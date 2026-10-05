@@ -18,8 +18,12 @@ import (
 // ClientID registers a preconfigured client (public when ClientSecret is
 // empty). DenyWith makes /authorize answer with that error code.
 // UnadvertisedIss keeps sending iss in the callback but drops the metadata flag.
+// IssuerPath makes the server its own protected MCP endpoint at that path, with
+// URL+IssuerPath as issuer, endpoints under it, metadata at the path-inserted
+// and root well-known URLs, and no protected-resource metadata.
 type AuthServerOptions struct {
 	UnadvertisedIss bool
+	IssuerPath      string
 	Registration    bool
 	ClientID        string
 	ClientSecret    string
@@ -32,8 +36,9 @@ type AuthServerOptions struct {
 // AuthServer is a loopback-only fake authorization server with PKCE S256,
 // dynamic client registration, RFC 9207 iss and refresh-token rotation.
 type AuthServer struct {
-	URL string
-	o   AuthServerOptions
+	URL    string
+	issuer string
+	o      AuthServerOptions
 
 	mu            sync.Mutex
 	clients       map[string]asClient
@@ -61,11 +66,16 @@ func NewAuthServer(t testing.TB, o AuthServerOptions) *AuthServer {
 	if o.ClientID != "" {
 		a.clients[o.ClientID] = asClient{secret: o.ClientSecret}
 	}
+	p := o.IssuerPath
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /.well-known/oauth-authorization-server", a.metadata)
-	mux.HandleFunc("POST /register", a.register)
-	mux.HandleFunc("GET /authorize", a.authorize)
-	mux.HandleFunc("POST /token", a.token)
+	mux.HandleFunc("GET /.well-known/oauth-authorization-server"+p, a.metadata)
+	if p != "" {
+		mux.HandleFunc("GET /.well-known/oauth-authorization-server", a.metadata)
+		mux.Handle(p, a.Protect(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(200) }), p))
+	}
+	mux.HandleFunc("POST "+p+"/register", a.register)
+	mux.HandleFunc("GET "+p+"/authorize", a.authorize)
+	mux.HandleFunc("POST "+p+"/token", a.token)
 	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		a.mu.Lock()
 		a.requests[r.URL.Path]++
@@ -74,6 +84,7 @@ func NewAuthServer(t testing.TB, o AuthServerOptions) *AuthServer {
 	}))
 	t.Cleanup(hs.Close)
 	a.URL = hs.URL
+	a.issuer = hs.URL + p
 	a.prmIssuer = hs.URL
 	return a
 }
@@ -83,7 +94,7 @@ func NewAuthServer(t testing.TB, o AuthServerOptions) *AuthServer {
 func (a *AuthServer) Protect(next http.Handler, path string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		metadata := "/.well-known/oauth-protected-resource" + path
-		if r.URL.Path == metadata {
+		if r.URL.Path == metadata && a.o.IssuerPath == "" {
 			a.mu.Lock()
 			issuer := a.prmIssuer
 			a.mu.Unlock()
@@ -163,9 +174,9 @@ func (a *AuthServer) SetIssuerForPRM(issuer string) {
 
 func (a *AuthServer) metadata(w http.ResponseWriter, _ *http.Request) {
 	m := map[string]any{
-		"issuer":                                         a.URL,
-		"authorization_endpoint":                         a.URL + "/authorize",
-		"token_endpoint":                                 a.URL + "/token",
+		"issuer":                                         a.issuer,
+		"authorization_endpoint":                         a.issuer + "/authorize",
+		"token_endpoint":                                 a.issuer + "/token",
 		"code_challenge_methods_supported":               []string{"S256"},
 		"token_endpoint_auth_methods_supported":          []string{"client_secret_post", "client_secret_basic", "none"},
 		"scopes_supported":                               []string{"mcp", "offline_access"},
@@ -173,7 +184,7 @@ func (a *AuthServer) metadata(w http.ResponseWriter, _ *http.Request) {
 		"authorization_response_iss_parameter_supported": !a.o.UnadvertisedIss,
 	}
 	if a.o.Registration {
-		m["registration_endpoint"] = a.URL + "/register"
+		m["registration_endpoint"] = a.issuer + "/register"
 	}
 	writeJSON(w, 200, m)
 }
@@ -225,7 +236,7 @@ func (a *AuthServer) authorize(w http.ResponseWriter, r *http.Request) {
 		a.codes[code] = asCode{client: q.Get("client_id"), redirect: redirect, challenge: q.Get("code_challenge"), resource: q.Get("resource")}
 		a.mu.Unlock()
 		back.Set("code", code)
-		back.Set("iss", a.URL)
+		back.Set("iss", a.issuer)
 	}
 	sep := "?"
 	if strings.Contains(redirect, "?") {

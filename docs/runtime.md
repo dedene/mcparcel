@@ -278,6 +278,13 @@ and prints no token. `auth lock` is not built yet.
   The OAuth HTTP client never follows a redirect of a token or registration
   request; metadata GETs follow at most 10, never to http from https or into
   loopback.
+- No PRM and no valid authorization-server metadata at the origin (some servers,
+  e.g. self-hosted GlitchTip, name the MCP URL itself as issuer): the MCP URL is
+  tried as issuer at its path-inserted well-known URLs, with the same strict
+  issuer check, and becomes the stored issuer and resource. The SDK only takes
+  the authorization server from PRM or the origin, so for this sign-in its
+  client answers the path-inserted PRM URL with a document naming the MCP URL;
+  its other metadata GETs keep the SDK's non-public-address dial check.
 - Keychain item: service `mcparcel-oauth`, account = canonical connection ID, one
   compact JSON value: URL, issuer, resource, token URL, auth style, DCR client ID
   and secret (never a preconfigured one), refresh token, last access expiry, last

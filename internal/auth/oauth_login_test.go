@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -181,7 +182,8 @@ func TestFixedRedirectVerbatim(t *testing.T) {
 	if got := u.Query().Get("redirect_uri"); got != redirect {
 		t.Fatal(got)
 	}
-	if got := u.Query().Get("scope"); got != "read offline_access" {
+	// The SDK unions scopes through a map, so their order varies.
+	if got := strings.Fields(u.Query().Get("scope")); !slices.Equal(slices.Sorted(slices.Values(got)), []string{"offline_access", "read"}) {
 		t.Fatal("configured scopes not used:", got)
 	}
 	for _, bad := range []string{"https://127.0.0.1:1/cb", "http://example.com/cb", "::"} {

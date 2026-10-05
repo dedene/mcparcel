@@ -43,9 +43,15 @@ func (h *OAuthHandler) login(ctx context.Context, req *http.Request, resp *http.
 }
 
 func (h *OAuthHandler) loginLocked(ctx context.Context, req *http.Request, resp *http.Response) error {
-	issuer, resource, asm, _, err := discoverIssuer(ctx, h.client, h.opts.URL, resp.Header.Values("WWW-Authenticate"))
+	issuer, resource, asm, found, err := discoverIssuer(ctx, h.client, h.opts.URL, resp.Header.Values("WWW-Authenticate"))
 	if err != nil {
 		return h.authFailed(fmt.Sprintf("Could not discover the authorization server for %s.", h.opts.Label))
+	}
+	client := h.client
+	// Without PRM only the MCP URL fallback gives an issuer with a path.
+	if u, err := url.Parse(issuer); !found && err == nil && u.Path != "" {
+		client = noPRMClient(h.client, h.opts.URL)
+		defer client.CloseIdleConnections()
 	}
 	if h.auth.IssuerURL != "" && !issuersEqual(h.auth.IssuerURL, issuer) {
 		return h.authFailed("The authorization server does not match auth.issuerUrl.")
@@ -63,7 +69,7 @@ func (h *OAuthHandler) loginLocked(ctx context.Context, req *http.Request, resp 
 		AuthorizationCodeFetcher: cb.fetch,
 		RequestRefreshToken:      true,
 		AcceptUnadvertisedIss:    true,
-		Client:                   h.client,
+		Client:                   client,
 		ScopeFilter: func(discovered []string) []string {
 			if len(h.auth.Scopes) > 0 {
 				return h.auth.Scopes
