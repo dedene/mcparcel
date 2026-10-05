@@ -17,14 +17,16 @@ import (
 // AuthServerOptions configures the fake OAuth 2.1 authorization server.
 // ClientID registers a preconfigured client (public when ClientSecret is
 // empty). DenyWith makes /authorize answer with that error code.
+// UnadvertisedIss keeps sending iss in the callback but drops the metadata flag.
 type AuthServerOptions struct {
-	Registration  bool
-	ClientID      string
-	ClientSecret  string
-	AccessTTL     time.Duration
-	RotateRefresh bool
-	DenyWith      string
-	TokenPrefix   string
+	UnadvertisedIss bool
+	Registration    bool
+	ClientID        string
+	ClientSecret    string
+	AccessTTL       time.Duration
+	RotateRefresh   bool
+	DenyWith        string
+	TokenPrefix     string
 }
 
 // AuthServer is a loopback-only fake authorization server with PKCE S256,
@@ -168,7 +170,7 @@ func (a *AuthServer) metadata(w http.ResponseWriter, _ *http.Request) {
 		"token_endpoint_auth_methods_supported":          []string{"client_secret_post", "client_secret_basic", "none"},
 		"scopes_supported":                               []string{"mcp", "offline_access"},
 		"response_types_supported":                       []string{"code"},
-		"authorization_response_iss_parameter_supported": true,
+		"authorization_response_iss_parameter_supported": !a.o.UnadvertisedIss,
 	}
 	if a.o.Registration {
 		m["registration_endpoint"] = a.URL + "/register"

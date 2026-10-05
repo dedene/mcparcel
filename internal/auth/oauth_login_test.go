@@ -115,6 +115,31 @@ func TestCallbackWrongIssuerFails(t *testing.T) {
 	}
 }
 
+// Some servers send iss in the callback without advertising RFC 9207 support.
+// A matching iss is accepted; a wrong one still fails.
+func TestCallbackUnadvertisedIssuer(t *testing.T) {
+	f := newFixture(t, testutil.AuthServerOptions{Registration: true, UnadvertisedIss: true})
+	h := f.handler(t, nil, auth.OAuthClient{}, newBrowser().login(), nil)
+	if _, err := send(ctx(t), h, f.mcpURL); err != nil {
+		t.Fatal(err)
+	}
+
+	f = newFixture(t, testutil.AuthServerOptions{Registration: true, UnadvertisedIss: true})
+	b := newBrowser()
+	b.visit = func(u string) page {
+		noFollow := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+		resp, err := noFollow.Get(u)
+		if err != nil {
+			return page{body: err.Error()}
+		}
+		resp.Body.Close()
+		return get(strings.Replace(resp.Header.Get("Location"), "iss=", "iss=https%3A%2F%2Fevil.invalid&was=", 1))
+	}
+	h = f.handler(t, nil, auth.OAuthClient{}, b.login(), nil)
+	_, err := send(ctx(t), h, f.mcpURL)
+	code(t, err, "auth_failed")
+}
+
 func freePort(t *testing.T) int {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")

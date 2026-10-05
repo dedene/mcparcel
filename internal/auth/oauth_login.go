@@ -62,6 +62,7 @@ func (h *OAuthHandler) loginLocked(ctx context.Context, req *http.Request, resp 
 		RedirectURL:              cb.redirect,
 		AuthorizationCodeFetcher: cb.fetch,
 		RequestRefreshToken:      true,
+		AcceptUnadvertisedIss:    true,
 		Client:                   h.client,
 		ScopeFilter: func(discovered []string) []string {
 			if len(h.auth.Scopes) > 0 {
