@@ -114,8 +114,8 @@ Secret bindings are allowed in env, HTTP headers and OAuth client fields only.
 Personal definitions may also use `{secret: "env:NAME", prefix?, suffix?}`: the
 daemon resolves NAME at connect time from its captured login environment, falling
 back to the Keychain generic password with service NAME and the login user as
-account. Temporary bridge until 1Password profiles (stage 6). Allowed in stdio env
-and HTTP headers only, not OAuth client fields; protected variable names are
+account. Temporary bridge until 1Password profiles (stage 6). Allowed in stdio env,
+HTTP headers and the OAuth `clientId`/`clientSecret` fields; protected variable names are
 rejected. A GitHub catalog containing one fails `add`/`sync` with `invalid_catalog`.
 `config validate` checks format only; it does not apply the personal-only rule.
 No secret command-line arguments. Import of a credential embedded in argv is
@@ -126,6 +126,10 @@ No shell expansion, `${...}` expansion or command substitution; only an explicit
 OAuth fields: `clientName`, `scopes` (array), `clientId` (Value), `clientSecret`
 (Value), `tokenEndpointAuthMethod` (`none`, `client_secret_basic`, `client_secret_post`),
 `redirectUrl` (optional explicit callback), `issuerUrl` (optional explicit override).
+`tokenEndpointAuthMethod` is sent in dynamic registration only; the SDK picks the
+method from server metadata, and enforcing the configured one is deferred.
+`redirectUrl` must be `http` on `127.0.0.1`, `[::1]` or `localhost`; without it the
+callback is `http://127.0.0.1:<random port>/callback`.
 Use discovery otherwise; bind state/tokens to the discovered issuer and resource.
 Missing registered client information is an actionable error if registration is
 unavailable. Do not assume `clientName` is interchangeable with a registered ID.
@@ -281,8 +285,9 @@ headers or the base URL; the value never appears in a report, error or file.
 Block application of an affected connection until resolved;
 `--only <id>...` permits an explicit supported subset, with omitted rows reported.
 An unbound `${NAME}` in an env or header value becomes an `env:NAME` reference
-(prefix/suffix kept) with an `environment_reference` warning; protected names and
-OAuth client references stay unresolved and block the connection.
+(prefix/suffix kept) with an `environment_reference` warning; the same holds for
+`oauthClientId`/`oauthClientSecret`, so all 32 owner entries import. Protected
+names stay unresolved and block the connection.
 A local `--bindings <file>` maps source env names to local profile/op-refs instead;
 its format is a JSON map whose values are `{profile, secret}`. A connection must
 map to one profile; conflicting profiles block its import. Never read source

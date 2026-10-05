@@ -1,7 +1,6 @@
 package mcpclient_test
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -31,31 +30,6 @@ func TestHTTPRedirectNoCredentialForward(t *testing.T) {
 	code(t, e, "connection_failed")
 	if requests.Load() != 0 || strings.Contains(e.Error(), "SENTINEL") {
 		t.Fatal("credential forwarded")
-	}
-}
-
-func TestHTTP401AfterDispatch(t *testing.T) {
-	var calls atomic.Int64
-	s := httpSession(t, testutil.NewFixtureServer(), func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Method == "POST" {
-				data, _ := io.ReadAll(r.Body)
-				r.Body = io.NopCloser(strings.NewReader(string(data)))
-				var msg struct{ Method string }
-				_ = json.Unmarshal(data, &msg)
-				if msg.Method == "tools/call" {
-					calls.Add(1)
-					w.WriteHeader(401)
-					return
-				}
-			}
-			next.ServeHTTP(w, r)
-		})
-	})
-	r, e := s.Call(context.Background(), "counter", nil, nil)
-	code(t, e, "outcome_unknown")
-	if !r.Dispatched || calls.Load() != 1 {
-		t.Fatal("call replay")
 	}
 }
 

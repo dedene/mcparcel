@@ -21,7 +21,7 @@ npm launcher -> native CLI -> config + local catalog metadata
 ```
 
 Recommend Go, Kong, the official MCP Go SDK, the official 1Password Go SDK,
-keybase/go-keychain for the macOS Keychain, and Bubble Tea for setup. Use SDK transport/auth primitives behind small adapters;
+zalando/go-keyring v0.2.8 for the macOS Keychain, and Bubble Tea for setup. Use SDK transport/auth primitives behind small adapters;
 no custom MCP protocol implementation and no dependency on mcporter at runtime.
 The 1Password desktop build must have CGO enabled where the SDK requires it.
 
@@ -232,8 +232,8 @@ Build on the SDK's `auth.AuthorizationCodeHandler`: it supports a pre-registered
 client, client-ID metadata documents and dynamic registration, a fixed redirect
 URL, and token persistence hooks. It chooses the token-endpoint auth method from
 the server's metadata (`client_secret_post` before `client_secret_basic`) and has
-no override, so a definition's explicit `tokenEndpointAuthMethod` is enforced by
-filtering the advertised methods in MCParcel's HTTP client.
+no override. A definition's `tokenEndpointAuthMethod` goes into dynamic
+registration only; enforcing it (filtering the advertised methods) is deferred.
 
 Use authorization code + PKCE where applicable, unique state, validated loopback
 callback and issuer/resource/audience binding. Preserve registered redirect URLs and
@@ -242,8 +242,10 @@ refresh token rotation need fixture coverage; never invent a generic callback fo
 a server with a registered fixed URL. Do not import mcporter's token cache.
 
 Serialize refresh per token identity; save rotated refresh tokens atomically before
-other calls can use them. Login via browser is implicit on first need. Headless
-calls return structured instructions, never hang. A callback port conflict gives
+other calls can use them. Login is explicit in this release: `mcparcel auth login
+<mcp>`. A call without a usable stored session returns `auth_required` with next
+action `mcparcel auth login <mcp>`; implicit browser login on first need is
+deferred. Headless calls return structured instructions, never hang. A callback port conflict gives
 an actionable error; don't silently substitute a nonregistered port.
 
 OAuth-only profiles use their provider token lifetime and Keychain session, without
@@ -254,7 +256,57 @@ its stored tokens: the next interactive call starts a fresh browser authorizatio
 `--no-input` fails. Clear the flag only after successful authorization. This is
 deliberately independent of whether Keychain would permit a silent read.
 `auth logout <mcp>` removes local OAuth tokens/registration; provider-side revocation
-is a separate capability, reported accurately. `auth status` never reads tokens.
+is a separate capability, reported accurately (`providerRevoked` is always false
+for now). `auth status` reads the Keychain item locally, never starts the runtime
+and prints no token. `auth lock` is not built yet.
+
+### OAuth as built (stage 7 core)
+
+- Daemon only. `auth login` sends IPC `login`; the daemon connects with an OAuth
+  handler in login mode, streams the authorization URL to the CLI (`auth_url`
+  frame), and the CLI prints it on stderr and runs `/usr/bin/open` (argv, https or
+  loopback http only). 10-minute deadline; a pending login holds the connection's
+  gate, so its calls queue; Ctrl-C cancels. `--no-input` returns `auth_required`
+  after the connection check (unknown: `connection_unavailable`; not sign-in
+  capable: `invalid_arguments`). A login the server never challenges stores
+  nothing and does not keep its session.
+- Flow: SDK v1.8.0 `AuthorizationCodeHandler`. PRM + AS discovery, preconfigured
+  client (`clientId`/`clientSecret`, env refs allowed) else DCR, PKCE S256, state,
+  RFC 9207 `iss`, issuer/resource binding. Loopback listener on 127.0.0.1 (random
+  port unless `redirectUrl` fixes it); port in use: `auth_callback_unavailable`.
+  The callback page (signed in, failed, expired, mismatch) is embedded, no JS.
+  The OAuth HTTP client never follows a redirect of a token or registration
+  request; metadata GETs follow at most 10, never to http from https or into
+  loopback.
+- Keychain item: service `mcparcel-oauth`, account = canonical connection ID, one
+  compact JSON value: URL, issuer, resource, token URL, auth style, DCR client ID
+  and secret (never a preconfigured one), refresh token, last access expiry, last
+  terminal failure `{at, code}`. Access tokens stay in daemon memory. Budget about
+  2.8 KB of JSON (go-keyring's 4096-byte `security -i` line, checked before Set);
+  larger: `keychain_unavailable`, no split. No plaintext fallback. Keychain errors:
+  `keychain_unavailable`. Re-login with DCR registers a new client.
+- Use: access token attached by the SDK; refreshed in `Token()` when it expires
+  within 30 s, and on a 401 for non-tool requests (one resend). A 401 on
+  `tools/call` is never resent: `auth_expired`, next action "Run the call again."
+  Refreshes are serialized per connection; a rotated refresh token is saved before
+  the new access token is used. Refresh omits RFC 8707 `resource`.
+- Failure: `invalid_grant` or another OAuth error code, or an issuer or resource
+  that fetched protected-resource metadata names differently, records the failure,
+  clears the refresh token and gives `auth_required`; later calls fail before any
+  network request. 5xx, 429 or network errors give `connection_failed` and record
+  nothing. Metadata that cannot be fetched during a 401 is not an issuer change:
+  the refresh goes to the stored token URL. A token the server rejects right
+  after a refresh ends that session with `auth_required`, without another
+  refresh; a 403 gives `auth_failed`.
+- Unmarked HTTP connections without a credential header are OAuth-capable: a 401
+  gives `auth_required` pointing at `auth login`, and a stored session is used
+  when present (one Keychain read per new session). A connection with a credential
+  header answers 401 as `auth_required` naming its `env:` variables; `auth login`
+  rejects it (`invalid_arguments`).
+- Log events: `oauth_signed_in`, `oauth_refreshed`, `oauth_refresh_failed`,
+  `oauth_signed_out`. Never token, code, verifier or provider text.
+- Deferred: implicit login, keep-alive refresh, `auth lock`, failure history,
+  client reuse, `tokenEndpointAuthMethod` enforcement, provider revocation.
 
 ## OAuth session health
 

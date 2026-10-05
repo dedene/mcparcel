@@ -2131,7 +2131,6 @@
     "raw": "{\"schemaVersion\":1,\"connections\":{\"x\":{\"transport\":{\"type\":\"http\",\"url\":\"https://x.invalid/mcp\"},\"auth\":{\"type\":\"oauth\",\"clientSecret\":{\"secret\":\"env:CS\"}}}}}",
     "syntaxValid": true,
     "schemaValid": true,
-    "goValid": false,
-    "path": "connections.x.auth"
+    "goValid": true
   }
 ]

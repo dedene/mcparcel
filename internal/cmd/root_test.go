@@ -76,6 +76,10 @@ func TestNewCommandUsageIsSafeJSON(t *testing.T) {
 		{"call", "--json"},
 		{"tools", "--json"},
 		{"runtime", "bogus-CANARY", "--json"},
+		{"auth", "--json"},
+		{"auth", "login", "--json"},
+		{"auth", "logout", "--json"},
+		{"auth", "bogus-CANARY", "--json"},
 		{"call", "fixture.echo", "--timeout", "CANARY", "--json"},
 		{"call", "fixture.echo", "--args", "", "--json"},
 		{"call", "fixture.echo", "--args-file=", "--json"},
@@ -115,7 +119,7 @@ func TestProductHelp(t *testing.T) {
 	if code != 0 || stderr != "" {
 		t.Fatalf("code=%d stderr=%q", code, stderr)
 	}
-	for _, want := range []string{"tools", "call", "runtime", "config", "import", "--json", "--no-input"} {
+	for _, want := range []string{"tools", "call", "runtime", "auth", "config", "import", "--json", "--no-input"} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("help missing %s: %s", want, stdout)
 		}

@@ -230,11 +230,6 @@ func validateConnection(c *Connection, path string, profiles map[string]ProfileR
 				return err
 			}
 		}
-		for _, v := range []*Value{a.ClientID, a.ClientSecret} {
-			if v != nil && v.Secret != nil && strings.HasPrefix(v.Secret.Secret, "env:") {
-				return fieldError(p, "environment reference not allowed in OAuth client fields")
-			}
-		}
 	}
 	if policy := c.ToolPolicy; policy != nil {
 		if policy.Allow != nil {

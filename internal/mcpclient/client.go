@@ -8,8 +8,10 @@ import (
 	"sync"
 	"time"
 
+	sdkauth "github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/dedene/mcparcel/internal/auth"
 	"github.com/dedene/mcparcel/internal/config"
 	"github.com/dedene/mcparcel/internal/jsonutil"
 	"github.com/dedene/mcparcel/internal/output"
@@ -23,6 +25,8 @@ type ConnectOptions struct {
 	Version         string
 	ConnectTimeout  time.Duration
 	ShutdownTimeout time.Duration
+	// OAuth authorizes HTTP requests; leave it a nil interface when unused.
+	OAuth sdkauth.OAuthHandler
 }
 type (
 	Result struct {
@@ -43,6 +47,7 @@ type session struct {
 	closeDone chan struct{}
 	sdk       *mcp.ClientSession
 	cleanup   func(context.Context)
+	status    func() error
 	timeout   time.Duration
 }
 
@@ -75,6 +80,9 @@ func Connect(ctx context.Context, opts ConnectOptions) (Session, error) {
 	sdk, err := client.Connect(c, transport, nil)
 	if err != nil {
 		cleanup(context.Background())
+		if failure := authFailure(err, status); failure != nil {
+			return nil, failure
+		}
 		if c.Err() != nil {
 			return nil, contextError(c.Err(), false)
 		}
@@ -83,7 +91,23 @@ func Connect(ctx context.Context, opts ConnectOptions) (Session, error) {
 		}
 		return nil, output.NewError("connection_failed", nil)
 	}
-	return &session{sdk: sdk, cleanup: cleanup, timeout: opts.ConnectTimeout, closeDone: make(chan struct{})}, nil
+	return &session{sdk: sdk, cleanup: cleanup, status: status, timeout: opts.ConnectTimeout, closeDone: make(chan struct{})}, nil
+}
+
+// authFailure finds a sign-in error in err's chain, else the transport's
+// auth_required after a 401; nil when neither applies.
+func authFailure(err error, status func() error) error {
+	var e *output.Error
+	if errors.As(err, &e) && e != nil {
+		switch e.Code {
+		case "auth_required", "auth_expired", "auth_failed", "keychain_unavailable", "auth_callback_unavailable", "invalid_arguments":
+			return e
+		}
+	}
+	if failure := status(); errors.As(failure, &e) && e != nil && e.Code == "auth_required" {
+		return e
+	}
+	return nil
 }
 
 func contextError(err error, dispatched bool) error {
@@ -109,6 +133,9 @@ func (s *session) Tools(ctx context.Context) ([]json.RawMessage, error) {
 	for range 1000 {
 		r, err := s.sdk.ListTools(ctx, &mcp.ListToolsParams{Cursor: cursor})
 		if err != nil {
+			if failure := authFailure(err, s.status); failure != nil {
+				return nil, failure
+			}
 			if ctx.Err() != nil {
 				return nil, contextError(ctx.Err(), false)
 			}
@@ -175,8 +202,11 @@ func (s *session) Call(ctx context.Context, tool string, arguments map[string]an
 		return out, contextError(ctx.Err(), false)
 	}
 	out.Dispatched = true
-	r, err := s.sdk.CallTool(ctx, &mcp.CallToolParams{Name: tool, Arguments: arguments})
+	r, err := s.sdk.CallTool(auth.WithToolCall(ctx), &mcp.CallToolParams{Name: tool, Arguments: arguments})
 	if err != nil {
+		if failure := authFailure(err, s.status); failure != nil {
+			return out, failure
+		}
 		if ctx.Err() != nil {
 			return out, contextError(ctx.Err(), true)
 		}

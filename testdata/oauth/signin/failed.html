@@ -1,0 +1,24 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sign-in failed · MCParcel</title><style>
+:root{--bg:#F4F4EC;--card:#FBFBF6;--ink:#252B25;--muted:#5C645A;--line:#DCDDCF;--olive:#85934B;--accent:#5F6B2F;--term:#252B25;--term-ink:#F4F4EC;--term-dim:#A3AA9B;--ok:#5F6B2F;--bad:#A8452E;--warn:#8A6410}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#1B201B;--card:#252B25;--ink:#F4F4EC;--muted:#A3AA9B;--line:#3A4239;--accent:#A9B76A;--term:#161A16;--ok:#A9B76A;--bad:#E58A72;--warn:#D9B45A}}
+:root[data-theme=dark]{--bg:#1B201B;--card:#252B25;--ink:#F4F4EC;--muted:#A3AA9B;--line:#3A4239;--accent:#A9B76A;--term:#161A16;--ok:#A9B76A;--bad:#E58A72;--warn:#D9B45A}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%}
+body{background:var(--bg);color:var(--ink);font:16px/1.55 ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;display:grid;grid-template-columns:minmax(0,520px);justify-content:center;align-content:center;min-height:100vh;padding:24px 16px}
+main{width:100%;max-width:520px}
+.brand{display:flex;align-items:center;gap:12px;margin:0 0 20px 2px;font-weight:700;font-size:20px;letter-spacing:.02em}
+.mark{width:44px;height:28px;color:var(--olive);flex:none}
+.card{background:var(--card);border:1px solid var(--line);border-radius:4px;padding:28px 28px 24px;border-top:6px solid var(--state)}
+.status{display:inline-block;font-size:12px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--state);margin:0 0 10px}
+h1{font-size:26px;line-height:1.2;margin:0 0 12px;letter-spacing:-.01em;text-wrap:balance}
+p{margin:0 0 14px;color:var(--muted)}
+p strong{color:var(--ink);font-weight:700}
+.term{background:var(--term);color:var(--term-ink);border-radius:4px;padding:12px 14px;margin:18px 0 0;font-size:14px;overflow-x:auto;white-space:nowrap}
+.term .p{color:var(--olive);font-weight:700;margin-right:8px}
+.term .d{color:var(--term-dim)}
+dl{margin:18px 0 0;padding:14px 0 0;border-top:1px solid var(--line);display:grid;grid-template-columns:auto 1fr;gap:4px 16px;font-size:14px}
+dt{color:var(--muted)}dd{margin:0;overflow-wrap:anywhere}
+footer{margin:16px 2px 0;font-size:13px;color:var(--muted)}
+.ok{--state:var(--ok)}.bad{--state:var(--bad)}.warn{--state:var(--warn)}
+@media (max-width:400px){.card{padding:22px 18px 18px}h1{font-size:22px}}
+</style></head><body><main class="bad"><div class="brand"><svg class="mark" viewBox="0 0 50 32" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linejoin="miter"><path d="M3 0v29h44V0" stroke-width="6"/><path d="M12.5 7l6 5.5-6 5.5" stroke-width="4.5"/><path d="M23 18.75h14" stroke-width="4.5"/></g></svg><span>MCParcel</span></div><section class="card" role="status"><div class="status">Sign-in failed</div><h1>Linear did not sign you in</h1><p>The provider refused the request. Nothing was stored, and your existing session, if any, is unchanged.</p><div class="term"><span class="p">&gt;_</span>mcparcel auth login linear</div><dl><dt>Provider error</dt><dd>access_denied</dd><dt>Detail</dt><dd>The user denied the request.</dd></dl></section><footer>Served by MCParcel on this computer. No data left your machine from this page.</footer></main></body></html>

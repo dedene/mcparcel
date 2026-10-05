@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 )
@@ -93,5 +94,19 @@ func TestEnvRefValue(t *testing.T) {
 	mixed := Connection{CredentialProfile: "team", Transport: Transport{Stdio: &Stdio{Command: Literal("npx"), Env: map[string]Value{"A": {Secret: &SecretRef{Secret: "op://v/i/f"}}, "B": {Secret: &SecretRef{Secret: "env:X"}}}}}}
 	if !reflect.DeepEqual(SecretRefs(mixed), []string{"op://v/i/f"}) || !reflect.DeepEqual(EnvRefs(mixed), []string{"X"}) {
 		t.Fatal(SecretRefs(mixed), EnvRefs(mixed))
+	}
+}
+
+func TestPersonalOAuthEnvClientRef(t *testing.T) {
+	const oauth = `{"schemaVersion":1,"connections":{"x":{"transport":{"type":"http","url":"https://x.invalid/mcp"},"auth":{"type":"oauth","clientId":{"secret":"env:FIXTURE_CLIENT_ID"},"clientSecret":{"secret":"env:%s"}}}}}`
+	c, err := DecodePersonal([]byte(fmt.Sprintf(oauth, "FIXTURE_CLIENT_SECRET")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := EnvRefs(c.Connections["x"]); !reflect.DeepEqual(got, []string{"FIXTURE_CLIENT_ID", "FIXTURE_CLIENT_SECRET"}) {
+		t.Fatal(got)
+	}
+	if _, err = DecodePersonal([]byte(fmt.Sprintf(oauth, "OP_SERVICE_ACCOUNT_TOKEN"))); !errors.Is(err, ErrConfig) {
+		t.Fatal(err)
 	}
 }

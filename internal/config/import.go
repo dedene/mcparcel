@@ -254,7 +254,6 @@ func convertImportEntry(id string, raw any, bindings map[string]CredentialBindin
 				c.Auth.Scopes = append(c.Auth.Scopes, scope)
 			}
 		}
-		warn(".auth", "runtime_oauth_pending")
 	} else {
 		for _, key := range []string{"clientName", "oauthClientId", "oauthClientSecret", "oauthRedirectUrl", "oauthScope", "oauthTokenEndpointAuthMethod"} {
 			if _, exists := obj[key]; exists {
@@ -374,7 +373,7 @@ func convertImportEntry(id string, raw any, bindings map[string]CredentialBindin
 	}
 	for _, key := range []string{"oauthClientId", "oauthClientSecret"} {
 		if s, exists := valid[key].(string); exists {
-			v := convert(s, "."+key, key == "oauthClientSecret", false, false)
+			v := convert(s, "."+key, key == "oauthClientSecret", false, true)
 			if c.Auth != nil {
 				if key == "oauthClientId" {
 					c.Auth.ClientID = &v

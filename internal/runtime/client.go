@@ -49,6 +49,17 @@ type Client struct {
 	Version    string
 	Executable string
 	NoInput    bool
+	// OnAuthURL receives the authorization URL of a running login.
+	OnAuthURL func(string)
+}
+type LoginData struct {
+	Connection string `json:"connection"`
+	SignedIn   bool   `json:"signedIn"`
+}
+type LogoutData struct {
+	Connection      string `json:"connection"`
+	Removed         bool   `json:"removed"`
+	ProviderRevoked bool   `json:"providerRevoked"`
 }
 
 func newRequestID() string {
@@ -211,6 +222,16 @@ func (c *Client) exchange(ctx context.Context, intent string, r Request, ensure 
 				out.Dispatched = true
 				continue
 			}
+			if v.f.Kind == "auth_url" && r.Method == "login" {
+				var u AuthURL
+				if decodeBody(v.f.Body, &u) != nil {
+					return c.lost(ctx, id, attempted)
+				}
+				if c.OnAuthURL != nil {
+					c.OnAuthURL(u.URL)
+				}
+				continue
+			}
 			if v.f.Kind != "response" {
 				return c.lost(ctx, id, attempted)
 			}
@@ -266,6 +287,24 @@ func (c *Client) Call(ctx context.Context, req CallRequest) (CallResponse, error
 		if de := decodeBody(resp.Data, &out.Data); de != nil && e == nil {
 			e = de
 		}
+	}
+	return out, e
+}
+
+func (c *Client) Login(ctx context.Context, id string) (LoginData, error) {
+	var out LoginData
+	r, _, e := c.exchange(ctx, "work", Request{Method: "login", Connection: id, Arguments: emptyArgs(), NoInput: c.NoInput}, true)
+	if e == nil {
+		e = decodeBody(r.Data, &out)
+	}
+	return out, e
+}
+
+func (c *Client) Logout(ctx context.Context, canonical string) (LogoutData, error) {
+	var out LogoutData
+	r, _, e := c.exchange(ctx, "work", Request{Method: "logout", Connection: canonical, Arguments: emptyArgs()}, true)
+	if e == nil {
+		e = decodeBody(r.Data, &out)
 	}
 	return out, e
 }

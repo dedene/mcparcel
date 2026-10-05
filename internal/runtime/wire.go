@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/dedene/mcparcel/internal/args"
+	"github.com/dedene/mcparcel/internal/config"
 	"github.com/dedene/mcparcel/internal/output"
 )
 
@@ -47,6 +48,11 @@ type Request struct {
 	NoInput    bool     `json:"noInput,omitempty"`
 	Force      bool     `json:"force,omitempty"`
 }
+
+// AuthURL streams a sign-in's authorization URL to the waiting CLI.
+type AuthURL struct {
+	URL string `json:"url"`
+}
 type Response struct {
 	Data       json.RawMessage `json:"data"`
 	Error      *output.Error   `json:"error"`
@@ -63,7 +69,7 @@ func validateRequest(intent string, r Request) error {
 	if r.Arguments.Values == nil {
 		return ErrInvalidFrame
 	}
-	if (intent == "restart" || intent == "stop") && r.Method != intent || intent == "status" && r.Method != "status" || intent == "work" && r.Method != "tools" && r.Method != "call" {
+	if (intent == "restart" || intent == "stop") && r.Method != intent || intent == "status" && r.Method != "status" || intent == "work" && r.Method != "tools" && r.Method != "call" && r.Method != "login" && r.Method != "logout" {
 		return ErrInvalidFrame
 	}
 	switch r.Method {
@@ -79,6 +85,13 @@ func validateRequest(intent string, r Request) error {
 		}
 	case "tools":
 		if r.Tool != "" || r.Timeout != "" || len(r.Arguments.Values) != 0 || r.Force {
+			return ErrInvalidFrame
+		}
+	case "login", "logout":
+		if r.Connection == "" || r.Tool != "" || r.Timeout != "" || len(r.Arguments.Values) != 0 || r.Cached || r.Force {
+			return ErrInvalidFrame
+		}
+		if r.Method == "logout" && config.ValidateCanonicalID(r.Connection) != nil {
 			return ErrInvalidFrame
 		}
 	case "status", "restart", "stop":
@@ -119,6 +132,15 @@ func validateBody(f Frame) error {
 	case "response":
 		var v Response
 		return decodeBody(f.Body, &v)
+	case "auth_url":
+		var v AuthURL
+		if e := decodeBody(f.Body, &v); e != nil {
+			return e
+		}
+		if v.URL == "" {
+			return ErrInvalidFrame
+		}
+		return nil
 	case "dispatch", "cancel":
 		var v struct{}
 		return decodeBody(f.Body, &v)

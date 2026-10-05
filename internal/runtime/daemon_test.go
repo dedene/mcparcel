@@ -210,7 +210,7 @@ func lockFile(t *testing.T, p config.Paths) *os.File {
 	return f
 }
 
-func service(t *testing.T, h *daemonHandler, idle time.Duration) (*Client, <-chan error) {
+func service(t *testing.T, h Handler, idle time.Duration) (*Client, <-chan error) {
 	t.Helper()
 	t.Setenv("SHELL", "/bin/sh")
 	p, _ := testutil.IsolatedPaths(t)

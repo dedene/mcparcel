@@ -134,7 +134,7 @@ func (s Snapshot) RuntimeConnection(id string) (string, Connection, error) {
 	if err != nil {
 		return "", Connection{}, err
 	}
-	if c.Auth != nil || c.Transport.HTTP != nil && c.Transport.HTTP.Mode == "sse" || c.Lifecycle != nil && c.Lifecycle.IdleTimeout != "" && c.Lifecycle.IdleTimeout != "session" || c.CredentialProfile != "" && s.Local.CredentialProfiles[c.CredentialProfile].Mode == "desktop" {
+	if c.Transport.HTTP != nil && c.Transport.HTTP.Mode == "sse" || c.Lifecycle != nil && c.Lifecycle.IdleTimeout != "" && c.Lifecycle.IdleTimeout != "session" || c.CredentialProfile != "" && s.Local.CredentialProfiles[c.CredentialProfile].Mode == "desktop" {
 		return "", Connection{}, ErrRuntimeUnsupported
 	}
 	return canonical, c, nil

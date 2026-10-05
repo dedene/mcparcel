@@ -62,14 +62,13 @@ func TestApplyImportAll32(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if _, _, e = snap.RuntimeConnection("front-mcp"); !errors.Is(e, ErrRuntimeUnsupported) {
+	if _, _, e = snap.RuntimeConnection("front-mcp"); e != nil {
 		t.Fatal(e)
 	}
 }
 
 func TestApplyImportBlockedIsNoWrite(t *testing.T) {
-	raw, _ := importFixture(t)
-	r := converted(t, raw, nil)
+	r := converted(t, []byte(blockedImportFixture), nil)
 	store, p := importStore(t, true)
 	before := stateFiles(t, p)
 	result, e := ApplyImport(context.Background(), store, 3, r, nil)
@@ -86,10 +85,13 @@ func TestApplyImportBlockedIsNoWrite(t *testing.T) {
 			t.Fatal(row)
 		}
 	}
-	if n != 31 || len(blocked.Report.Entries) != 32 {
+	if n != 1 || len(blocked.Report.Entries) != 2 || !importRow(t, blocked.Report, "good").Applicable {
 		t.Fatal(n)
 	}
 }
+
+// One literal OAuth client secret blocks the whole apply.
+const blockedImportFixture = `{"mcpServers":{"bad":{"baseUrl":"https://x.invalid/mcp","auth":"oauth","oauthClientSecret":"literal-canary"},"good":{"command":"fixture"}}}`
 
 func TestApplyImportOnly(t *testing.T) {
 	raw, _ := importFixture(t)
@@ -123,7 +125,7 @@ func TestApplyImportOnly(t *testing.T) {
 			blocked++
 		}
 	}
-	if selected != 2 || omitted != 30 || blocked != 1 {
+	if selected != 2 || omitted != 30 || blocked != 0 {
 		t.Fatal(selected, omitted, blocked)
 	}
 }

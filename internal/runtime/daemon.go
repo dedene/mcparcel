@@ -35,6 +35,19 @@ var (
 	listenMu  sync.Mutex // umask is process-wide.
 )
 
+type authURLKey struct{}
+
+// withAuthURLSender lets a login stream its authorization URL to the CLI.
+func withAuthURLSender(ctx context.Context, send func(string) error) context.Context {
+	return context.WithValue(ctx, authURLKey{}, send)
+}
+
+// authURLSender returns the login's URL sender, or nil outside a login.
+func authURLSender(ctx context.Context) func(string) error {
+	send, _ := ctx.Value(authURLKey{}).(func(string) error)
+	return send
+}
+
 type writerGate chan struct{}
 
 func makeWriter() writerGate { g := make(writerGate, 1); g <- struct{}{}; return g }
@@ -236,13 +249,15 @@ func (s *daemonService) serveSocket(conn *net.UnixConn) {
 	f, e := ReadFrame(conn)
 	_ = conn.SetReadDeadline(time.Time{})
 	send := func(r Response) {
+		// Encode before the write budget starts: a large result must not spend it.
+		frame := requestFrame("response", id, r)
 		writeCtx, c := context.WithTimeout(context.Background(), min(2*time.Second, s.opts.ShutdownTimeout))
 		defer c()
 		if ctx.Err() == nil {
 			stop := context.AfterFunc(ctx, c)
 			defer stop()
 		}
-		_ = writeSocket(writeCtx, conn, g, requestFrame("response", id, r))
+		_ = writeSocket(writeCtx, conn, g, frame)
 	}
 	if e != nil {
 		if !errors.Is(e, io.EOF) {
@@ -330,7 +345,13 @@ func (s *daemonService) serveSocket(conn *net.UnixConn) {
 		}
 		return nil
 	}
-	r := s.opts.Handler.Handle(ctx, id, req, before)
+	handleCtx := ctx
+	if req.Method == "login" {
+		handleCtx = withAuthURLSender(ctx, func(u string) error {
+			return writeSocket(ctx, conn, g, requestFrame("auth_url", id, AuthURL{URL: u}))
+		})
+	}
+	r := s.opts.Handler.Handle(handleCtx, id, req, before)
 	if protocol.Load() {
 		r = Response{Error: output.NewError("protocol_error", &output.Details{RequestID: id, Dispatched: r.Dispatched, Outcome: outcome(r.Dispatched)}), Dispatched: r.Dispatched}
 	}

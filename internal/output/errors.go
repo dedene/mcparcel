@@ -77,6 +77,9 @@ var registry = map[string]errorSpec{
 	"protocol_error":           {6, "The runtime or MCP response is invalid.", "Check the daemon log and server compatibility."},
 	"input_required":           {6, "The MCP server requires an unsupported interactive response.", "Use a client that supports this server interaction."},
 	"canceled":                 {130, "The operation was canceled.", ""},
+
+	"keychain_unavailable":      {3, "The macOS Keychain could not store or read the sign-in.", "Unlock the login keychain, then try again."},
+	"auth_callback_unavailable": {3, "The sign-in callback address is in use.", "Close the program using that port, then try again."},
 }
 
 func (e *Error) Error() string { return e.Message }

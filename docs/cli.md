@@ -17,8 +17,10 @@ npx mcparcel call paper.<tool> --args-file request.json --json
 
 `add` registers a GitHub catalog and validates metadata. It does not enable entries,
 start servers or read 1Password. `setup` remains useful whenever selections change.
-Authentication is implicit on the first call that needs it; there is no mandatory
-`unlock` command. Private catalog access through `gh` is independent of 1Password.
+1Password authentication is implicit on the first call that needs it; there is no
+mandatory `unlock` command. OAuth sign-in is explicit in this release: a call
+without a stored session returns `auth_required` with next action
+`mcparcel auth login <mcp>` instead of opening a browser. Private catalog access through `gh` is independent of 1Password.
 
 Catalog README agent prompt:
 
@@ -57,10 +59,11 @@ also work via `npx mcparcel ...`. No global installation or Homebrew is required
 | `config input set <mcp> <name> <value>` | Set a declared non-secret local input |
 | `config profile set <name> --file <profile.json>` | Save a validated credential profile containing references only |
 | `config profile bind <mcp> <profile>` | Bind the connection's declared credential requirement |
-| `auth status [<mcp>]` | Redacted session/expiry status without authenticating; for one OAuth connection, the recorded reason for the last re-login |
+| `auth login <mcp>` | Browser sign-in for an HTTP connection; prints the URL on stderr and opens the browser; `--no-input` returns `auth_required` once the connection is known to use sign-in; JSON `{connection, signedIn}` (`signedIn: false` when the server never asked for sign-in) |
+| `auth status [<mcp>]` | Offline, never starts the runtime: per HTTP connection `{connection, signedIn, refreshToken, accessTokenExpiresAt?, lastRefreshFailure?: {at, code}}` in `items`; no token. Without `<mcp>`: enabled HTTP connections marked OAuth or holding a sign-in |
 | `auth lock` | End in-memory credential sessions and block stored OAuth reuse until reauthorization |
 | `auth refresh <mcp>` | Invalidate credential lease; next call resolves/reconnects as necessary |
-| `auth logout <mcp>` | Remove local OAuth state; report whether provider revocation occurred |
+| `auth logout <mcp>` | Remove the Keychain sign-in through the runtime (starts it if needed); JSON `{connection, removed, providerRevoked}`; `providerRevoked` is always false for now |
 | `doctor [<mcp>] [--live]` | Local prerequisite checks; only explicit live mode connects to specified MCP |
 | `runtime status` / `runtime restart [--force]` / `runtime stop [--force]` | Inspect, restart or stop the daemon; restart and stop refuse active calls unless forced; restart recaptures the login environment and drops pooled sessions, so changed `env:` values apply; stop on a stopped runtime succeeds |
 | `version` / `--help` | Version and English usage |
@@ -137,7 +140,10 @@ Error codes distinguish `auth_required`, `auth_expired`, `config_required`,
 `config_conflict`, `connection_unavailable`, `review_required`, `tool_denied`,
 `runtime_version_mismatch`, `runtime_config_mismatch`, `auth_account_conflict` and
 `outcome_unknown`. `review_required` uses exit 4; `runtime_config_mismatch` exit 6;
-`auth_account_conflict` exit 3. Catalog commands add `invalid_repository` (exit 2,
+`auth_account_conflict` exit 3. OAuth adds `auth_failed` (provider refused; only a
+sanitized OAuth error code is shown), `keychain_unavailable` (Keychain could not
+read or store the sign-in, or it is too large) and `auth_callback_unavailable`
+(fixed callback port in use), all exit 3. Catalog commands add `invalid_repository` (exit 2,
 malformed `owner/repo` argument, nothing fetched), `invalid_catalog` (exit 2, fetched
 content rejected) and `catalog_unavailable` (exit 4, repository unreachable or not
 registered). Human `sync` with no registered catalogs prints a hint to run
@@ -192,7 +198,8 @@ visible focus and plain ASCII fallback are required. No mandatory mouse or color
   An enabled connection whose execution or auth fields changed shows `Review
   required` and cannot be called until accepted with `sync --apply --accept <mcp>`
   or `enable <mcp>`. The diff names every changed field.
-- Expired auth: metadata still available; first protected call initiates auth.
+- Expired auth: metadata still available; first protected call initiates auth
+  (OAuth: returns `auth_required` pointing at `auth login`).
 - No-input agents: receive an actionable structured auth error instead of a prompt.
 
 ## Deferred surface

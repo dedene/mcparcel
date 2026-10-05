@@ -325,7 +325,7 @@ func TestImportUnresolvedSecret(t *testing.T) {
 		}
 	}
 	bytes, _ := json.Marshal(r)
-	if applicable != 31 || blocked != 1 || refs != 2 || strings.Contains(string(bytes), "credential-canary") {
+	if applicable != 32 || blocked != 0 || refs != 0 || strings.Contains(string(bytes), "credential-canary") {
 		t.Fatal(applicable, blocked, refs)
 	}
 }
@@ -339,7 +339,7 @@ func TestImportBlockedNames(t *testing.T) {
 			got = append(got, v.ID)
 		}
 	}
-	if !reflect.DeepEqual(got, []string{"front-mcp"}) {
+	if !reflect.DeepEqual(got, []string{}) {
 		t.Fatal(got)
 	}
 }

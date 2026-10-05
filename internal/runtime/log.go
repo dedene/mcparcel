@@ -57,7 +57,8 @@ func (w *boundedLog) Write(b []byte) (int, error) {
 func (w *boundedLog) Close() error { w.mu.Lock(); defer w.mu.Unlock(); return w.file.Close() }
 func WriteLog(w io.Writer, event string, path *string) error {
 	switch event {
-	case "daemon_started", "login_env_fallback", "connection_opened", "connection_closed", "auth_failed", "daemon_stopped":
+	case "daemon_started", "login_env_fallback", "connection_opened", "connection_closed", "auth_failed", "daemon_stopped",
+		"oauth_signed_in", "oauth_refreshed", "oauth_refresh_failed", "oauth_signed_out":
 	default:
 		return errors.New("invalid log event")
 	}

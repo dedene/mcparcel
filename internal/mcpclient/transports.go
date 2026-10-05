@@ -17,12 +17,15 @@ type headerTransport struct {
 	base    *http.Transport
 	origin  *url.URL
 	headers map[string]string
+	oauth   bool // 401 and 403 reach the SDK's OAuth handler
 	mu      sync.Mutex
 	failure error
+	// unauthorized records a 401 seen in OAuth mode until the next 2xx.
+	unauthorized bool
 }
 
 func (t *headerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	if failure := t.status(); failure != nil && req.Method != http.MethodDelete {
+	if failure := t.sticky(); failure != nil && req.Method != http.MethodDelete {
 		return nil, failure
 	}
 	if req.URL.Scheme != t.origin.Scheme || req.URL.Host != t.origin.Host || req.URL.User != nil {
@@ -34,13 +37,22 @@ func (t *headerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		clone.GetBody = nil
 	}
 	for k, v := range t.headers {
+		if t.oauth && http.CanonicalHeaderKey(k) == "Authorization" {
+			continue
+		}
 		clone.Header.Set(k, v)
 	}
 	resp, err := t.base.RoundTrip(clone)
 	if err != nil {
 		return nil, output.NewError("connection_failed", nil)
 	}
-	if resp.StatusCode >= 300 && resp.StatusCode < 400 || resp.StatusCode == 401 {
+	if t.oauth && (resp.StatusCode == 401 || resp.StatusCode == 403) {
+		if resp.StatusCode == 401 {
+			t.mu.Lock()
+			t.unauthorized = true
+			t.mu.Unlock()
+		}
+	} else if resp.StatusCode >= 300 && resp.StatusCode < 400 || resp.StatusCode == 401 {
 		code := "connection_failed"
 		if resp.StatusCode == 401 {
 			code = "auth_required"
@@ -51,11 +63,26 @@ func (t *headerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		t.mu.Unlock()
 		_ = resp.Body.Close()
 		return nil, failure
+	} else if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		t.mu.Lock()
+		t.unauthorized = false
+		t.mu.Unlock()
 	}
 	resp.Body = &boundedResponseBody{ReadCloser: resp.Body, remaining: 16 * 1024 * 1024, transport: t}
 	return resp, nil
 }
-func (t *headerTransport) status() error { t.mu.Lock(); defer t.mu.Unlock(); return t.failure }
+func (t *headerTransport) sticky() error { t.mu.Lock(); defer t.mu.Unlock(); return t.failure }
+
+// status is the sticky failure, else auth_required after an unanswered 401.
+func (t *headerTransport) status() error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.failure == nil && t.unauthorized {
+		return output.NewError("auth_required", nil)
+	}
+	return t.failure
+}
+
 func makeTransport(opts ConnectOptions) (mcp.Transport, func(context.Context), func() error, error) {
 	if opts.Connection.Transport.Stdio != nil {
 		transport, close, err := startProcess(opts)
@@ -77,9 +104,9 @@ func makeTransport(opts ConnectOptions) (mcp.Transport, func(context.Context), f
 		headers[k] = v
 	}
 	base := &http.Transport{Proxy: nil}
-	rt := &headerTransport{base: base, origin: origin, headers: headers}
+	rt := &headerTransport{base: base, origin: origin, headers: headers, oauth: opts.OAuth != nil}
 	client := &http.Client{Transport: rt, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	return &mcp.StreamableClientTransport{Endpoint: endpoint, HTTPClient: client, MaxRetries: -1, DisableStandaloneSSE: true, MaxEventSize: 16 * 1024 * 1024}, func(context.Context) { base.CloseIdleConnections() }, rt.status, nil
+	return &mcp.StreamableClientTransport{Endpoint: endpoint, HTTPClient: client, MaxRetries: -1, DisableStandaloneSSE: true, MaxEventSize: 16 * 1024 * 1024, OAuthHandler: opts.OAuth}, func(context.Context) { base.CloseIdleConnections() }, rt.status, nil
 }
 
 type boundedResponseBody struct {

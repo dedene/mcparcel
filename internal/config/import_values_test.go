@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -127,11 +128,22 @@ func TestImportEnvBridgeAll32(t *testing.T) {
 			}
 		}
 	}
-	want := []ImportIssue{{Path: "mcpServers.front-mcp.oauthClientId", Code: "unresolved_credential", Variable: "FRONT_MCP_CLIENT_ID"}, {Path: "mcpServers.front-mcp.oauthClientSecret", Code: "unresolved_credential", Variable: "FRONT_MCP_CLIENT_SECRET"}}
-	if applicable != 31 || len(blocked) != 1 || blocked[0] != "front-mcp" || warnings != 12 || len(unresolved) != 2 || unresolved[0] != want[0] || unresolved[1] != want[1] {
+	if applicable != 32 || len(blocked) != 0 || warnings != 14 || len(unresolved) != 0 {
 		t.Fatal(applicable, blocked, warnings, unresolved)
 	}
 	defs := r.Definitions.Connections
+	front := defs["front-mcp"].Auth
+	if front.ClientID == nil || front.ClientID.Secret == nil || front.ClientID.Secret.Secret != "env:FRONT_MCP_CLIENT_ID" || front.ClientSecret == nil || front.ClientSecret.Secret == nil || front.ClientSecret.Secret.Secret != "env:FRONT_MCP_CLIENT_SECRET" {
+		t.Fatal(front)
+	}
+	for key, name := range map[string]string{"oauthClientId": "FRONT_MCP_CLIENT_ID", "oauthClientSecret": "FRONT_MCP_CLIENT_SECRET"} {
+		if !slices.Contains(importRow(t, r, "front-mcp").Warnings, ImportIssue{Path: "mcpServers.front-mcp." + key, Code: "environment_reference", Variable: name}) {
+			t.Fatal(key)
+		}
+	}
+	if slack := defs["slack"].Auth.ClientID; slack == nil || slack.Literal == nil || *slack.Literal != "client-id-slack" {
+		t.Fatal(slack)
+	}
 	exa, proxmox, treg := defs["exa"], defs["proxmox-mcp-plus"], defs["treg"]
 	if s := exa.Transport.Stdio.Env["EXA_API_KEY"].Secret; s == nil || *s != (SecretRef{Secret: "env:EXA_API_KEY"}) {
 		t.Fatal(s)

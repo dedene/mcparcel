@@ -116,9 +116,6 @@ func TestLoadFullCatalogFields(t *testing.T) {
 			}
 			_, _, err = snapshot.RuntimeConnection("paper")
 			expected := error(nil)
-			if strings.Contains(field, `"auth"`) {
-				expected = config.ErrRuntimeUnsupported
-			}
 			if strings.Contains(field, `"inputs"`) {
 				expected = config.ErrConfigRequired
 			}

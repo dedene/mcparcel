@@ -4,7 +4,12 @@ package cmd
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -95,5 +100,134 @@ func newKeychain(paths config.Paths) func(context.Context, string) (string, erro
 			return "", auth.ErrProvider
 		}
 		return strings.TrimSuffix(string(b), "\n"), nil
+	}
+}
+
+// fixtureKeyring stores each item in a private file under StateDir and never
+// runs security. StateDir/fixture-keyring-unavailable fails every call.
+type fixtureKeyring struct {
+	mu    sync.Mutex
+	paths config.Paths
+}
+
+func newKeyring(paths config.Paths) auth.Keyring { return &fixtureKeyring{paths: paths} }
+
+var errFixtureKeyring = errors.New("fixture keyring unavailable")
+
+// open returns the StateDir handle and the item's file name.
+func (k *fixtureKeyring) open(service, account string, create bool) (*os.File, string, error) {
+	if _, err := os.Stat(filepath.Join(k.paths.StateDir, "fixture-keyring-unavailable")); err == nil {
+		return nil, "", errFixtureKeyring
+	}
+	dir, err := config.OpenPrivateDir(k.paths.StateDir, create)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, "", auth.ErrNoSession
+	}
+	if err != nil {
+		return nil, "", errFixtureKeyring
+	}
+	sum := sha256.Sum256([]byte(service + "\x00" + account))
+	return dir, "fixture-keyring-" + hex.EncodeToString(sum[:]), nil
+}
+
+func (k *fixtureKeyring) Get(service, account string) (string, error) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	dir, name, err := k.open(service, account, false)
+	if err != nil {
+		return "", err
+	}
+	defer dir.Close()
+	f, err := config.OpenPrivateFile(dir, name, false)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", auth.ErrNoSession
+	}
+	if err != nil {
+		return "", errFixtureKeyring
+	}
+	defer f.Close()
+	b, err := io.ReadAll(f)
+	if err != nil {
+		return "", errFixtureKeyring
+	}
+	return string(b), nil
+}
+
+func (k *fixtureKeyring) Set(service, account, secret string) error {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	dir, name, err := k.open(service, account, true)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	f, err := config.OpenPrivateFile(dir, name, true)
+	if err != nil {
+		return errFixtureKeyring
+	}
+	defer f.Close()
+	if f.Truncate(0) != nil {
+		return errFixtureKeyring
+	}
+	if _, err = f.WriteString(secret); err != nil {
+		return errFixtureKeyring
+	}
+	return nil
+}
+
+func (k *fixtureKeyring) Delete(service, account string) error {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	dir, name, err := k.open(service, account, false)
+	if err != nil {
+		return err
+	}
+	_ = dir.Close()
+	err = os.Remove(filepath.Join(k.paths.StateDir, name))
+	if errors.Is(err, os.ErrNotExist) {
+		return auth.ErrNoSession
+	}
+	if err != nil {
+		return errFixtureKeyring
+	}
+	return nil
+}
+
+// newBrowser never opens a browser: it follows the sign-in URL to the
+// daemon's callback and keeps the page in StateDir/fixture-browser-page.
+// StateDir/fixture-browser-off turns it off.
+func newBrowser(paths config.Paths) func(context.Context, string) error {
+	return func(ctx context.Context, raw string) error {
+		if _, err := os.Stat(filepath.Join(paths.StateDir, "fixture-browser-off")); err == nil {
+			return nil
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, raw, nil)
+		if err != nil {
+			return err
+		}
+		resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		if err != nil {
+			return err
+		}
+		dir, err := config.OpenPrivateDir(paths.StateDir, true)
+		if err != nil {
+			return err
+		}
+		defer dir.Close()
+		f, err := config.OpenPrivateFile(dir, "fixture-browser-page", true)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		if err = f.Truncate(0); err != nil {
+			return err
+		}
+		_, err = f.Write(body)
+		return err
 	}
 }

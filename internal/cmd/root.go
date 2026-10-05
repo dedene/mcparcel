@@ -51,6 +51,7 @@ type CLI struct {
 	Spike   SpikeCmd   `cmd:"" hidden:"" help:"Stage-1 feasibility probes. Removed before release."`
 	Tools   ToolsCmd   `cmd:"" help:"List a connection's tools."`
 	Call    CallCmd    `cmd:"" help:"Call an MCP tool."`
+	Auth    AuthCmd    `cmd:"" help:"Sign in to, inspect or sign out of OAuth connections."`
 	Runtime RuntimeCmd `cmd:"" help:"Inspect, restart or stop the runtime."`
 	Daemon  DaemonCmd  `cmd:"" hidden:""`
 }
@@ -197,7 +198,7 @@ func scanIntent(argv []string) parseIntent {
 		}
 		if i.command == "" && !strings.HasPrefix(token, "-") {
 			i.command = token
-			i.product = token == "tools" || token == "call" || token == "runtime" || token == "daemon" || token == "config" || token == "import" || token == "catalog" || token == "list" || token == "inspect" || token == "enable" || token == "disable" || token == "local" || token == "add" || token == "remove" || token == "sync"
+			i.product = token == "tools" || token == "call" || token == "auth" || token == "runtime" || token == "daemon" || token == "config" || token == "import" || token == "catalog" || token == "list" || token == "inspect" || token == "enable" || token == "disable" || token == "local" || token == "add" || token == "remove" || token == "sync"
 		}
 	}
 	return i

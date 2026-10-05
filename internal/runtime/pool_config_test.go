@@ -46,15 +46,13 @@ func TestResolvedRuntimeInput(t *testing.T) {
 }
 
 func TestRuntimeUnsupportedBeforeEffects(t *testing.T) {
-	for _, kind := range []string{"oauth", "sse", "desktop", "lifecycle"} {
+	for _, kind := range []string{"sse", "desktop", "lifecycle"} {
 		t.Run(kind, func(t *testing.T) {
 			r := newRig(t)
 			r.http("a", testutil.FixtureOptions{}, kind == "desktop")
 			r.http("public", testutil.FixtureOptions{}, false)
 			c := r.personal.Connections["a"]
 			switch kind {
-			case "oauth":
-				c.Auth = &config.OAuth{Type: "oauth"}
 			case "sse":
 				c.Transport.HTTP.Mode = "sse"
 			case "desktop":

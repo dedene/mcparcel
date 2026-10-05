@@ -469,3 +469,13 @@ func TestValidateSnapshotRejectsEnvRef(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestValidateSnapshotRejectsOAuthEnvRef(t *testing.T) {
+	c, err := config.DecodeCatalog([]byte(`{"schemaVersion":1,"connections":{"x":{"transport":{"type":"http","url":"https://x.invalid/mcp"},"auth":{"type":"oauth","clientId":{"secret":"env:X"}}}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = validateSnapshot(Snapshot{Source: existingSource(), Catalog: c}); !errors.Is(err, ErrContentInvalid) {
+		t.Fatal(err)
+	}
+}

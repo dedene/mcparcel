@@ -23,6 +23,7 @@ type PoolOptions struct {
 	Credentials     auth.Resolver
 	Log             func(event string)
 	Keychain        func(ctx context.Context, name string) (string, error)
+	Keyring         auth.Keyring // OAuth sessions; nil fails marked connections with keychain_unavailable
 	Load            func(config.Paths) (config.Snapshot, error)
 	Connect         func(context.Context, mcpclient.ConnectOptions) (mcpclient.Session, error)
 	Now             func() time.Time
@@ -91,8 +92,11 @@ func (p *pool) Handle(ctx context.Context, id string, req Request, before func()
 	p.mu.Unlock()
 	defer func() { cancel(nil); p.mu.Lock(); delete(p.requests, w); p.mu.Unlock(); p.workers.Done() }()
 	fail := func(e error) Response { return Response{Error: poolError(e, context.Cause(workCtx), id, false)} }
-	if req.Method != "call" && req.Method != "tools" {
+	if req.Method != "call" && req.Method != "tools" && req.Method != "login" && req.Method != "logout" {
 		return fail(output.NewError("protocol_error", nil))
+	}
+	if req.Method == "logout" {
+		return p.logout(workCtx, req.Connection)
 	}
 	if p.opts.Credentials == nil {
 		return fail(errors.New("missing credentials resolver"))
@@ -110,11 +114,20 @@ func (p *pool) Handle(ctx context.Context, id string, req Request, before func()
 			return fail(e)
 		}
 	}
+	var login *auth.LoginOptions
+	if req.Method == "login" {
+		if login, e = loginOptions(ctx, req, c); e != nil {
+			return fail(e)
+		}
+	}
 	hash, e := snapshot.ConnectionHash(canonical)
 	if e != nil {
 		return fail(e)
 	}
 	duration := 180 * time.Second
+	if req.Method == "login" {
+		duration = loginTimeout
+	}
 	if req.Method == "call" {
 		duration = 120 * time.Second
 		text := req.Timeout
@@ -131,14 +144,7 @@ func (p *pool) Handle(ctx context.Context, id string, req Request, before func()
 	deadlineCtx, deadlineCancel := context.WithDeadline(workCtx, started.Add(duration))
 	defer deadlineCancel()
 	workCtx = deadlineCtx
-	p.mu.Lock()
-	gate := p.gates[canonical]
-	if gate == nil {
-		gate = make(chan struct{}, 1)
-		gate <- struct{}{}
-		p.gates[canonical] = gate
-	}
-	p.mu.Unlock()
+	gate := p.gate(canonical)
 	if workCtx.Err() != nil {
 		return fail(workCtx.Err())
 	}
@@ -170,7 +176,16 @@ func (p *pool) Handle(ctx context.Context, id string, req Request, before func()
 	}
 	lease := auth.Lease{Identity: "public"}
 	refs := config.SecretRefs(c)
-	if names := config.EnvRefs(c); len(names) > 0 && len(refs) == 0 {
+	if oauthCapable(c) && len(refs) == 0 {
+		defer func() {
+			if resp.Error != nil && resp.Error.Code == "auth_required" {
+				resp.Error.NextAction = "mcparcel auth login " + req.Connection
+				if resp.Error.Message == output.NewError("auth_required", nil).Message {
+					resp.Error.Message = "Sign-in required for " + req.Connection + "."
+				}
+			}
+		}()
+	} else if names := config.EnvRefs(c); len(names) > 0 && len(refs) == 0 {
 		defer func() {
 			if resp.Error != nil && resp.Error.Code == "auth_required" {
 				resp.Error.NextAction = "Check " + strings.Join(names, ", ") + " (login-shell environment, else the Keychain generic password of the same name), update the value, then run mcparcel runtime restart."
@@ -189,7 +204,10 @@ func (p *pool) Handle(ctx context.Context, id string, req Request, before func()
 			return fail(auth.ErrExpired)
 		}
 	}
-	entry, e := p.session(workCtx, canonical, hash, c, lease, gate)
+	entry, handler, e := p.session(workCtx, canonical, hash, c, lease, gate, req.Connection, login)
+	if login != nil {
+		return p.finishLogin(workCtx, req.Connection, canonical, entry, handler, e, fail)
+	}
 	if e != nil {
 		return fail(e)
 	}

@@ -34,6 +34,8 @@ func TestErrorExitRegistry(t *testing.T) {
 		{"auth_required", 3, "Credential authorization is required.", "Run the command interactively with 1Password desktop integration enabled."},
 		{"auth_expired", 3, "The credential session expired.", "Run the command interactively to authorize again."},
 		{"auth_failed", 3, "Credential resolution failed.", "Check the profile, desktop integration and vault access."},
+		{"keychain_unavailable", 3, "The macOS Keychain could not store or read the sign-in.", "Unlock the login keychain, then try again."},
+		{"auth_callback_unavailable", 3, "The sign-in callback address is in use.", "Close the program using that port, then try again."},
 		{"connection_unavailable", 4, "The connection is not defined.", "Check the connection ID in personal.json."},
 		{"tool_error", 5, "The MCP tool returned an error result.", ""},
 		{"connection_failed", 6, "Could not connect to the MCP server.", "Check the connection configuration and prerequisites."},

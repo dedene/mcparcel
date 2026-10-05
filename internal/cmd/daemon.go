@@ -32,6 +32,6 @@ func (c *DaemonCmd) Run(ctx context.Context, _ *Streams) error {
 	login, captureErr := runtimeclient.CaptureLoginEnv(ctx)
 	credentials := newCredentials(paths, version)
 	defer credentials.Close()
-	pool := runtimeclient.NewPool(runtimeclient.PoolOptions{Paths: paths, LoginEnv: login, Version: version, Credentials: credentials, Keychain: newKeychain(paths), Log: func(event string) { _ = runtimeclient.WriteLog(log, event, nil) }})
+	pool := runtimeclient.NewPool(runtimeclient.PoolOptions{Paths: paths, LoginEnv: login, Version: version, Credentials: credentials, Keychain: newKeychain(paths), Keyring: newKeyring(paths), Log: func(event string) { _ = runtimeclient.WriteLog(log, event, nil) }})
 	return runtimeclient.Serve(ctx, runtimeclient.DaemonOptions{Paths: paths, Version: version, Lock: lock, LoginEnv: login, EnvFallback: captureErr != nil, Handler: pool, Log: log})
 }

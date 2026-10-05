@@ -118,7 +118,7 @@ func TestImportPreviewBlackBox(t *testing.T) {
 			a++
 		}
 	}
-	if len(report.Entries) != 32 || a != 31 || report.Applied || report.Revision == nil || *report.Revision != 0 {
+	if len(report.Entries) != 32 || a != 32 || report.Applied || report.Revision == nil || *report.Revision != 0 {
 		t.Fatal(v.stdout)
 	}
 	for _, p := range []string{r.paths.ConfigDir, r.paths.StateDir, r.paths.RuntimeDir} {
@@ -129,10 +129,13 @@ func TestImportPreviewBlackBox(t *testing.T) {
 	r.offline()
 }
 
+// One literal OAuth client secret blocks the whole apply.
+const blockedImport = `{"mcpServers":{"bad":{"baseUrl":"https://x.invalid/mcp","auth":"oauth","oauthClientSecret":"literal-canary"},"good":{"command":"fixture"}}}`
+
 func TestImportApplyBlockedBlackBox(t *testing.T) {
 	r := newMetadataRig(t)
-	v := r.run(2, "import_blocked", "import", "mcporter", "--file", r.fixture(), "--apply", "--json")
-	if string(v.envelope.Data) != "null" {
+	v := r.run(2, "import_blocked", "import", "mcporter", "--file", r.file("blocked.json", []byte(blockedImport)), "--apply", "--json")
+	if string(v.envelope.Data) != "null" || strings.Contains(v.stdout+v.stderr, "canary") {
 		t.Fatal(v.stdout)
 	}
 	var raw struct {
@@ -142,7 +145,7 @@ func TestImportApplyBlockedBlackBox(t *testing.T) {
 			} `json:"details"`
 		} `json:"error"`
 	}
-	if e := json.Unmarshal([]byte(v.stdout), &raw); e != nil || len(raw.Error.Details.Report.Entries) != 32 {
+	if e := json.Unmarshal([]byte(v.stdout), &raw); e != nil || len(raw.Error.Details.Report.Entries) != 2 {
 		t.Fatal(v.stdout, e)
 	}
 	s, e := config.ReadState(context.Background(), r.paths)
@@ -448,10 +451,10 @@ func TestConfigImportStage4Regression(t *testing.T) {
 			}
 		}
 	}
-	if len(preview.Entries) != 32 || counts["stdio"] != 17 || counts["http"] != 15 || oauth != 10 || refs != 2 || preview.Revision == nil || *preview.Revision != current.Selections.Revision {
+	if len(preview.Entries) != 32 || counts["stdio"] != 17 || counts["http"] != 15 || oauth != 10 || refs != 0 || preview.Revision == nil || *preview.Revision != current.Selections.Revision {
 		t.Fatal(preview, counts, oauth, refs)
 	}
-	blocked := r.run(2, "import_blocked", "import", "mcporter", "--file", raw, "--apply", "--json")
+	blocked := r.run(2, "import_blocked", "import", "mcporter", "--file", r.file("blocked.json", []byte(blockedImport)), "--apply", "--json")
 	if string(blocked.envelope.Data) != "null" || blocked.envelope.Error.Details["importReport"] == nil {
 		t.Fatal(blocked.stdout)
 	}

@@ -196,7 +196,7 @@ func TestStoreAcceptOAuthMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := loaded.RuntimeConnection(acceptedPaper); !errors.Is(err, ErrRuntimeUnsupported) {
+	if _, _, err := loaded.RuntimeConnection(acceptedPaper); err != nil {
 		t.Fatal(err)
 	}
 }
