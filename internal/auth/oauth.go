@@ -60,7 +60,7 @@ type OAuthHandler struct {
 var _ sdkauth.OAuthHandler = (*OAuthHandler)(nil)
 
 func NewOAuthHandler(o OAuthOptions) *OAuthHandler {
-	h := &OAuthHandler{opts: o, client: &http.Client{Timeout: 30 * time.Second, Transport: &http.Transport{Proxy: nil}, CheckRedirect: checkRedirect}}
+	h := &OAuthHandler{opts: o, client: &http.Client{Timeout: 30 * time.Second, Transport: &http.Transport{Proxy: nil, ForceAttemptHTTP2: true}, CheckRedirect: checkRedirect}}
 	if o.Auth != nil {
 		h.auth = *o.Auth
 	}
