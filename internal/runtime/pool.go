@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,6 +22,7 @@ type PoolOptions struct {
 	Version         string
 	Credentials     auth.Resolver
 	Log             func(event string)
+	Keychain        func(ctx context.Context, name string) (string, error)
 	Load            func(config.Paths) (config.Snapshot, error)
 	Connect         func(context.Context, mcpclient.ConnectOptions) (mcpclient.Session, error)
 	Now             func() time.Time
@@ -168,6 +170,13 @@ func (p *pool) Handle(ctx context.Context, id string, req Request, before func()
 	}
 	lease := auth.Lease{Identity: "public"}
 	refs := config.SecretRefs(c)
+	if names := config.EnvRefs(c); len(names) > 0 && len(refs) == 0 {
+		defer func() {
+			if resp.Error != nil && resp.Error.Code == "auth_required" {
+				resp.Error.NextAction = "Check " + strings.Join(names, ", ") + " (login-shell environment, else the Keychain generic password of the same name), update the value, then run mcparcel runtime restart."
+			}
+		}()
+	}
 	if len(refs) > 0 {
 		authCtx, authCancel := context.WithTimeout(workCtx, 120*time.Second)
 		lease, e = p.opts.Credentials.Resolve(authCtx, c.CredentialProfile, snapshot.Local.CredentialProfiles[c.CredentialProfile], refs, req.NoInput)

@@ -459,3 +459,13 @@ func TestValidateSnapshotStoreSize(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestValidateSnapshotRejectsEnvRef(t *testing.T) {
+	c, err := config.DecodeCatalog([]byte(`{"schemaVersion":1,"connections":{"exa":{"transport":{"type":"stdio","command":"npx","env":{"EXA_API_KEY":{"secret":"env:EXA_API_KEY"}}}}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = validateSnapshot(Snapshot{Source: existingSource(), Catalog: c}); !errors.Is(err, ErrContentInvalid) {
+		t.Fatal(err)
+	}
+}

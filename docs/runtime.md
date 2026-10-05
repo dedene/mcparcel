@@ -86,8 +86,16 @@ and for every `inheritEnv` name. If the capture fails, it falls back to the
 caller's PATH and says so in `runtime status` and the daemon log. `runtime status`
 prints the captured PATH; `runtime restart` recaptures it. On top of the base it
 adds explicit non-secret inherited names, configured literals and resolved
-bindings. Never forward `OP_SERVICE_ACCOUNT_TOKEN`, GitHub credentials or other
-unrelated parent variables. `inheritEnv` cannot override protected credential names.
+bindings. An `env:NAME` reference (personal definitions, stdio env and HTTP headers)
+resolves at connect time from that captured environment, else from the Keychain
+generic password with service NAME and the login user as account
+(`/usr/bin/security find-generic-password`, argv, 5s limit). Neither present gives
+`config_required` naming the variable, with both fixes. Values are never logged or
+persisted. A pooled session keeps its value until it reconnects; `runtime restart`
+recaptures the environment and is how a key is rotated. `auth_required` on a
+connection whose only credentials are `env:` references names those variables
+instead of 1Password. Never forward `OP_SERVICE_ACCOUNT_TOKEN`, GitHub credentials
+or other unrelated parent variables. `inheritEnv` cannot override protected credential names.
 Known auth dependencies such as octocode's GitHub access need explicit bindings or
 supported server-owned auth, demonstrated in the 32-server acceptance matrix.
 

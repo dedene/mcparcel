@@ -90,6 +90,9 @@ func ValidateState(state State) error {
 			return fieldError("catalogs", "source catalog required")
 		}
 		for _, id := range sortedKeys(catalog.Connections) {
+			if len(EnvRefs(catalog.Connections[id])) > 0 {
+				return fieldError("catalogs."+source.ID+".connections."+id, "environment reference requires a personal definition")
+			}
 			present["github:"+source.Owner+"/"+source.Repo+"#"+id] = catalog.Connections[id]
 		}
 		delete(catalogs, source.ID)

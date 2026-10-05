@@ -7,8 +7,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -166,4 +168,60 @@ func forbiddenChildEnv(key string) bool {
 		return true
 	}
 	return strings.HasPrefix(key, "DYLD_") || strings.HasPrefix(key, "LD_")
+}
+
+// envRefValues adds values for env: references from the captured login
+// environment, falling back to a Keychain generic password named after the
+// variable (temporary bridge). Values never enter errors or logs.
+func envRefValues(ctx context.Context, login map[string]string, keychain func(context.Context, string) (string, error), c config.Connection, resolved map[string]string) (map[string]string, error) {
+	names := config.EnvRefs(c)
+	if len(names) == 0 {
+		return resolved, nil
+	}
+	out := maps.Clone(resolved)
+	if out == nil {
+		out = map[string]string{}
+	}
+	for _, name := range names {
+		value := login[name]
+		if value == "" && keychain != nil {
+			if v, err := keychain(ctx, name); err == nil {
+				value = v
+			}
+		}
+		if value == "" {
+			err := output.NewError("config_required", nil)
+			err.Message = "Environment variable " + name + " is not set in the daemon's login environment and the Keychain has no generic password named " + name + "."
+			err.NextAction = "Export " + name + " where your login shell reads it (zsh: ~/.zprofile or ~/.zshenv, not ~/.zshrc), or store it with security add-generic-password -a \"$USER\" -s " + name + " -w (prompts for the value), then run mcparcel runtime restart. If mcparcel runtime status shows Environment: caller fallback, the login-shell capture failed; fix that first."
+			return nil, err
+		}
+		out["env:"+name] = value
+	}
+	return out, nil
+}
+
+var errKeychain = errors.New("keychain lookup failed")
+
+// KeychainLookup reads the generic password with service name and the
+// current user as account, as the owner's mcporter wrapper does.
+func KeychainLookup(ctx context.Context, name string) (string, error) {
+	u, err := user.Current()
+	if err != nil || u.Username == "" {
+		return "", errKeychain
+	}
+	return keychainRead(ctx, "/usr/bin/security", u.Username, name)
+}
+
+// keychainRead never surfaces stderr or exit details; only success matters.
+func keychainRead(ctx context.Context, bin, account, service string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin, "find-generic-password", "-a", account, "-s", service, "-w")
+	cmd.Stderr = io.Discard
+	cmd.WaitDelay = 100 * time.Millisecond
+	out, err := cmd.Output()
+	if err != nil {
+		return "", errKeychain
+	}
+	return strings.TrimSuffix(string(out), "\n"), nil
 }

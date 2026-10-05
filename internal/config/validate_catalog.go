@@ -230,6 +230,11 @@ func validateConnection(c *Connection, path string, profiles map[string]ProfileR
 				return err
 			}
 		}
+		for _, v := range []*Value{a.ClientID, a.ClientSecret} {
+			if v != nil && v.Secret != nil && strings.HasPrefix(v.Secret.Secret, "env:") {
+				return fieldError(p, "environment reference not allowed in OAuth client fields")
+			}
+		}
 	}
 	if policy := c.ToolPolicy; policy != nil {
 		if policy.Allow != nil {
@@ -268,7 +273,7 @@ func validateValue(v Value, path string, header bool) error {
 	if v.Literal != nil {
 		text = *v.Literal
 	} else if v.Secret != nil {
-		if !validRef(v.Secret.Secret) {
+		if !validValueRef(v.Secret.Secret) {
 			return fieldError(path+".secret", "invalid secret reference")
 		}
 		text = v.Secret.Prefix + v.Secret.Suffix

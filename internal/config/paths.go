@@ -19,6 +19,15 @@ func ResolvePaths(getenv func(string) string, home, osTemp string, uid int) (Pat
 		}
 		return filepath.Join(path, "mcparcel"), nil
 	}
+	// Symlinks in ancestors (macOS /var -> /private/var) are resolved once; the
+	// directory itself is not, so OpenPrivateDir's no-follow walk still applies.
+	realParent := func(path string) (string, error) {
+		parent, err := canonicalConfigPath(filepath.Dir(path))
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(parent, filepath.Base(path)), nil
+	}
 	p := Paths{Home: home}
 	var err error
 	if p.ConfigDir, err = root("XDG_CONFIG_HOME", ".config"); err != nil {
@@ -33,12 +42,18 @@ func ResolvePaths(getenv func(string) string, home, osTemp string, uid int) (Pat
 	if p.StateDir, err = root("XDG_STATE_HOME", ".local/state"); err != nil {
 		return Paths{}, err
 	}
+	if p.StateDir, err = realParent(p.StateDir); err != nil {
+		return Paths{}, err
+	}
 	p.RuntimeDir = getenv("MCPARCEL_RUNTIME_DIR")
 	if p.RuntimeDir == "" {
 		p.RuntimeDir = filepath.Join(osTemp, "mcp-"+strconv.Itoa(uid))
 	}
-	if !filepath.IsAbs(p.RuntimeDir) || filepath.Clean(p.RuntimeDir) != p.RuntimeDir {
+	if !filepath.IsAbs(p.RuntimeDir) {
 		return Paths{}, ErrUnsafePath
+	}
+	if p.RuntimeDir, err = realParent(filepath.Clean(p.RuntimeDir)); err != nil {
+		return Paths{}, err
 	}
 	p.PersonalFile = filepath.Join(p.ConfigDir, "personal.json")
 	p.ConfigFile = filepath.Join(p.ConfigDir, "config.json")

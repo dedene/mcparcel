@@ -34,7 +34,11 @@ func (p *pool) session(ctx context.Context, id, hash string, c config.Connection
 	if old != nil {
 		p.retire(id, old)
 	}
-	env, e := BuildChildEnv(p.opts.LoginEnv, c, lease.Values)
+	values, e := envRefValues(ctx, p.opts.LoginEnv, p.opts.Keychain, c, lease.Values)
+	if e != nil {
+		return nil, e
+	}
+	env, e := BuildChildEnv(p.opts.LoginEnv, c, values)
 	if e != nil {
 		return nil, e
 	}
@@ -44,7 +48,7 @@ func (p *pool) session(ctx context.Context, id, hash string, c config.Connection
 			if v.Literal != nil {
 				headers[k] = *v.Literal
 			} else if v.Secret != nil {
-				value, ok := lease.Values[v.Secret.Secret]
+				value, ok := values[v.Secret.Secret]
 				if !ok {
 					return nil, auth.ErrProvider
 				}

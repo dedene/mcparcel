@@ -67,3 +67,31 @@ func TestLiteralText(t *testing.T) {
 		}
 	}
 }
+
+const envRefCatalog = `{"schemaVersion":1,"connections":{"exa":{"transport":{"type":"stdio","command":"npx","env":{"EXA_API_KEY":{"secret":"env:EXA_API_KEY"}}}},"treg":{"transport":{"type":"http","url":"https://treg.invalid/mcp","headers":{"Authorization":{"secret":"env:TREG_TOKEN","prefix":"Bearer "}}}}}}`
+
+func TestEnvRefValue(t *testing.T) {
+	c, err := DecodePersonal([]byte(envRefCatalog))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := json.Marshal(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := DecodePersonal(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b2, err := json.Marshal(again); err != nil || string(b2) != string(b) {
+		t.Fatalf("roundtrip %s: %v", b2, err)
+	}
+	exa, treg := c.Connections["exa"], c.Connections["treg"]
+	if len(SecretRefs(exa)) != 0 || !reflect.DeepEqual(EnvRefs(exa), []string{"EXA_API_KEY"}) || !reflect.DeepEqual(EnvRefs(treg), []string{"TREG_TOKEN"}) {
+		t.Fatal(SecretRefs(exa), EnvRefs(exa), EnvRefs(treg))
+	}
+	mixed := Connection{CredentialProfile: "team", Transport: Transport{Stdio: &Stdio{Command: Literal("npx"), Env: map[string]Value{"A": {Secret: &SecretRef{Secret: "op://v/i/f"}}, "B": {Secret: &SecretRef{Secret: "env:X"}}}}}}
+	if !reflect.DeepEqual(SecretRefs(mixed), []string{"op://v/i/f"}) || !reflect.DeepEqual(EnvRefs(mixed), []string{"X"}) {
+		t.Fatal(SecretRefs(mixed), EnvRefs(mixed))
+	}
+}

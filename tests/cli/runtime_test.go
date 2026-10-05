@@ -358,3 +358,23 @@ func TestSIGINTDuringArgumentReadBlackBox(t *testing.T) {
 		t.Fatal("argument cancellation started runtime")
 	}
 }
+
+func TestRuntimeDirThroughSymlinkBlackBox(t *testing.T) {
+	r := newRig(t)
+	if err := os.Mkdir(r.root+"/linked", 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(r.root+"/linked", r.root+"/l"); err != nil {
+		t.Fatal(err)
+	}
+	r.env = replaceEnv(r.env, "MCPARCEL_RUNTIME_DIR", r.root+"/l/run")
+	var err error
+	if r.paths, err = config.ResolvePaths(func(k string) string { return envValue(r.env, k) }, r.paths.Home, "/private/tmp", os.Getuid()); err != nil {
+		t.Fatal(err)
+	}
+	r.call("fixture.counter")
+	if s := r.status(); s.Socket != r.root+"/linked/run/daemon.sock" {
+		t.Fatal(s.Socket)
+	}
+	r.check(r.run("runtime", "stop", "--json"), 0, "")
+}

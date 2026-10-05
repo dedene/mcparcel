@@ -2098,5 +2098,40 @@
     "schemaValid": false,
     "goValid": false,
     "path": "connections.hosted.transport.headers.X-Fixture-Token"
+  },
+  {
+    "name": "env-ref-valid",
+    "document": "catalog",
+    "raw": "{\"schemaVersion\":1,\"connections\":{\"exa\":{\"transport\":{\"type\":\"stdio\",\"command\":\"npx\",\"env\":{\"EXA_API_KEY\":{\"secret\":\"env:EXA_API_KEY\"}}}},\"treg\":{\"transport\":{\"type\":\"http\",\"url\":\"https://treg.invalid/mcp\",\"headers\":{\"Authorization\":{\"secret\":\"env:TREG_TOKEN\",\"prefix\":\"Bearer \"}}}}}}",
+    "syntaxValid": true,
+    "schemaValid": true,
+    "goValid": true
+  },
+  {
+    "name": "env-ref-bad-name",
+    "document": "catalog",
+    "raw": "{\"schemaVersion\":1,\"connections\":{\"exa\":{\"transport\":{\"type\":\"stdio\",\"command\":\"npx\",\"env\":{\"EXA_API_KEY\":{\"secret\":\"env:EXA-KEY\"}}}}}}",
+    "syntaxValid": true,
+    "schemaValid": false,
+    "goValid": false,
+    "path": "connections.exa.transport.env.EXA_API_KEY.secret"
+  },
+  {
+    "name": "env-ref-protected",
+    "document": "catalog",
+    "raw": "{\"schemaVersion\":1,\"connections\":{\"exa\":{\"transport\":{\"type\":\"stdio\",\"command\":\"npx\",\"env\":{\"EXA_API_KEY\":{\"secret\":\"env:GH_TOKEN\"}}}}}}",
+    "syntaxValid": true,
+    "schemaValid": true,
+    "goValid": false,
+    "path": "connections.exa.transport.env.EXA_API_KEY.secret"
+  },
+  {
+    "name": "env-ref-oauth-client-secret",
+    "document": "catalog",
+    "raw": "{\"schemaVersion\":1,\"connections\":{\"x\":{\"transport\":{\"type\":\"http\",\"url\":\"https://x.invalid/mcp\"},\"auth\":{\"type\":\"oauth\",\"clientSecret\":{\"secret\":\"env:CS\"}}}}}",
+    "syntaxValid": true,
+    "schemaValid": true,
+    "goValid": false,
+    "path": "connections.x.auth"
   }
 ]

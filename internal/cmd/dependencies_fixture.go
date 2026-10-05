@@ -6,6 +6,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -80,4 +82,18 @@ func newCredentials(paths config.Paths, _ string) auth.Resolver {
 		}}, nil
 	}}
 	return auth.NewResolver(auth.ResolverOptions{Provider: provider})
+}
+
+// newKeychain never runs security: test binaries read a fixture file instead.
+func newKeychain(paths config.Paths) func(context.Context, string) (string, error) {
+	return func(_ context.Context, name string) (string, error) {
+		if name == "" || strings.ContainsAny(name, "/.") {
+			return "", auth.ErrProvider
+		}
+		b, err := os.ReadFile(filepath.Join(paths.StateDir, "fixture-keychain-"+name))
+		if err != nil {
+			return "", auth.ErrProvider
+		}
+		return strings.TrimSuffix(string(b), "\n"), nil
+	}
 }

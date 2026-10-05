@@ -122,6 +122,11 @@ func validateSnapshot(s Snapshot) (Snapshot, error) {
 	if err != nil {
 		return Snapshot{}, ErrContentInvalid
 	}
+	for _, c := range catalog.Connections {
+		if len(config.EnvRefs(c)) > 0 {
+			return Snapshot{}, ErrContentInvalid
+		}
+	}
 	raw, err = json.MarshalIndent(catalog, "", "  ")
 	if err != nil {
 		return Snapshot{}, ErrContentInvalid

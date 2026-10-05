@@ -325,7 +325,7 @@ func TestImportUnresolvedSecret(t *testing.T) {
 		}
 	}
 	bytes, _ := json.Marshal(r)
-	if applicable != 21 || blocked != 11 || refs != 14 || strings.Contains(string(bytes), "credential-canary") {
+	if applicable != 31 || blocked != 1 || refs != 2 || strings.Contains(string(bytes), "credential-canary") {
 		t.Fatal(applicable, blocked, refs)
 	}
 }
@@ -339,7 +339,7 @@ func TestImportBlockedNames(t *testing.T) {
 			got = append(got, v.ID)
 		}
 	}
-	if !reflect.DeepEqual(got, strings.Fields("browserstack bugsnag exa firecrawl front-mcp ovh-logs perplexity proxmox-mcp-plus rails-blocks se-ranking treg")) {
+	if !reflect.DeepEqual(got, []string{"front-mcp"}) {
 		t.Fatal(got)
 	}
 }
@@ -468,10 +468,13 @@ func TestImportEntryRules(t *testing.T) {
 func TestImportInspectsAllFields(t *testing.T) {
 	r := converted(t, []byte(`{"mcpServers":{"bad":{"command":"fixture","env":{"A":null,"TOKEN":"${MISSING}"},"headers":{"Authorization":"canary"},"oauthClientSecret":"canary","typo":true}}}`), nil)
 	row := importRow(t, r, "bad")
-	for _, want := range []ImportIssue{{Path: "mcpServers.bad.env.A", Code: "invalid_field"}, {Path: "mcpServers.bad.env.TOKEN", Code: "unresolved_credential", Variable: "MISSING"}, {Path: "mcpServers.bad.headers.Authorization", Code: "potential_secret"}, {Path: "mcpServers.bad.oauthClientSecret", Code: "potential_secret"}, {Path: "mcpServers.bad.typo", Code: "unknown_field"}} {
+	for _, want := range []ImportIssue{{Path: "mcpServers.bad.env.A", Code: "invalid_field"}, {Path: "mcpServers.bad.headers.Authorization", Code: "potential_secret"}, {Path: "mcpServers.bad.oauthClientSecret", Code: "potential_secret"}, {Path: "mcpServers.bad.typo", Code: "unknown_field"}} {
 		if !slices.Contains(row.Unresolved, want) {
 			t.Fatalf("missing %+v in %+v", want, row)
 		}
+	}
+	if !slices.Contains(row.Warnings, ImportIssue{Path: "mcpServers.bad.env.TOKEN", Code: "environment_reference", Variable: "MISSING"}) || row.Applicable {
+		t.Fatalf("env reference: %+v", row)
 	}
 }
 

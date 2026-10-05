@@ -219,3 +219,102 @@ func writeFile(t *testing.T, path, data string, mode os.FileMode) {
 		t.Fatal(err)
 	}
 }
+
+func symlinkRoot(t *testing.T) string {
+	t.Helper()
+	root, err := os.MkdirTemp("/private/tmp", "mcp-path-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(root); err != nil {
+			t.Error(err)
+		}
+	})
+	if err := os.Mkdir(root+"/real", 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(root+"/real", root+"/link"); err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+func TestResolvePathsResolvesSymlinks(t *testing.T) {
+	root := symlinkRoot(t)
+	env := map[string]string{"MCPARCEL_RUNTIME_DIR": root + "/link/run", "XDG_STATE_HOME": root + "/link/state"}
+	p, err := config.ResolvePaths(func(k string) string { return env[k] }, root+"/home", "/private/tmp", os.Getuid())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.RuntimeDir != root+"/real/run" || p.SocketFile != root+"/real/run/daemon.sock" || p.LockFile != root+"/real/run/daemon.lock" || p.StateDir != root+"/real/state/mcparcel" || p.LogFile != root+"/real/state/mcparcel/daemon.log" {
+		t.Fatalf("%#v", p)
+	}
+	if _, err := os.Stat(root + "/real/run"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal(err)
+	}
+	// $TMPDIR ends in "/", so MCPARCEL_RUNTIME_DIR=$TMPDIR/x is not clean.
+	for _, runtime := range []string{root + "/link//run", root + "/link/run/"} {
+		env["MCPARCEL_RUNTIME_DIR"] = runtime
+		got, err := config.ResolvePaths(func(k string) string { return env[k] }, root+"/home", "/private/tmp", os.Getuid())
+		if err != nil || got.RuntimeDir != root+"/real/run" {
+			t.Fatal(runtime, got.RuntimeDir, err)
+		}
+	}
+	dir, err := config.OpenPrivateDir(p.RuntimeDir, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir.Close()
+	if info, err := os.Stat(root + "/real/run"); err != nil || !info.IsDir() || info.Mode().Perm() != 0o700 {
+		t.Fatal(info, err)
+	}
+	if f, err := config.OpenPrivateDir(root+"/link/run2", true); !errors.Is(err, config.ErrUnsafePath) {
+		if f != nil {
+			f.Close()
+		}
+		t.Fatal(err)
+	}
+}
+
+func TestResolvePathsSymlinkFailsClosed(t *testing.T) {
+	root := symlinkRoot(t)
+	resolve := func(runtime string) (config.Paths, error) {
+		return config.ResolvePaths(func(k string) string {
+			if k == "MCPARCEL_RUNTIME_DIR" {
+				return runtime
+			}
+			return ""
+		}, root+"/home", "/private/tmp", os.Getuid())
+	}
+	if err := os.Symlink(root+"/missing", root+"/dangling"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := resolve(root + "/dangling/run"); !errors.Is(err, config.ErrUnsafePath) {
+		t.Fatal("dangling ancestor:", err)
+	}
+	long := root + "/" + strings.Repeat("a", 70)
+	if err := os.Mkdir(long, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(long, root+"/s"); err != nil {
+		t.Fatal(err)
+	}
+	if len(root+"/s/run/daemon.sock") > 100 || len(long+"/run/daemon.sock") <= 100 {
+		t.Fatal("bad test")
+	}
+	if _, err := resolve(root + "/s/run"); !errors.Is(err, config.ErrUnsafePath) {
+		t.Fatal("long resolved socket:", err)
+	}
+	// The leaf is never followed: a planted /tmp/mcp-<uid> symlink stays refused.
+	p, err := resolve(root + "/link")
+	if err != nil || p.RuntimeDir != root+"/link" {
+		t.Fatal(p.RuntimeDir, err)
+	}
+	if f, err := config.OpenPrivateDir(p.RuntimeDir, true); !errors.Is(err, config.ErrUnsafePath) {
+		if f != nil {
+			f.Close()
+		}
+		t.Fatal(err)
+	}
+}

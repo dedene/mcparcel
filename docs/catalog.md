@@ -111,9 +111,17 @@ unions and unsupported schema versions are errors. No ignored config fields.
 Value is exactly one of: a literal string, `{input: "name"}`, or
 `{secret: "op://vault/item/field", prefix?: "Bearer ", suffix?: ""}`.
 Secret bindings are allowed in env, HTTP headers and OAuth client fields only.
+Personal definitions may also use `{secret: "env:NAME", prefix?, suffix?}`: the
+daemon resolves NAME at connect time from its captured login environment, falling
+back to the Keychain generic password with service NAME and the login user as
+account. Temporary bridge until 1Password profiles (stage 6). Allowed in stdio env
+and HTTP headers only, not OAuth client fields; protected variable names are
+rejected. A GitHub catalog containing one fails `add`/`sync` with `invalid_catalog`.
+`config validate` checks format only; it does not apply the personal-only rule.
 No secret command-line arguments. Import of a credential embedded in argv is
 flagged for an equivalent env/header-based configuration; never silently exposed.
-No shell expansion, `${...}` expansion, command substitution or implicit env reads.
+No shell expansion, `${...}` expansion or command substitution; only an explicit
+`env:NAME` reference reads the environment.
 
 OAuth fields: `clientName`, `scopes` (array), `clientId` (Value), `clientSecret`
 (Value), `tokenEndpointAuthMethod` (`none`, `client_secret_basic`, `client_secret_post`),
@@ -184,6 +192,8 @@ macOS-first paths (respect explicit `XDG_CONFIG_HOME`, `XDG_DATA_HOME` and
   auth identity and config hash; never tool results.
 - Runtime: private short directory beneath the OS user temp directory — lock/socket;
   verify owner, reject symlinks, directories `0700`, socket/files `0600`.
+  `MCPARCEL_RUNTIME_DIR` overrides it; a non-clean absolute value is cleaned, a
+  relative one is rejected.
 - State: `~/.local/state/mcparcel/daemon.log` — size-bounded, redacted daemon log
   (respects `XDG_STATE_HOME`).
 
@@ -226,7 +236,10 @@ Write temp + fsync + rename with a config lock. Config files hold references, no
 values, and may be hand-written or symlinked from a dotfiles repository: they must
 be regular files owned by the user and not writable by group or other. Runtime and
 state files (socket, lock, daemon log) are stricter: no symlink components,
-directories `0700`, files `0600`.
+directories `0700`, files `0600`. Symlinks in the ancestors of the state and
+runtime directories (`XDG_STATE_HOME`, `MCPARCEL_RUNTIME_DIR`, e.g. macOS `/var`)
+are resolved once; the final directory must be a real directory and pass the
+ownership and `0700` checks.
 The config lock is `.mcparcel.lock` (mode `0600`) inside the resolved configuration
 directory, created by the first writer, so every writer of one configuration takes
 the same lock whatever its state directory; add it to `.gitignore` when the
@@ -249,7 +262,7 @@ valid: selections never reference an ID before the config that defines it exists
 | --- | --- |
 | Server map key | Connection ID plus preserved alias |
 | `description` | `description` |
-| `command`, `args`, `env` | stdio transport; env references become unresolved credential bindings |
+| `command`, `args`, `env` | stdio transport; unbound `${NAME}` becomes an `env:NAME` reference |
 | `baseUrl`, `headers` | HTTP URL/headers with deliberate HTTP policy |
 | `auth: oauth` | `auth.type: oauth` |
 | `clientName` | `auth.clientName` |
@@ -267,7 +280,10 @@ with a password or a credential-named query parameter in arguments, env values,
 headers or the base URL; the value never appears in a report, error or file.
 Block application of an affected connection until resolved;
 `--only <id>...` permits an explicit supported subset, with omitted rows reported.
-A local `--bindings <file>` provides source env-name → local profile/op-ref mappings;
+An unbound `${NAME}` in an env or header value becomes an `env:NAME` reference
+(prefix/suffix kept) with an `environment_reference` warning; protected names and
+OAuth client references stay unresolved and block the connection.
+A local `--bindings <file>` maps source env names to local profile/op-refs instead;
 its format is a JSON map whose values are `{profile, secret}`. A connection must
 map to one profile; conflicting profiles block its import. Never read source
 credential stores, shell profiles or expanded env values to guess mappings.

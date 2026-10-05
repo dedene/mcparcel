@@ -68,7 +68,7 @@ func checkShape(v any, typ reflect.Type, path string) error {
 		if _, ok = obj["secret"]; !ok {
 			return fieldError(path, "secret required")
 		}
-		if text, ok := obj["secret"].(string); ok && !validRef(text) {
+		if text, ok := obj["secret"].(string); ok && !validValueRef(text) {
 			return fieldError(path+".secret", "invalid secret reference")
 		}
 		for _, key := range []string{"prefix", "suffix"} {
@@ -200,6 +200,16 @@ func sortedKeys[V any](m map[string]V) []string {
 	sort.Strings(keys)
 	return keys
 }
+
+// envRefName returns NAME for a valid "env:NAME" reference: the temporary
+// environment credential bridge (personal definitions only; replaced by
+// 1Password profiles in stage 6). Protected names are never valid.
+func envRefName(ref string) (string, bool) {
+	name, ok := strings.CutPrefix(ref, "env:")
+	return name, ok && envName.MatchString(name) && !ProtectedEnv(name)
+}
+
+func validValueRef(ref string) bool { _, ok := envRefName(ref); return ok || validRef(ref) }
 
 func validRef(ref string) bool {
 	if !strings.HasPrefix(ref, "op://") || strings.ContainsAny(ref, "@?#\x00") {

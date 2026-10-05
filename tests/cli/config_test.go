@@ -118,7 +118,7 @@ func TestImportPreviewBlackBox(t *testing.T) {
 			a++
 		}
 	}
-	if len(report.Entries) != 32 || a != 21 || report.Applied || report.Revision == nil || *report.Revision != 0 {
+	if len(report.Entries) != 32 || a != 31 || report.Applied || report.Revision == nil || *report.Revision != 0 {
 		t.Fatal(v.stdout)
 	}
 	for _, p := range []string{r.paths.ConfigDir, r.paths.StateDir, r.paths.RuntimeDir} {
@@ -448,7 +448,7 @@ func TestConfigImportStage4Regression(t *testing.T) {
 			}
 		}
 	}
-	if len(preview.Entries) != 32 || counts["stdio"] != 17 || counts["http"] != 15 || oauth != 10 || refs != 14 || preview.Revision == nil || *preview.Revision != current.Selections.Revision {
+	if len(preview.Entries) != 32 || counts["stdio"] != 17 || counts["http"] != 15 || oauth != 10 || refs != 2 || preview.Revision == nil || *preview.Revision != current.Selections.Revision {
 		t.Fatal(preview, counts, oauth, refs)
 	}
 	blocked := r.run(2, "import_blocked", "import", "mcporter", "--file", raw, "--apply", "--json")

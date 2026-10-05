@@ -49,7 +49,7 @@ also work via `npx mcparcel ...`. No global installation or Homebrew is required
 | `call <mcp>.<tool> [key=value ...] [--args <json>]` | Invoke an enabled, allowed tool |
 | `setup` | Interactive domain and connection editor |
 | `sync [<owner/repo>] [--apply [--accept <mcp>...]]` | Fetch and display update; only `--apply` changes active snapshot; `--accept` unblocks named connections whose execution or auth changed |
-| `import mcporter --file <path> [--bindings <file>] [--only <id>...] [--apply]` | Preview or apply supported imports, with explicit unresolved-field report |
+| `import mcporter --file <path> [--bindings <file>] [--only <id>...] [--apply]` | Preview or apply supported imports, with explicit unresolved-field report; unbound `${NAME}` in env/header values becomes `env:NAME` with an `environment_reference` warning |
 | `local add --file <definition.json>` | Add a connection object containing `id` plus catalog connection fields |
 | `local update <id> --file <definition.json>` | Replace that personal connection atomically; matching ID required |
 | `local remove <id>` | Remove personal definition; never mutate a team catalog |
@@ -62,7 +62,7 @@ also work via `npx mcparcel ...`. No global installation or Homebrew is required
 | `auth refresh <mcp>` | Invalidate credential lease; next call resolves/reconnects as necessary |
 | `auth logout <mcp>` | Remove local OAuth state; report whether provider revocation occurred |
 | `doctor [<mcp>] [--live]` | Local prerequisite checks; only explicit live mode connects to specified MCP |
-| `runtime status` / `runtime restart [--force]` / `runtime stop [--force]` | Inspect, restart or stop the daemon; restart and stop refuse active calls unless forced; stop on a stopped runtime succeeds |
+| `runtime status` / `runtime restart [--force]` / `runtime stop [--force]` | Inspect, restart or stop the daemon; restart and stop refuse active calls unless forced; restart recaptures the login environment and drops pooled sessions, so changed `env:` values apply; stop on a stopped runtime succeeds |
 | `version` / `--help` | Version and English usage |
 
 All commands provide `--json` except interactive `setup`; use selection/config

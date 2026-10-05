@@ -9,6 +9,7 @@ import (
 	"io"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -139,25 +140,41 @@ func (s Snapshot) RuntimeConnection(id string) (string, Connection, error) {
 	return canonical, c, nil
 }
 
-func SecretRefs(c Connection) []string {
+// SecretRefs returns 1Password references; EnvRefs returns the variable names
+// of env: references. Anything with the env: prefix is never a 1Password ref.
+func SecretRefs(c Connection) []string { return valueRefs(c, false) }
+func EnvRefs(c Connection) []string    { return valueRefs(c, true) }
+
+func valueRefs(c Connection, wantEnv bool) []string {
 	set := make(map[string]bool)
-	collect := func(values map[string]Value) {
-		for _, v := range values {
-			if v.Secret != nil {
-				set[v.Secret.Secret] = true
-			}
+	add := func(v Value) {
+		if v.Secret == nil {
+			return
+		}
+		name, env := strings.CutPrefix(v.Secret.Secret, "env:")
+		if env != wantEnv {
+			return
+		}
+		if env {
+			set[name] = true
+		} else {
+			set[v.Secret.Secret] = true
 		}
 	}
 	if c.Transport.Stdio != nil {
-		collect(c.Transport.Stdio.Env)
+		for _, v := range c.Transport.Stdio.Env {
+			add(v)
+		}
 	}
 	if c.Transport.HTTP != nil {
-		collect(c.Transport.HTTP.Headers)
+		for _, v := range c.Transport.HTTP.Headers {
+			add(v)
+		}
 	}
 	if c.Auth != nil {
 		for _, v := range []*Value{c.Auth.ClientID, c.Auth.ClientSecret} {
-			if v != nil && v.Secret != nil {
-				set[v.Secret.Secret] = true
+			if v != nil {
+				add(*v)
 			}
 		}
 	}

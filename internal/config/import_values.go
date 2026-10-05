@@ -8,7 +8,7 @@ import (
 
 var sourceReference = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
 
-func importValue(text, path string, bindings map[string]CredentialBinding) (Value, string, *ImportIssue) {
+func importValue(text, path string, bindings map[string]CredentialBinding, env bool) (Value, string, *ImportIssue) {
 	matches := sourceReference.FindAllStringSubmatchIndex(text, -1)
 	issue := func(code, variable string) (Value, string, *ImportIssue) {
 		return Value{}, "", &ImportIssue{Path: path, Code: code, Variable: variable}
@@ -30,7 +30,10 @@ func importValue(text, path string, bindings map[string]CredentialBinding) (Valu
 	variable := text[m[2]:m[3]]
 	binding, ok := bindings[variable]
 	if !ok {
-		return issue("unresolved_credential", variable)
+		if !env || ProtectedEnv(variable) {
+			return issue("unresolved_credential", variable)
+		}
+		return Value{Secret: &SecretRef{Secret: "env:" + variable, Prefix: prefix, Suffix: suffix}}, "", nil
 	}
 	if !identifier.MatchString(binding.Profile) || !validRef(binding.Secret) {
 		return issue("invalid_binding", variable)

@@ -263,7 +263,7 @@ func convertImportEntry(id string, raw any, bindings map[string]CredentialBindin
 		}
 	}
 	profiles := map[string]bool{}
-	convert := func(s, field string, protected, header bool) Value {
+	convert := func(s, field string, protected, header, env bool) Value {
 		if secretURL(s) {
 			block(field, "secret_in_args")
 			return Value{}
@@ -277,7 +277,7 @@ func convertImportEntry(id string, raw any, bindings map[string]CredentialBindin
 			block(field, "unsupported_expansion")
 			return Value{}
 		}
-		v, p, i := importValue(s, path+field, bindings)
+		v, p, i := importValue(s, path+field, bindings, env)
 		if i != nil {
 			row.Unresolved = append(row.Unresolved, *i)
 			return Value{}
@@ -292,6 +292,11 @@ func convertImportEntry(id string, raw any, bindings map[string]CredentialBindin
 		if err := validateValue(v, path+field, header); err != nil {
 			block(field, "invalid_field")
 			return Value{}
+		}
+		if v.Secret != nil {
+			if name, ok := strings.CutPrefix(v.Secret.Secret, "env:"); ok {
+				row.Warnings = append(row.Warnings, ImportIssue{Path: path + field, Code: "environment_reference", Variable: name})
+			}
 		}
 		return v
 	}
@@ -355,7 +360,7 @@ func convertImportEntry(id string, raw any, bindings map[string]CredentialBindin
 			} else if !envName.MatchString(name) || forbiddenExplicit(name) {
 				block(field, "invalid_field")
 			}
-			v := convert(values[name].(string), field, protected, header)
+			v := convert(values[name].(string), field, protected, header, true)
 			if header && c.Transport.HTTP != nil {
 				c.Transport.HTTP.Headers[name] = v
 			}
@@ -369,7 +374,7 @@ func convertImportEntry(id string, raw any, bindings map[string]CredentialBindin
 	}
 	for _, key := range []string{"oauthClientId", "oauthClientSecret"} {
 		if s, exists := valid[key].(string); exists {
-			v := convert(s, "."+key, key == "oauthClientSecret", false)
+			v := convert(s, "."+key, key == "oauthClientSecret", false, false)
 			if c.Auth != nil {
 				if key == "oauthClientId" {
 					c.Auth.ClientID = &v

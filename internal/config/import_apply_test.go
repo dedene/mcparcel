@@ -86,7 +86,7 @@ func TestApplyImportBlockedIsNoWrite(t *testing.T) {
 			t.Fatal(row)
 		}
 	}
-	if n != 21 || len(blocked.Report.Entries) != 32 {
+	if n != 31 || len(blocked.Report.Entries) != 32 {
 		t.Fatal(n)
 	}
 }
@@ -123,7 +123,7 @@ func TestApplyImportOnly(t *testing.T) {
 			blocked++
 		}
 	}
-	if selected != 2 || omitted != 30 || blocked != 11 {
+	if selected != 2 || omitted != 30 || blocked != 1 {
 		t.Fatal(selected, omitted, blocked)
 	}
 }

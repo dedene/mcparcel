@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -19,7 +20,7 @@ import (
 	runtimeclient "github.com/dedene/mcparcel/internal/runtime"
 )
 
-var binaryA, binaryB, fixtureBinary string
+var binaryA, binaryB, fixtureBinary, buildRoot string
 
 // test-cli: make ci runs this untagged package through go test -race ./...;
 // mcparceltest applies only to the CLI binaries built by TestMain.
@@ -27,13 +28,20 @@ func TestMain(m *testing.M) {
 	if os.Getenv("MCPARCEL_FIXTURE_STDIO") == "1" {
 		os.Exit(runFixture())
 	}
-	root, err := os.MkdirTemp("/private/tmp", "cli-build-")
+	_, source, _, _ := goruntime.Caller(0)
+	repo := filepath.Clean(filepath.Join(filepath.Dir(source), "../.."))
+	// Built binaries live in the gitignored .scratch, not /private/tmp; .scratch itself is shared and kept.
+	scratch := filepath.Join(repo, ".scratch")
+	if err := os.MkdirAll(scratch, 0o700); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	root, err := os.MkdirTemp(scratch, "cli-build-")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	_, source, _, _ := goruntime.Caller(0)
-	repo := filepath.Clean(filepath.Join(filepath.Dir(source), "../.."))
+	buildRoot = root
 	fixtureBinary, _ = os.Executable()
 	binaryA, binaryB = filepath.Join(root, "mcparcel-a"), filepath.Join(root, "mcparcel-b")
 	for i, binary := range []string{binaryA, binaryB} {
@@ -82,6 +90,7 @@ func TestMain(m *testing.M) {
 type rig struct {
 	t        *testing.T
 	root     string
+	bin      string
 	paths    config.Paths
 	env      []string
 	personal config.Personal
@@ -109,17 +118,21 @@ type process struct {
 
 func newRig(t *testing.T) *rig {
 	t.Helper()
+	// Runtime dirs and sockets stay short under /private/tmp (104-byte socket path limit).
 	root, err := os.MkdirTemp("/private/tmp", "cli-test-")
 	if err != nil {
 		t.Fatal(err)
 	}
+	bin, err := os.MkdirTemp(buildRoot, "rig-")
+	if err != nil {
+		t.Fatal(err)
+	}
 	for i, binary := range []string{binaryA, binaryB} {
-		name := []string{"cli-a", "cli-b"}[i]
-		if e := os.Link(binary, root+"/"+name); e != nil {
+		if e := os.Link(binary, filepath.Join(bin, []string{"cli-a", "cli-b"}[i])); e != nil {
 			t.Fatal(e)
 		}
 	}
-	r := &rig{t: t, root: root, pids: map[int]bool{}, personal: config.Personal{SchemaVersion: 1, Connections: map[string]config.Connection{}, CredentialProfiles: map[string]config.ProfileRequirement{}}}
+	r := &rig{t: t, root: root, bin: bin, pids: map[int]bool{}, personal: config.Personal{SchemaVersion: 1, Connections: map[string]config.Connection{}, CredentialProfiles: map[string]config.ProfileRequirement{}}}
 	r.env = []string{"HOME=" + root + "/home", "TMPDIR=" + root + "/tmp", "SHELL=" + root + "/shell", "XDG_CONFIG_HOME=" + root + "/config", "XDG_DATA_HOME=" + root + "/data", "XDG_CACHE_HOME=" + root + "/cache", "XDG_STATE_HOME=" + root + "/state", "MCPARCEL_RUNTIME_DIR=" + root + "/run", "PATH=/usr/bin:/bin:/usr/sbin:/sbin", "LANG=C", "LC_ALL=C", "MCPARCEL_SENTINEL_HOME=" + root + "/sentinel"}
 	r.paths, err = config.ResolvePaths(func(k string) string { return envValue(r.env, k) }, root+"/home", "/private/tmp", os.Getuid())
 	if err != nil {
@@ -193,6 +206,9 @@ func newRig(t *testing.T) *rig {
 		if e = os.RemoveAll(root); e != nil {
 			t.Error(e)
 		}
+		if e = os.RemoveAll(r.bin); e != nil {
+			t.Error(e)
+		}
 	})
 	r.stdio("fixture", "")
 	return r
@@ -263,9 +279,9 @@ func (r *rig) startReader(binary string, input io.Reader, args ...string) *proce
 	r.t.Cleanup(cancel)
 	switch binary {
 	case binaryA:
-		binary = r.root + "/cli-a"
+		binary = r.bin + "/cli-a"
 	case binaryB:
-		binary = r.root + "/cli-b"
+		binary = r.bin + "/cli-b"
 	}
 	p := &process{cmd: exec.CommandContext(ctx, binary, args...), done: make(chan struct{})}
 	p.cmd.Env = append([]string(nil), r.env...)
@@ -424,7 +440,7 @@ func (r *rig) daemonPIDs() []int {
 	var pids []int
 	for _, line := range strings.Split(string(out), "\n") {
 		fields := strings.Fields(line)
-		if len(fields) >= 3 && (fields[1] == r.root+"/cli-a" || fields[1] == r.root+"/cli-b") && fields[2] == "daemon" {
+		if len(fields) >= 3 && (fields[1] == r.bin+"/cli-a" || fields[1] == r.bin+"/cli-b") && fields[2] == "daemon" {
 			var pid int
 			if _, err := fmt.Sscanf(fields[0], "%d", &pid); err == nil {
 				pids = append(pids, pid)
@@ -451,5 +467,30 @@ func (r *rig) waitActive(count int) {
 			return
 		case <-time.After(10 * time.Millisecond):
 		}
+	}
+}
+
+func TestBlackBoxBinariesInScratch(t *testing.T) {
+	_, source, _, _ := goruntime.Caller(0)
+	scratch := filepath.Clean(filepath.Join(filepath.Dir(source), "../../.scratch"))
+	under := func(path string) bool {
+		rel, err := filepath.Rel(scratch, path)
+		return err == nil && rel != ".." && !strings.HasPrefix(rel, "../")
+	}
+	for _, binary := range []string{binaryA, binaryB} {
+		if !under(binary) {
+			t.Fatalf("binary %s outside %s", binary, scratch)
+		}
+	}
+	r := newRig(t)
+	if !under(r.bin) || !strings.HasPrefix(r.root, "/private/tmp/cli-test-") {
+		t.Fatalf("rig bin=%s root=%s", r.bin, r.root)
+	}
+	if _, err := os.Lstat(r.root + "/cli-a"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("binary link under runtime root: %v", err)
+	}
+	r.call("fixture.counter")
+	if len(r.daemonPIDs()) == 0 {
+		t.Fatal("daemonPIDs did not find the daemon started from the scratch link")
 	}
 }

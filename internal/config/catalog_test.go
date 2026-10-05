@@ -128,3 +128,24 @@ func TestLoadFullCatalogFields(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateStateRejectsCatalogEnvRef(t *testing.T) {
+	c, err := config.DecodeCatalog([]byte(`{"schemaVersion":1,"connections":{"exa":{"transport":{"type":"stdio","command":"npx","env":{"EXA_API_KEY":{"secret":"env:EXA_API_KEY"}}}}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	local, err := config.DecodeLocal([]byte(`{"schemaVersion":1,"sources":[{"id":"github-42","repositoryId":42,"owner":"owner","repo":"repo","path":"catalog.json","ref":"main","commit":"0123456789abcdef0123456789abcdef01234567","pinned":false}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	empty := config.Catalog{SchemaVersion: 1, Connections: map[string]config.Connection{}}
+	selections := config.Selections{SchemaVersion: 1, Connections: map[string]config.Selection{}}
+	err = config.ValidateState(config.State{Local: local, Personal: empty, Selections: selections, Catalogs: map[string]config.Catalog{"github-42": c}})
+	if !errors.Is(err, config.ErrConfig) || !strings.Contains(err.Error(), "catalogs.github-42.connections.exa") {
+		t.Fatal(err)
+	}
+	err = config.ValidateState(config.State{Local: config.Local{SchemaVersion: 1}, Personal: c, Selections: selections})
+	if err != nil {
+		t.Fatal(err)
+	}
+}

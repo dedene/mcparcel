@@ -38,7 +38,7 @@ func (v *Value) UnmarshalJSON(data []byte) error {
 		if err = json.Unmarshal(data, &ref); err != nil {
 			return fieldError("value", "invalid secret binding")
 		}
-		if !validRef(ref.Secret) || strings.ContainsRune(ref.Prefix+ref.Suffix, 0) {
+		if !validValueRef(ref.Secret) || strings.ContainsRune(ref.Prefix+ref.Suffix, 0) {
 			return fieldError("value.secret", "invalid secret reference or affix")
 		}
 		next.Secret = &ref
