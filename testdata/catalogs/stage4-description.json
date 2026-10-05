@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "name": "Fixture team",
+  "domains": {
+    "docs": {
+      "label": "Documents"
+    }
+  },
+  "connections": {
+    "paper": {
+      "description": "Revised",
+      "transport": {
+        "type": "http",
+        "url": "https://paper.example.invalid/mcp"
+      }
+    },
+    "retired": {
+      "transport": {
+        "type": "stdio",
+        "command": "fixture-retired"
+      }
+    }
+  }
+}

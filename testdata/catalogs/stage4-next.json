@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "name": "Fixture team",
+  "domains": {
+    "docs": {
+      "label": "Documents"
+    }
+  },
+  "connections": {
+    "paper": {
+      "description": "Original",
+      "transport": {
+        "type": "http",
+        "url": "https://paper-v2.example.invalid/mcp"
+      }
+    },
+    "newcomer": {
+      "transport": {
+        "type": "stdio",
+        "command": "fixture-new"
+      }
+    }
+  }
+}

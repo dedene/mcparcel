@@ -1,0 +1,113 @@
+{
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "connections": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/Selection"
+      },
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^(?:local:[a-z0-9]+(?:-[a-z0-9]+)*|github:[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?/[a-z0-9._-]{1,100}#[a-z0-9]+(?:-[a-z0-9]+)*)$",
+        "not": {
+          "pattern": "^github:[^/]+/\\.{1,2}#"
+        }
+      }
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "revision",
+    "connections"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "Selection": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "inputs": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^[^\\x00]*$"
+          },
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+          }
+        },
+        "credentialProfile": {
+          "type": "string",
+          "pattern": "^(?:[a-z0-9]+(?:-[a-z0-9]+)*)?$"
+        },
+        "disabledTools": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[^\\x00]*$",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "reviewRequired": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "additionalProperties": false
+    },
+    "Identifier": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "EnvName": {
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+    },
+    "HeaderName": {
+      "type": "string",
+      "pattern": "^[!#$%&'*+.^_`|~0-9A-Za-z-]+$"
+    },
+    "Owner": {
+      "type": "string",
+      "pattern": "^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$"
+    },
+    "Repo": {
+      "type": "string",
+      "pattern": "^[a-z0-9._-]{1,100}$",
+      "not": {
+        "enum": [
+          ".",
+          ".."
+        ]
+      }
+    },
+    "Commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "CanonicalID": {
+      "type": "string",
+      "pattern": "^(?:local:[a-z0-9]+(?:-[a-z0-9]+)*|github:[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?/[a-z0-9._-]{1,100}#[a-z0-9]+(?:-[a-z0-9]+)*)$",
+      "not": {
+        "pattern": "^github:[^/]+/\\.{1,2}#"
+      }
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mcparcel.dev/schema/selections.schema.json"
+}

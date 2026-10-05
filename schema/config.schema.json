@@ -1,0 +1,223 @@
+{
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Source"
+      },
+      "uniqueItems": true
+    },
+    "credentialProfiles": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/Profile"
+      },
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+      }
+    },
+    "aliases": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^(?:local:[a-z0-9]+(?:-[a-z0-9]+)*|github:[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?/[a-z0-9._-]{1,100}#[a-z0-9]+(?:-[a-z0-9]+)*)$",
+        "not": {
+          "pattern": "^github:[^/]+/\\.{1,2}#"
+        }
+      },
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+      }
+    },
+    "runtime": {
+      "$ref": "#/$defs/RuntimeDefaults"
+    }
+  },
+  "required": [
+    "schemaVersion"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "ProfileServiceAccount": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "const": "desktop-service-account"
+        },
+        "account": {
+          "type": "string",
+          "pattern": "^[^\\x00]*$",
+          "minLength": 1
+        },
+        "bootstrapRef": {
+          "type": "string",
+          "pattern": "^op://[^/@?#\\x00]*[^/@?#\\x00\t\n\u000b\f\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000][^/@?#\\x00]*/[^/@?#\\x00]*[^/@?#\\x00\t\n\u000b\f\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000][^/@?#\\x00]*/[^/@?#\\x00]*[^/@?#\\x00\t\n\u000b\f\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000][^/@?#\\x00]*(?:/[^/@?#\\x00]*[^/@?#\\x00\t\n\u000b\f\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000][^/@?#\\x00]*)?$",
+          "$comment": "MCParcel also validates semantic URL/path/duration/reference rules."
+        },
+        "sessionDuration": {
+          "type": "string",
+          "pattern": "^[^\\x00]*$",
+          "$comment": "MCParcel also validates semantic URL/path/duration/reference rules.",
+          "default": "24h"
+        }
+      },
+      "required": [
+        "mode",
+        "account",
+        "bootstrapRef"
+      ],
+      "additionalProperties": false
+    },
+    "ProfileDesktop": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "const": "desktop"
+        },
+        "account": {
+          "type": "string",
+          "pattern": "^[^\\x00]*$",
+          "minLength": 1
+        },
+        "sessionDuration": {
+          "type": "string",
+          "pattern": "^[^\\x00]*$",
+          "$comment": "MCParcel also validates semantic URL/path/duration/reference rules.",
+          "default": "24h"
+        }
+      },
+      "required": [
+        "mode",
+        "account"
+      ],
+      "additionalProperties": false
+    },
+    "Profile": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ProfileServiceAccount"
+        },
+        {
+          "$ref": "#/$defs/ProfileDesktop"
+        }
+      ]
+    },
+    "RuntimeDefaults": {
+      "type": "object",
+      "properties": {
+        "keepAlive": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "Source": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^github-[1-9][0-9]*$",
+          "$comment": "MCParcel also validates source ID equality and unique source identities."
+        },
+        "repositoryId": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "owner": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$"
+        },
+        "repo": {
+          "type": "string",
+          "pattern": "^[a-z0-9._-]{1,100}$",
+          "not": {
+            "enum": [
+              ".",
+              ".."
+            ]
+          }
+        },
+        "path": {
+          "type": "string",
+          "pattern": "^[^/\\\\\\x00]+(?:/[^/\\\\\\x00]+)*$",
+          "not": {
+            "pattern": "(^|/)\\.{1,2}(/|$)"
+          },
+          "$comment": "MCParcel also validates semantic URL/path/duration/reference rules."
+        },
+        "ref": {
+          "type": "string",
+          "pattern": "^[^\\x00]*$",
+          "minLength": 1
+        },
+        "commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "pinned": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "repositoryId",
+        "owner",
+        "repo",
+        "path",
+        "ref",
+        "commit",
+        "pinned"
+      ],
+      "additionalProperties": false
+    },
+    "Identifier": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "EnvName": {
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+    },
+    "HeaderName": {
+      "type": "string",
+      "pattern": "^[!#$%&'*+.^_`|~0-9A-Za-z-]+$"
+    },
+    "Owner": {
+      "type": "string",
+      "pattern": "^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$"
+    },
+    "Repo": {
+      "type": "string",
+      "pattern": "^[a-z0-9._-]{1,100}$",
+      "not": {
+        "enum": [
+          ".",
+          ".."
+        ]
+      }
+    },
+    "Commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "CanonicalID": {
+      "type": "string",
+      "pattern": "^(?:local:[a-z0-9]+(?:-[a-z0-9]+)*|github:[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?/[a-z0-9._-]{1,100}#[a-z0-9]+(?:-[a-z0-9]+)*)$",
+      "not": {
+        "pattern": "^github:[^/]+/\\.{1,2}#"
+      }
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mcparcel.dev/schema/config.schema.json"
+}

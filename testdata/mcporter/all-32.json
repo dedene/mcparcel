@@ -1,0 +1,287 @@
+{
+  "mcpServers": {
+    "sequential-thinking": {
+      "description": "Sanitized description for sequential-thinking",
+      "command": "npx",
+      "args": [
+        "-y",
+        "arg-1"
+      ],
+      "env": {
+        "npm_config_loglevel": "literal-value"
+      }
+    },
+    "perplexity": {
+      "description": "Sanitized description for perplexity",
+      "command": "npx",
+      "args": [
+        "-y",
+        "arg-1"
+      ],
+      "env": {
+        "PERPLEXITY_API_KEY": "${PERPLEXITY_API_KEY}",
+        "npm_config_loglevel": "literal-value"
+      }
+    },
+    "context7": {
+      "description": "Sanitized description for context7",
+      "command": "npx",
+      "args": [
+        "-y",
+        "arg-1"
+      ],
+      "env": {
+        "npm_config_loglevel": "literal-value"
+      }
+    },
+    "firecrawl": {
+      "description": "Sanitized description for firecrawl",
+      "command": "npx",
+      "args": [
+        "-y",
+        "arg-1"
+      ],
+      "env": {
+        "FIRECRAWL_API_KEY": "${FIRECRAWL_API_KEY}",
+        "FIRECRAWL_API_URL": "literal-value",
+        "npm_config_loglevel": "literal-value"
+      }
+    },
+    "exa": {
+      "description": "Sanitized description for exa",
+      "command": "npx",
+      "args": [
+        "-y",
+        "arg-1",
+        "arg-2"
+      ],
+      "env": {
+        "EXA_API_KEY": "${EXA_API_KEY}",
+        "npm_config_loglevel": "literal-value"
+      }
+    },
+    "octocode": {
+      "description": "Sanitized description for octocode",
+      "command": "npx",
+      "args": [
+        "-y",
+        "arg-1"
+      ],
+      "env": {
+        "npm_config_loglevel": "literal-value"
+      }
+    },
+    "bugsnag": {
+      "description": "Sanitized description for bugsnag",
+      "command": "npx",
+      "args": [
+        "-y",
+        "arg-1"
+      ],
+      "env": {
+        "BUGSNAG_API_KEY": "${BUGSNAG_API_KEY}",
+        "npm_config_loglevel": "literal-value"
+      }
+    },
+    "paper": {
+      "description": "Sanitized description for paper",
+      "baseUrl": "http://paper.example.invalid/mcp"
+    },
+    "excalidraw": {
+      "description": "Sanitized description for excalidraw",
+      "command": "docker",
+      "args": [
+        "arg-0",
+        "-i",
+        "--rm",
+        "-e",
+        "arg-4",
+        "-e",
+        "arg-6",
+        "arg-7"
+      ]
+    },
+    "notion": {
+      "description": "Sanitized description for notion",
+      "baseUrl": "https://notion.example.invalid/mcp",
+      "auth": "oauth"
+    },
+    "chrome-devtools": {
+      "description": "Sanitized description for chrome-devtools",
+      "command": "npx",
+      "args": [
+        "-y",
+        "arg-1",
+        "--autoConnect"
+      ]
+    },
+    "lighthouse": {
+      "description": "Sanitized description for lighthouse",
+      "command": "npx",
+      "args": [
+        "-y",
+        "arg-1"
+      ]
+    },
+    "context-mode": {
+      "description": "Sanitized description for context-mode",
+      "command": "npx",
+      "args": [
+        "-y",
+        "arg-1"
+      ],
+      "env": {
+        "npm_config_loglevel": "literal-value"
+      }
+    },
+    "figma": {
+      "description": "Sanitized description for figma",
+      "baseUrl": "https://figma.example.invalid/mcp",
+      "auth": "oauth",
+      "clientName": "client-name"
+    },
+    "mobbin": {
+      "description": "Sanitized description for mobbin",
+      "baseUrl": "https://mobbin.example.invalid/mcp",
+      "auth": "oauth"
+    },
+    "uptimerobot": {
+      "description": "Sanitized description for uptimerobot",
+      "baseUrl": "https://uptimerobot.example.invalid/mcp",
+      "auth": "oauth"
+    },
+    "higgsfield": {
+      "description": "Sanitized description for higgsfield",
+      "baseUrl": "https://higgsfield.example.invalid/mcp",
+      "auth": "oauth",
+      "clientName": "client-name",
+      "oauthScope": "scope-0 scope-1 scope-2"
+    },
+    "home-assistant": {
+      "description": "Sanitized description for home-assistant",
+      "baseUrl": "http://home-assistant.example.invalid/mcp"
+    },
+    "proxmox-mcp-plus": {
+      "command": "uvx",
+      "args": [
+        "arg-0"
+      ],
+      "env": {
+        "PROXMOX_HOST": "literal-value",
+        "PROXMOX_USER": "literal-value",
+        "PROXMOX_TOKEN_NAME": "literal-value",
+        "PROXMOX_TOKEN_VALUE": "${PROXMOX_TOKEN}",
+        "PROXMOX_PORT": "literal-value",
+        "PROXMOX_VERIFY_SSL": "literal-value"
+      }
+    },
+    "rails-blocks": {
+      "command": "rails-blocks-mcp",
+      "env": {
+        "RAILS_BLOCKS_CLI": "literal-value",
+        "RAILS_BLOCKS_API_TOKEN": "${RAILS_BLOCKS_API_TOKEN}"
+      }
+    },
+    "glitchtip": {
+      "description": "Sanitized description for glitchtip",
+      "baseUrl": "https://glitchtip.example.invalid/mcp",
+      "auth": "oauth"
+    },
+    "front-mcp": {
+      "description": "Sanitized description for front-mcp",
+      "baseUrl": "https://front-mcp.example.invalid/mcp",
+      "auth": "oauth",
+      "clientName": "client-name",
+      "oauthClientId": "${FRONT_MCP_CLIENT_ID}",
+      "oauthClientSecret": "${FRONT_MCP_CLIENT_SECRET}"
+    },
+    "browserstack": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "arg-1"
+      ],
+      "env": {
+        "BROWSERSTACK_USERNAME": "${BROWSERSTACK_USERNAME}",
+        "BROWSERSTACK_ACCESS_KEY": "${BROWSERSTACK_ACCESS_KEY}"
+      }
+    },
+    "ovh-logs": {
+      "description": "Sanitized description for ovh-logs",
+      "command": "uvx",
+      "args": [
+        "arg-0"
+      ],
+      "env": {
+        "OPENSEARCH_URL": "literal-value",
+        "OPENSEARCH_USERNAME": "${OVH_LOGS_USERNAME}",
+        "OPENSEARCH_PASSWORD": "${OVH_LOGS_PASSWORD}",
+        "OPENSEARCH_DYNAMIC_CONNECTION": "literal-value",
+        "OPENSEARCH_DISABLED_TOOLS": "literal-value",
+        "OPENSEARCH_SETTINGS_ALLOW_WRITE": "literal-value",
+        "OPENSEARCH_SETTINGS_ALLOW_WRITE_CATEGORIES": "literal-value",
+        "OPENSEARCH_MAX_RESPONSE_SIZE": "literal-value",
+        "OPENSEARCH_QUERY_TIMEOUT": "literal-value"
+      }
+    },
+    "blender": {
+      "description": "Sanitized description for blender",
+      "command": "/usr/local/bin/uvx",
+      "args": [
+        "arg-0"
+      ],
+      "env": {
+        "BLENDER_HOST": "literal-value",
+        "BLENDER_PORT": "literal-value",
+        "BLENDER_MCP_DISABLE_TELEMETRY": "literal-value"
+      }
+    },
+    "treg": {
+      "description": "Sanitized description for treg",
+      "baseUrl": "https://treg.example.invalid/mcp",
+      "headers": {
+        "Authorization": "Bearer ${TREG_TOKEN}"
+      }
+    },
+    "maestro": {
+      "description": "Sanitized description for maestro",
+      "command": "maestro",
+      "args": [
+        "arg-0"
+      ],
+      "env": {
+        "JAVA_HOME": "literal-value"
+      }
+    },
+    "neuronwriter": {
+      "description": "Sanitized description for neuronwriter",
+      "baseUrl": "https://neuronwriter.example.invalid/mcp",
+      "auth": "oauth"
+    },
+    "slack": {
+      "description": "Sanitized description for slack",
+      "baseUrl": "https://slack.example.invalid/mcp",
+      "auth": "oauth",
+      "clientName": "client-name",
+      "oauthClientId": "client-id-slack",
+      "oauthTokenEndpointAuthMethod": "none",
+      "oauthRedirectUrl": "http://127.0.0.1:3118/callback"
+    },
+    "se-ranking": {
+      "description": "Sanitized description for se-ranking",
+      "baseUrl": "https://se-ranking.example.invalid/mcp",
+      "headers": {
+        "Authorization": "Bearer ${SE_RANKING_API_TOKEN}"
+      }
+    },
+    "typefully": {
+      "description": "Sanitized description for typefully",
+      "baseUrl": "https://typefully.example.invalid/mcp",
+      "auth": "oauth"
+    },
+    "rubrikit-staging": {
+      "baseUrl": "https://rubrikit-staging.example.invalid/mcp"
+    }
+  },
+  "imports": []
+}

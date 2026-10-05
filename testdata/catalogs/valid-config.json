@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "sources": [
+    {
+      "id": "github-42",
+      "repositoryId": 42,
+      "owner": "fixture-owner",
+      "repo": "fixture.repo",
+      "path": "catalogs/team.json",
+      "ref": "main",
+      "commit": "0123456789abcdef0123456789abcdef01234567",
+      "pinned": false
+    }
+  ],
+  "credentialProfiles": {
+    "team": {
+      "mode": "desktop-service-account",
+      "account": "Fixture",
+      "bootstrapRef": "op://fixture/bootstrap/token",
+      "sessionDuration": "24h"
+    },
+    "desktop": {
+      "mode": "desktop",
+      "account": "Fixture desktop",
+      "sessionDuration": "1h"
+    }
+  },
+  "aliases": {
+    "paper": "local:paper",
+    "hosted": "github:fixture-owner/fixture.repo#hosted"
+  },
+  "runtime": {
+    "keepAlive": true
+  }
+}

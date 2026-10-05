@@ -1,0 +1,598 @@
+{
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1
+    },
+    "name": {
+      "type": "string"
+    },
+    "domains": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/Domain"
+      },
+      "propertyNames": {
+        "allOf": [
+          {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+          },
+          {
+            "not": {
+              "const": "other"
+            }
+          }
+        ]
+      }
+    },
+    "credentialProfiles": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/ProfileRequirement"
+      },
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+      }
+    },
+    "connections": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/Connection"
+      },
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+      }
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "connections"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "InputRef": {
+      "type": "object",
+      "properties": {
+        "input": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+        }
+      },
+      "required": [
+        "input"
+      ],
+      "additionalProperties": false
+    },
+    "SecretRef": {
+      "type": "object",
+      "properties": {
+        "secret": {
+          "type": "string",
+          "pattern": "^op://[^/@?#\\x00]*[^/@?#\\x00\t\n\u000b\f\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000][^/@?#\\x00]*/[^/@?#\\x00]*[^/@?#\\x00\t\n\u000b\f\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000][^/@?#\\x00]*/[^/@?#\\x00]*[^/@?#\\x00\t\n\u000b\f\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000][^/@?#\\x00]*(?:/[^/@?#\\x00]*[^/@?#\\x00\t\n\u000b\f\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000][^/@?#\\x00]*)?$",
+          "$comment": "MCParcel also validates semantic URL/path/duration/reference rules."
+        },
+        "prefix": {
+          "type": "string",
+          "pattern": "^[^\\x00]*$"
+        },
+        "suffix": {
+          "type": "string",
+          "pattern": "^[^\\x00]*$"
+        }
+      },
+      "required": [
+        "secret"
+      ],
+      "additionalProperties": false
+    },
+    "HeaderSecretRef": {
+      "type": "object",
+      "properties": {
+        "secret": {
+          "type": "string",
+          "pattern": "^op://[^/@?#\\x00]*[^/@?#\\x00\t\n\u000b\f\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000][^/@?#\\x00]*/[^/@?#\\x00]*[^/@?#\\x00\t\n\u000b\f\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000][^/@?#\\x00]*/[^/@?#\\x00]*[^/@?#\\x00\t\n\u000b\f\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000][^/@?#\\x00]*(?:/[^/@?#\\x00]*[^/@?#\\x00\t\n\u000b\f\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000][^/@?#\\x00]*)?$",
+          "$comment": "MCParcel also validates semantic URL/path/duration/reference rules."
+        },
+        "prefix": {
+          "type": "string",
+          "pattern": "^[^\\x00\\r\\n]*$"
+        },
+        "suffix": {
+          "type": "string",
+          "pattern": "^[^\\x00\\r\\n]*$"
+        }
+      },
+      "required": [
+        "secret"
+      ],
+      "additionalProperties": false
+    },
+    "Value": {
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^[^\\x00]*$"
+        },
+        {
+          "$ref": "#/$defs/InputRef"
+        },
+        {
+          "$ref": "#/$defs/SecretRef"
+        }
+      ]
+    },
+    "NonsecretValue": {
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^[^\\x00]*$"
+        },
+        {
+          "$ref": "#/$defs/InputRef"
+        }
+      ]
+    },
+    "HeaderValue": {
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^[^\\x00\\r\\n]*$"
+        },
+        {
+          "$ref": "#/$defs/InputRef"
+        },
+        {
+          "$ref": "#/$defs/HeaderSecretRef"
+        }
+      ]
+    },
+    "Domain": {
+      "type": "object",
+      "properties": {
+        "label": {
+          "type": "string",
+          "pattern": "^[^\\x00]*$",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "label"
+      ],
+      "additionalProperties": false
+    },
+    "Input": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "enum": [
+            "string",
+            "path",
+            "url"
+          ]
+        },
+        "description": {
+          "type": "string",
+          "pattern": "^[^\\x00]*$",
+          "minLength": 1
+        },
+        "default": {
+          "type": "string",
+          "pattern": "^[^\\x00]*$",
+          "$comment": "MCParcel also validates semantic URL/path/duration/reference rules."
+        }
+      },
+      "required": [
+        "kind",
+        "description"
+      ],
+      "additionalProperties": false
+    },
+    "ProfileRequirement": {
+      "type": "object",
+      "properties": {
+        "description": {
+          "type": "string"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "ToolPolicy": {
+      "type": "object",
+      "properties": {
+        "allow": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[^\\x00]*$",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "deny": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[^\\x00]*$",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "Lifecycle": {
+      "type": "object",
+      "properties": {
+        "idleTimeout": {
+          "type": "string",
+          "pattern": "^[^\\x00]*$",
+          "minLength": 1,
+          "$comment": "MCParcel also validates semantic URL/path/duration/reference rules."
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "OAuth": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "oauth"
+        },
+        "clientName": {
+          "type": "string",
+          "pattern": "^[^\\x00]*$"
+        },
+        "scopes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[\\x21\\x23-\\x5b\\x5d-\\x7e]+$"
+          }
+        },
+        "clientId": {
+          "$ref": "#/$defs/Value"
+        },
+        "clientSecret": {
+          "$ref": "#/$defs/SecretRef"
+        },
+        "tokenEndpointAuthMethod": {
+          "enum": [
+            "none",
+            "client_secret_basic",
+            "client_secret_post"
+          ]
+        },
+        "redirectUrl": {
+          "type": "string",
+          "pattern": "^[^\\x00]*$",
+          "minLength": 1,
+          "$comment": "MCParcel also validates semantic URL/path/duration/reference rules."
+        },
+        "issuerUrl": {
+          "type": "string",
+          "pattern": "^[^\\x00]*$",
+          "minLength": 1,
+          "$comment": "MCParcel also validates semantic URL/path/duration/reference rules."
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": false
+    },
+    "CommandValue": {
+      "oneOf": [
+        {
+          "allOf": [
+            {
+              "type": "string",
+              "pattern": "^[^\\x00]*$"
+            },
+            {
+              "not": {
+                "pattern": "op://"
+              }
+            }
+          ],
+          "minLength": 1
+        },
+        {
+          "$ref": "#/$defs/InputRef"
+        }
+      ]
+    },
+    "ArgumentValue": {
+      "oneOf": [
+        {
+          "allOf": [
+            {
+              "type": "string",
+              "pattern": "^[^\\x00]*$"
+            },
+            {
+              "not": {
+                "pattern": "op://"
+              }
+            }
+          ]
+        },
+        {
+          "$ref": "#/$defs/InputRef"
+        }
+      ]
+    },
+    "CwdValue": {
+      "oneOf": [
+        {
+          "allOf": [
+            {
+              "type": "string",
+              "pattern": "^[^\\x00]*$"
+            },
+            {
+              "not": {
+                "pattern": "op://"
+              }
+            }
+          ],
+          "$comment": "MCParcel also validates semantic URL/path/duration/reference rules."
+        },
+        {
+          "$ref": "#/$defs/InputRef"
+        }
+      ]
+    },
+    "Stdio": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "stdio"
+        },
+        "command": {
+          "$ref": "#/$defs/CommandValue"
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArgumentValue"
+          }
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/Value"
+          },
+          "propertyNames": {
+            "allOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+              },
+              {
+                "not": {
+                  "enum": [
+                    "OP_SERVICE_ACCOUNT_TOKEN",
+                    "OP_CONNECT_TOKEN",
+                    "BASH_ENV",
+                    "ENV",
+                    "ZDOTDIR"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "pattern": "^(?:DYLD_|LD_)"
+                }
+              }
+            ]
+          }
+        },
+        "cwd": {
+          "$ref": "#/$defs/CwdValue"
+        },
+        "inheritEnv": {
+          "type": "array",
+          "items": {
+            "allOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+              },
+              {
+                "not": {
+                  "enum": [
+                    "OP_SERVICE_ACCOUNT_TOKEN",
+                    "OP_CONNECT_TOKEN",
+                    "GH_TOKEN",
+                    "GITHUB_TOKEN",
+                    "GITHUB_API_TOKEN",
+                    "GIT_ASKPASS",
+                    "SSH_AUTH_SOCK",
+                    "BASH_ENV",
+                    "ENV",
+                    "ZDOTDIR"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "pattern": "^(?:OP_|AWS_|AZURE_|GOOGLE_|DYLD_|LD_)"
+                }
+              }
+            ]
+          }
+        }
+      },
+      "required": [
+        "type",
+        "command"
+      ],
+      "additionalProperties": false
+    },
+    "HTTP": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "http"
+        },
+        "url": {
+          "$ref": "#/$defs/NonsecretValue",
+          "$comment": "MCParcel also validates semantic URL/path/duration/reference rules."
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/HeaderValue"
+          },
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^[!#$%&'*+.^_`|~0-9A-Za-z-]+$"
+          }
+        },
+        "mode": {
+          "enum": [
+            "",
+            "auto",
+            "streamable",
+            "sse"
+          ],
+          "default": "auto"
+        },
+        "allowInsecureHttp": {
+          "enum": [
+            "",
+            "never",
+            "loopback",
+            "explicit"
+          ],
+          "default": "never",
+          "$comment": "MCParcel also validates semantic URL/path/duration/reference rules."
+        }
+      },
+      "required": [
+        "type",
+        "url"
+      ],
+      "additionalProperties": false
+    },
+    "Transport": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/Stdio"
+        },
+        {
+          "$ref": "#/$defs/HTTP"
+        }
+      ]
+    },
+    "Connection": {
+      "type": "object",
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "domains": {
+          "type": "array",
+          "items": {
+            "allOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+              },
+              {
+                "not": {
+                  "const": "other"
+                }
+              }
+            ]
+          }
+        },
+        "inputs": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/Input"
+          },
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+          }
+        },
+        "credentialProfile": {
+          "type": "string",
+          "pattern": "^(?:[a-z0-9]+(?:-[a-z0-9]+)*)?$"
+        },
+        "transport": {
+          "$ref": "#/$defs/Transport"
+        },
+        "auth": {
+          "$ref": "#/$defs/OAuth"
+        },
+        "toolPolicy": {
+          "$ref": "#/$defs/ToolPolicy"
+        },
+        "lifecycle": {
+          "$ref": "#/$defs/Lifecycle"
+        },
+        "callTimeout": {
+          "type": "string",
+          "pattern": "^[^\\x00]*$",
+          "$comment": "MCParcel also validates semantic URL/path/duration/reference rules.",
+          "default": "120s"
+        }
+      },
+      "required": [
+        "transport"
+      ],
+      "additionalProperties": false
+    },
+    "Identifier": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "EnvName": {
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+    },
+    "HeaderName": {
+      "type": "string",
+      "pattern": "^[!#$%&'*+.^_`|~0-9A-Za-z-]+$"
+    },
+    "Owner": {
+      "type": "string",
+      "pattern": "^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$"
+    },
+    "Repo": {
+      "type": "string",
+      "pattern": "^[a-z0-9._-]{1,100}$",
+      "not": {
+        "enum": [
+          ".",
+          ".."
+        ]
+      }
+    },
+    "Commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "CanonicalID": {
+      "type": "string",
+      "pattern": "^(?:local:[a-z0-9]+(?:-[a-z0-9]+)*|github:[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?/[a-z0-9._-]{1,100}#[a-z0-9]+(?:-[a-z0-9]+)*)$",
+      "not": {
+        "pattern": "^github:[^/]+/\\.{1,2}#"
+      }
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mcparcel.dev/schema/catalog.schema.json"
+}

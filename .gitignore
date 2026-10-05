@@ -1,0 +1,15 @@
+# Build output (root-anchored so cmd/mcparcel/ is not ignored)
+/bin/
+/.tools/
+/packaging/npm/dist/
+node_modules/
+*.tgz
+
+# Test and coverage artifacts
+*.test
+*.out
+coverage.*
+
+# Local scratch
+/.scratch/
+.env

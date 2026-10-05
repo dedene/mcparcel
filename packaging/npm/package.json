@@ -1,0 +1,23 @@
+{
+  "name": "mcparcel",
+  "version": "0.0.0-dev.0",
+  "description": "One CLI for every MCP call: team catalogs, personal selections, on-demand credentials.",
+  "license": "MIT",
+  "private": true,
+  "bin": {
+    "mcparcel": "bin/mcparcel.cjs"
+  },
+  "files": [
+    "bin/mcparcel.cjs",
+    "dist/mcparcel"
+  ],
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "engines": {
+    "node": ">=20"
+  }
+}

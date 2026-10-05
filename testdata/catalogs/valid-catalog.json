@@ -1,0 +1,137 @@
+{
+  "schemaVersion": 1,
+  "name": "Fixture catalog",
+  "domains": {
+    "docs": {
+      "label": "Documents"
+    }
+  },
+  "credentialProfiles": {
+    "team": {
+      "description": "Team fixture credentials"
+    }
+  },
+  "connections": {
+    "paper": {
+      "label": "Paper",
+      "description": "Fixture document service",
+      "domains": [
+        "docs"
+      ],
+      "inputs": {
+        "command": {
+          "kind": "string",
+          "description": "Fixture command",
+          "default": "fixture"
+        },
+        "argument": {
+          "kind": "string",
+          "description": "Argument",
+          "default": ""
+        },
+        "workspace": {
+          "kind": "path",
+          "description": "Workspace",
+          "default": "/fictional/workspace"
+        }
+      },
+      "credentialProfile": "team",
+      "transport": {
+        "type": "stdio",
+        "command": {
+          "input": "command"
+        },
+        "args": [
+          {
+            "input": "argument"
+          },
+          "--fixture"
+        ],
+        "cwd": {
+          "input": "workspace"
+        },
+        "env": {
+          "FIXTURE_INPUT": {
+            "input": "argument"
+          },
+          "FIXTURE_TOKEN": {
+            "secret": "op://fixture/item/token"
+          },
+          "FIXTURE_LITERAL": "example"
+        },
+        "inheritEnv": [
+          "PATH"
+        ]
+      },
+      "toolPolicy": {
+        "allow": [
+          "read",
+          "write"
+        ],
+        "deny": [
+          "write"
+        ]
+      },
+      "lifecycle": {
+        "idleTimeout": "5m"
+      },
+      "callTimeout": "30s"
+    },
+    "hosted": {
+      "inputs": {
+        "endpoint": {
+          "kind": "url",
+          "description": "Fixture endpoint",
+          "default": "https://fixture.invalid/mcp"
+        }
+      },
+      "credentialProfile": "team",
+      "transport": {
+        "type": "http",
+        "url": {
+          "input": "endpoint"
+        },
+        "headers": {
+          "X-Fixture-Token": {
+            "secret": "op://fixture/item/token",
+            "prefix": "Bearer "
+          }
+        },
+        "mode": "streamable",
+        "allowInsecureHttp": "never"
+      },
+      "toolPolicy": {
+        "allow": []
+      }
+    },
+    "oauth": {
+      "credentialProfile": "team",
+      "transport": {
+        "type": "http",
+        "url": "https://oauth.invalid/mcp",
+        "headers": {
+          "X-Fixture": "example"
+        },
+        "mode": "sse"
+      },
+      "auth": {
+        "type": "oauth",
+        "clientName": "Fixture OAuth",
+        "scopes": [
+          "read",
+          "write"
+        ],
+        "clientId": "public-fixture",
+        "clientSecret": {
+          "secret": "op://fixture/oauth/client-secret"
+        },
+        "tokenEndpointAuthMethod": "client_secret_basic",
+        "redirectUrl": "http://127.0.0.1/callback",
+        "issuerUrl": "https://issuer.invalid"
+      },
+      "lifecycle": {
+        "idleTimeout": "session"
+      }
+    }
+  }
+}

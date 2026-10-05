@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "revision": 0,
+  "connections": {
+    "local:paper": {
+      "enabled": true,
+      "inputs": {
+        "command": "fixture",
+        "argument": "example",
+        "workspace": "/fictional/workspace"
+      },
+      "credentialProfile": "team",
+      "disabledTools": [
+        "write"
+      ]
+    },
+    "local:hosted": {
+      "enabled": false
+    },
+    "github:fixture-owner/fixture.repo#oauth": {
+      "enabled": true,
+      "reviewRequired": true,
+      "credentialProfile": "desktop"
+    }
+  }
+}

@@ -1,0 +1,114 @@
+package cmd
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/dedene/mcparcel/internal/config"
+	"github.com/dedene/mcparcel/internal/output"
+	runtimeclient "github.com/dedene/mcparcel/internal/runtime"
+)
+
+type RuntimeCmd struct {
+	Stop    RuntimeStopCmd    `cmd:"" help:"Stop the runtime and owned server sessions."`
+	Status  RuntimeStatusCmd  `cmd:"" help:"Inspect the runtime without starting it."`
+	Restart RuntimeRestartCmd `cmd:"" help:"Restart the runtime and reset owned server state."`
+}
+type (
+	RuntimeStatusCmd struct{}
+	RuntimeStopCmd   struct {
+		Force bool `help:"Cancel active calls before stopping."`
+	}
+	RuntimeRestartCmd struct {
+		Force bool `help:"Cancel active calls before restarting."`
+	}
+)
+
+func commandPaths() (config.Paths, error) {
+	return config.ResolvePaths(os.Getenv, os.Getenv("HOME"), "/private/tmp", os.Getuid())
+}
+
+func newRuntimeClient(opts *CommandOptions) (*runtimeclient.Client, error) {
+	paths, err := commandPaths()
+	if err != nil {
+		return nil, err
+	}
+	exe, err := os.Executable()
+	if err == nil {
+		exe, err = filepath.EvalSymlinks(exe)
+	}
+	if err != nil {
+		return nil, output.NewError("runtime_start_failed", nil)
+	}
+	info, err := os.Stat(exe)
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
+		return nil, output.NewError("runtime_start_failed", nil)
+	}
+	return &runtimeclient.Client{Paths: paths, Version: version, Executable: exe, NoInput: opts.NoInput}, nil
+}
+
+func statusText(status runtimeclient.Status) string {
+	var b strings.Builder
+	state := "stopped"
+	if status.Running {
+		state = "running"
+	}
+	fmt.Fprintf(&b, "Runtime: %s\n", state)
+	if status.Running {
+		environment := "login shell"
+		if status.EnvFallback {
+			environment = "caller fallback"
+		}
+		fmt.Fprintf(&b, "PID: %d\nVersion: %s\nActive calls: %d\nPATH: %s\nEnvironment: %s\n", status.PID, status.BinaryVersion, status.ActiveCalls, status.CapturedPath, environment)
+	}
+	fmt.Fprintf(&b, "Socket: %s\nLog: %s\n", status.Socket, status.Log)
+	return b.String()
+}
+
+func (c *RuntimeStatusCmd) Run(ctx context.Context, s *Streams, opts *CommandOptions) error {
+	client, err := newRuntimeClient(opts)
+	if err != nil {
+		return err
+	}
+	data, err := client.Status(ctx)
+	if err != nil {
+		return err
+	}
+	if opts.JSON {
+		return writeSuccess(s, opts, data)
+	}
+	return writeSuccess(s, opts, statusText(data))
+}
+
+func (c *RuntimeRestartCmd) Run(ctx context.Context, s *Streams, opts *CommandOptions) error {
+	client, err := newRuntimeClient(opts)
+	if err != nil {
+		return err
+	}
+	data, err := client.Restart(ctx, c.Force)
+	if err != nil {
+		return err
+	}
+	if opts.JSON {
+		return writeSuccess(s, opts, data)
+	}
+	return writeSuccess(s, opts, "Runtime restarted. Server state was reset.\n"+statusText(data.Status))
+}
+
+func (c *RuntimeStopCmd) Run(ctx context.Context, s *Streams, opts *CommandOptions) error {
+	client, err := newRuntimeClient(opts)
+	if err != nil {
+		return err
+	}
+	data, err := client.Stop(ctx, c.Force)
+	if err != nil {
+		return err
+	}
+	if opts.JSON {
+		return writeSuccess(s, opts, data)
+	}
+	return writeSuccess(s, opts, "Runtime stopped.\n")
+}

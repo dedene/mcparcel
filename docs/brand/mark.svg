@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 32" role="img" aria-label="MCParcel">
+  <g fill="none" stroke="#85934B" stroke-linejoin="miter">
+    <path d="M3 0v29h44V0" stroke-width="6"/>
+    <path d="M12.5 7l6 5.5-6 5.5" stroke-width="4.5"/>
+    <path d="M23 18.75h14" stroke-width="4.5"/>
+  </g>
+</svg>
