@@ -16,7 +16,7 @@ import (
 	"github.com/dedene/mcparcel/internal/output"
 )
 
-var testPrompt = elicit.Prompt{Message: `Allow Computer Use to use "Calculator"?`, RiskLevel: "high", Persist: []string{"session", "always"}}
+var testPrompt = elicit.Prompt{Message: `Allow Computer Use to use "Calculator"?`, RiskLevel: "high", Persist: []string{"session"}}
 
 func TestElicitRequestValidation(t *testing.T) {
 	empty := emptyArgs()
@@ -56,9 +56,11 @@ func TestElicitFrameValidation(t *testing.T) {
 		"overlong details": {frame("elicit", Elicit{testID, elicit.Prompt{Message: "hi", Details: strings.Repeat("a", 501)}}), false},
 		"unknown field":    {body("elicit", `{"promptId":"`+testID+`","message":"hi","extra":1}`), false},
 		"persist forever":  {frame("elicit", Elicit{testID, elicit.Prompt{Message: "hi", Persist: []string{"forever"}}}), false},
+		"persist always":   {frame("elicit", Elicit{testID, elicit.Prompt{Message: "hi", Persist: []string{"session", "always"}}}), false},
 		"elicit small":     {body("elicit", `{"promptId":"`+testID+`","message":"hi"}`), true},
 		"elicit over cap":  {body("elicit", `{"promptId":"`+testID+`","message":"hi"`+pad+`}`), false},
-		"accept always":    {frame("elicit_answer", ElicitAnswer{testID, elicit.Answer{Action: "accept", Persist: "always"}}), true},
+		"accept session":   {frame("elicit_answer", ElicitAnswer{testID, elicit.Answer{Action: "accept", Persist: "session"}}), true},
+		"accept always":    {frame("elicit_answer", ElicitAnswer{testID, elicit.Answer{Action: "accept", Persist: "always"}}), false},
 		"accept content":   {frame("elicit_answer", ElicitAnswer{testID, elicit.Answer{Action: "accept", Content: map[string]any{"name": "x"}}}), true},
 		"action maybe":     {frame("elicit_answer", ElicitAnswer{testID, elicit.Answer{Action: "maybe"}}), false},
 		"decline persist":  {frame("elicit_answer", ElicitAnswer{testID, elicit.Answer{Action: "decline", Persist: "session"}}), false},
@@ -261,7 +263,7 @@ func TestPromptsDropSuperseded(t *testing.T) {
 			firstErr = ctx.Err()
 			return elicit.Answer{Action: "cancel"}
 		}
-		return elicit.Answer{Action: "accept", Persist: "always"}
+		return elicit.Answer{Action: "accept", Persist: "session"}
 	})
 	defer func() { p.stop() }()
 	one, two := testID, strings.Repeat("e", 32)
@@ -281,7 +283,7 @@ func TestClientRelaysElicitation(t *testing.T) {
 	c, _ := service(t, &promptHandler{}, 0)
 	var mu sync.Mutex
 	var seen []elicit.Prompt
-	reply := elicit.Answer{Action: "accept", Persist: "always"}
+	reply := elicit.Answer{Action: "accept", Persist: "session"}
 	c.Prompt = "terminal"
 	c.OnElicit = func(_ context.Context, p elicit.Prompt) elicit.Answer {
 		mu.Lock()
@@ -295,7 +297,7 @@ func TestClientRelaysElicitation(t *testing.T) {
 	}
 	got := resultOf(t, r.Data.Result)
 	mu.Lock()
-	if !got.Prompter || !got.Forms || actions(got) != "accept/always" || len(seen) != 1 || !reflect.DeepEqual(seen[0], testPrompt) {
+	if !got.Prompter || !got.Forms || actions(got) != "accept/session" || len(seen) != 1 || !reflect.DeepEqual(seen[0], testPrompt) {
 		t.Fatalf("%+v %+v", got, seen)
 	}
 	reply = elicit.Answer{Action: "maybe"}

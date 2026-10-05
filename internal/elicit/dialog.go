@@ -7,8 +7,8 @@ import (
 )
 
 // DialogArgs is the argv for the fixed native dialog script: title, text,
-// timeout in seconds, then the buttons (at most three: Decline, Allow once and
-// the strongest persistence offered). Nil for a form or an invalid prompt.
+// timeout in seconds, then the offered buttons (Decline, Allow once, and Allow
+// for this session when offered). Nil for a form or an invalid prompt.
 func DialogArgs(connection string, p Prompt) []string {
 	if p.Valid() != nil || len(p.Fields) > 0 {
 		return nil
@@ -42,10 +42,11 @@ func DialogAnswer(p Prompt, button string) Answer {
 }
 
 func buttons(p Prompt) []int {
-	for i := len(choices) - 1; i > 1; i-- {
+	var out []int
+	for i := range choices {
 		if offered(p, i) {
-			return []int{0, 1, i}
+			out = append(out, i)
 		}
 	}
-	return []int{0, 1}
+	return out
 }

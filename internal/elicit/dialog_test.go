@@ -16,8 +16,6 @@ func TestDialogArgs(t *testing.T) {
 	}{
 		{nil, []string{"Decline", "Allow once"}},
 		{[]string{"session"}, []string{"Decline", "Allow once", "Allow for this session"}},
-		{[]string{"always"}, []string{"Decline", "Allow once", "Always allow"}},
-		{[]string{"session", "always"}, []string{"Decline", "Allow once", "Always allow"}},
 	} {
 		p := approval()
 		p.Persist = tc.persist
@@ -49,30 +47,35 @@ func TestDialogArgs(t *testing.T) {
 	if argv := elicit.DialogArgs("c", form()); argv != nil {
 		t.Fatalf("form argv = %q", argv)
 	}
+	for _, persist := range [][]string{{"always"}, {"session", "always"}} {
+		if argv := elicit.DialogArgs("c", elicit.Prompt{Message: "m", Persist: persist}); argv != nil {
+			t.Fatalf("persist %v argv = %q", persist, argv)
+		}
+	}
 	if argv := elicit.DialogArgs("c", elicit.Prompt{Message: "a\x07"}); argv != nil {
 		t.Fatalf("invalid prompt argv = %q", argv)
 	}
 }
 
 func TestDialogAnswer(t *testing.T) {
-	both := approval()
 	session := approval()
-	session.Persist = []string{"session"}
+	none := approval()
+	none.Persist = nil
 	for _, tc := range []struct {
 		p      elicit.Prompt
 		button string
 		want   elicit.Answer
 	}{
-		{both, "Decline", elicit.Answer{Action: "decline"}},
-		{both, "Allow once", elicit.Answer{Action: "accept"}},
-		{both, "Always allow", elicit.Answer{Action: "accept", Persist: "always"}},
-		{both, "Allow for this session", elicit.Answer{Action: "cancel"}},
+		{session, "Decline", elicit.Answer{Action: "decline"}},
+		{session, "Allow once", elicit.Answer{Action: "accept"}},
 		{session, "Allow for this session", elicit.Answer{Action: "accept", Persist: "session"}},
 		{session, "Always allow", elicit.Answer{Action: "cancel"}},
-		{both, "", elicit.Answer{Action: "cancel"}},
-		{both, "allow once", elicit.Answer{Action: "cancel"}},
-		{both, "Allow once\n", elicit.Answer{Action: "cancel"}},
-		{both, "OK", elicit.Answer{Action: "cancel"}},
+		{none, "Allow once", elicit.Answer{Action: "accept"}},
+		{none, "Allow for this session", elicit.Answer{Action: "cancel"}},
+		{session, "", elicit.Answer{Action: "cancel"}},
+		{session, "allow once", elicit.Answer{Action: "cancel"}},
+		{session, "Allow once\n", elicit.Answer{Action: "cancel"}},
+		{session, "OK", elicit.Answer{Action: "cancel"}},
 		{form(), "Allow once", elicit.Answer{Action: "cancel"}},
 	} {
 		if got := elicit.DialogAnswer(tc.p, tc.button); !reflect.DeepEqual(got, tc.want) {

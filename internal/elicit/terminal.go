@@ -13,6 +13,7 @@ import (
 const maxLine = 4096
 
 // choices numbers the approval options; the terminal and the dialog share it.
+// No lasting approval: a server does not store the persistence it receives.
 var choices = []struct {
 	label  string
 	answer Answer
@@ -20,7 +21,6 @@ var choices = []struct {
 	{"Decline", Answer{Action: "decline"}},
 	{"Allow once", Answer{Action: "accept"}},
 	{"Allow for this session", Answer{Action: "accept", Persist: "session"}},
-	{"Always allow", Answer{Action: "accept", Persist: "always"}},
 }
 
 var (

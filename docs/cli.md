@@ -126,11 +126,16 @@ the terminal's foreground process group, and neither `--json` nor `--no-input` i
 given. The prompt goes to stderr and names the connection from the `call` target
 as the asker, then the server's message, `Note:` (subtitle), `Risk:` and
 `Details:`, each cleaned of control, escape, bidi and blank padding characters and
-capped. Input typed before the prompt appears is discarded. An approval offers
-`1) Decline (default)`, `2) Allow once`, and `3) Allow for this session` and
-`4) Always allow` only when the server offers them; an absent number is invalid
-input, and three invalid entries decline. A form with flat string, number,
-integer, boolean or string-enum fields offers `1) Decline (default) 2) Answer`,
+capped. `Details:` shows the server's parameter list as `Name: value` items
+joined by `; ` (`Details: App: TextEdit`); any other shape is shown as text or
+compact JSON. Input typed before the prompt appears is discarded. An approval
+offers `1) Decline (default)`, `2) Allow once`, and `3) Allow for this session`
+only when the server offers it; an absent number is invalid input, and three
+invalid entries decline. There is no lasting approval, even when the server lists
+`always`: the server does not store an approval it receives (Codex computer use
+only uses it for statistics; the Codex app writes lasting approvals). To approve
+an app for good, approve it in the server's own app. A form with flat string,
+number, integer, boolean or string-enum fields offers `1) Decline (default) 2) Answer`,
 asks each field (a required one up to three times, then declines) and ends with
 `Send? [y/N]`. Anything else (nested objects, other schemas, URL mode) is declined
 without asking. Enter declines; Ctrl-D or the 5-minute prompt timeout cancel the
@@ -143,14 +148,14 @@ variable or setting that accepts for you.
 
 Without a terminal (or with `--json`), `runtime.approvalDialog: true` in
 `config.json` (default `false`) shows the approval as a native macOS dialog
-instead; `--no-input` never does. The dialog has at most three buttons: Decline
-(default), Allow once and the strongest persistence offered. It gives up after
-the same 5 minutes (cancel) and shows approvals only; forms are declined.
+instead; `--no-input` never does. The dialog has the same choices as buttons:
+Decline (default), Allow once, and Allow for this session when offered. It gives
+up after the same 5 minutes (cancel) and shows approvals only; forms are declined.
 
 Residual risk: MCParcel cannot prove that a human answered. An agent whose shell
-tool allocates a pseudo-terminal passes the terminal check and can type `4`
-itself, granting `Always allow` to its own request; a computer-use or
-accessibility agent can click the dialog. The daemon trusts the prompt mode the
+tool allocates a pseudo-terminal passes the terminal check and can type `2` or
+`3` itself, approving its own request; a computer-use or accessibility agent can
+click the dialog. The daemon trusts the prompt mode the
 CLI declares, so any process running as the same user can speak the socket
 protocol and answer its own prompt. That is why the dialog is opt-in.
 `--no-input` binds only a cooperating caller; an agent that must not grant

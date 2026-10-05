@@ -165,8 +165,8 @@ before the SDK validates it, and never accepts without the user's answer:
   `dialog` or absent (decline). Never together with `noInput`, only on `call`.
 - Frames. The daemon sends one `elicit` frame (`promptId`, 32 hex characters, and
   an already cleaned, capped prompt: message, subtitle, `riskLevel`,
-  `tool_params_display` as details, offered `persist`, fields) on the call's socket
-  after `dispatch`; the CLI answers with one `elicit_answer` frame (`promptId`,
+  `tool_params_display` as details, offered `persist` (`session` only), fields)
+  on the call's socket after `dispatch`; the CLI answers with one `elicit_answer` frame (`promptId`,
   `action`, `persist`, `content`). Both are capped at 64 KiB and decoded strictly;
   a prompt that would not fit is declined as unsupported. One prompt at a time per
   socket. An answer whose ID is not the open prompt's (stale, duplicate) is dropped;
@@ -180,6 +180,17 @@ before the SDK validates it, and never accepts without the user's answer:
   of flat string, number, integer, boolean and string-enum fields. A persistence
   offer is shown only for an approval. URL mode, nested or other schemas, and any
   form sent to a dialog are declined as unsupported without asking.
+- Choices. Decline, Allow once, and Allow for this session when the server's
+  `_meta.persist` lists `session`. A listed `always` is dropped: Codex computer
+  use does not store an approval it receives (it reads `_meta.persist` only for
+  its statistics; the Codex app writes lasting approvals), so MCParcel offers no
+  lasting approval; approve an app for good in the server's own app. A prompt or
+  `elicit_answer` frame carrying `always` is invalid and fails closed.
+- Details. A `tool_params_display` array of objects, each with a string
+  `display_name` (else `name`) and a string, number or boolean `value`, becomes
+  `Name: value` items joined by `; `, each cleaned, under the same 500-character
+  cap; an empty array shows nothing. A string is shown as is and any other shape
+  as compact JSON.
 - Lifecycle. While a prompt is open the call deadline is paused. The CLI closes
   its prompt after 5 minutes and answers `cancel`; the daemon's own backstop is
   5 minutes 5 seconds. A CLI disconnect (such as a closed terminal) or Ctrl-C
@@ -429,8 +440,8 @@ use starts the daemon again. No launchd agent is installed.
 without a terminal (or with `--json`, never with `--no-input`) show a server's
 approval request as a native macOS dialog. The CLI runs `/usr/bin/osascript`
 with a fixed script and passes the title, text, timeout and button labels as argv,
-never as script source. Approvals only (forms are declined), at most three
-buttons: Decline (default), Allow once and the strongest persistence offered; it
+never as script source. Approvals only (forms are declined), with buttons
+Decline (default), Allow once, and Allow for this session when offered; it
 gives up after 5 minutes, which answers `cancel`. The CLI reads the setting only
 when it cannot prompt on the terminal; an unreadable config means no dialog.
 

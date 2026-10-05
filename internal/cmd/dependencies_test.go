@@ -27,7 +27,7 @@ import (
 func TestNewTerminalNeedsTerminal(t *testing.T) {
 	state := t.TempDir()
 	for _, name := range []string{"fixture-terminal", "fixture-dialog-answer"} {
-		if err := os.WriteFile(filepath.Join(state, name), []byte("4\nAlways allow\n"), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(state, name), []byte("3\nAllow for this session\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -57,11 +57,11 @@ func TestPollReader(t *testing.T) {
 		t.Fatal("no fd")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	if _, err = w.WriteString("4\n"); err != nil {
+	if _, err = w.WriteString("3\n"); err != nil {
 		t.Fatal(err)
 	}
-	p := elicit.Prompt{Message: "Allow?", Persist: []string{"session", "always"}}
-	if a := elicit.Ask(ctx, &pollReader{ctx: ctx, fd: fd}, io.Discard, "fixture", p); a.Action != "accept" || a.Persist != "always" {
+	p := elicit.Prompt{Message: "Allow?", Persist: []string{"session"}}
+	if a := elicit.Ask(ctx, &pollReader{ctx: ctx, fd: fd}, io.Discard, "fixture", p); a.Action != "accept" || a.Persist != "session" {
 		t.Fatal(a)
 	}
 	done := make(chan error)
@@ -89,7 +89,7 @@ func TestPollReader(t *testing.T) {
 // prompt's reader is created counts.
 func TestPromptReaderDropsTypeAhead(t *testing.T) {
 	master, slave := openPTY(t)
-	if _, err := master.WriteString("4\n"); err != nil {
+	if _, err := master.WriteString("3\n"); err != nil {
 		t.Fatal(err)
 	}
 	fd, ok := fileFD(slave)
@@ -101,11 +101,11 @@ func TestPromptReaderDropsTypeAhead(t *testing.T) {
 	if _, err := master.WriteString("2\n"); err != nil {
 		t.Fatal(err)
 	}
-	p := elicit.Prompt{Message: "Allow?", Persist: []string{"session", "always"}}
+	p := elicit.Prompt{Message: "Allow?", Persist: []string{"session"}}
 	if a := elicit.Ask(ctx, r, io.Discard, "fixture", p); a.Action != "accept" || a.Persist != "" {
 		t.Fatal(a)
 	}
-	if _, err := master.WriteString("4\n"); err != nil {
+	if _, err := master.WriteString("3\n"); err != nil {
 		t.Fatal(err)
 	}
 	if a := elicit.Ask(ctx, promptReader(ctx, -1), io.Discard, "fixture", p); a.Action != "cancel" {
@@ -145,7 +145,7 @@ func openPTY(t *testing.T) (master, slave *os.File) {
 // argv after it, never script source. The command is built, never run.
 func TestDialogCommand(t *testing.T) {
 	text := `"; do shell script "touch /tmp/x" --`
-	argv := elicit.DialogArgs("fixture", elicit.Prompt{Message: text, Persist: []string{"always"}})
+	argv := elicit.DialogArgs("fixture", elicit.Prompt{Message: text, Persist: []string{"session"}})
 	cmd := dialogCommand(context.Background(), argv)
 	if cmd.Path != "/usr/bin/osascript" || cmd.Args[0] != "/usr/bin/osascript" {
 		t.Fatal(cmd.Path, cmd.Args)
@@ -159,7 +159,7 @@ func TestDialogCommand(t *testing.T) {
 			t.Fatal(script)
 		}
 	}
-	if !strings.HasPrefix(argv[0], "MCParcel") || !slices.Equal(argv[3:], []string{"Decline", "Allow once", "Always allow"}) {
+	if !strings.HasPrefix(argv[0], "MCParcel") || !slices.Equal(argv[3:], []string{"Decline", "Allow once", "Allow for this session"}) {
 		t.Fatal(argv)
 	}
 }

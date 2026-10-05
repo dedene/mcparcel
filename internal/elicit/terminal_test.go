@@ -20,9 +20,7 @@ func ask(t *testing.T, p elicit.Prompt, input string) (elicit.Answer, string) {
 }
 
 func TestAskApproval(t *testing.T) {
-	both := approval()
 	session := approval()
-	session.Persist = []string{"session"}
 	none := approval()
 	none.Persist = nil
 	for _, tc := range []struct {
@@ -31,21 +29,19 @@ func TestAskApproval(t *testing.T) {
 		input string
 		want  elicit.Answer
 	}{
-		{"enter", both, "\n", elicit.Answer{Action: "decline"}},
-		{"one", both, "1\n", elicit.Answer{Action: "decline"}},
-		{"crlf", both, "2\r\n", elicit.Answer{Action: "accept"}},
-		{"allow once", both, " 2 \n", elicit.Answer{Action: "accept"}},
-		{"session", both, "3\n", elicit.Answer{Action: "accept", Persist: "session"}},
-		{"always", both, "4\n", elicit.Answer{Action: "accept", Persist: "always"}},
-		{"session only", session, "3\n", elicit.Answer{Action: "accept", Persist: "session"}},
+		{"enter", session, "\n", elicit.Answer{Action: "decline"}},
+		{"one", session, "1\n", elicit.Answer{Action: "decline"}},
+		{"crlf", session, "2\r\n", elicit.Answer{Action: "accept"}},
+		{"allow once", session, " 2 \n", elicit.Answer{Action: "accept"}},
+		{"session", session, "3\n", elicit.Answer{Action: "accept", Persist: "session"}},
 		{"always not offered", session, "4\n4\n4\n", elicit.Answer{Action: "decline"}},
 		{"session not offered", none, "3\n4\n3\n", elicit.Answer{Action: "decline"}},
 		{"invalid then allow", none, "yes\n2\n", elicit.Answer{Action: "accept"}},
-		{"garbage", both, "x\ny\nz\n2\n", elicit.Answer{Action: "decline"}},
-		{"eof", both, "", elicit.Answer{Action: "cancel"}},
-		{"eof without newline", both, "2", elicit.Answer{Action: "cancel"}},
-		{"eof after invalid", both, "x\n", elicit.Answer{Action: "cancel"}},
-		{"long line", both, strings.Repeat("2", 5000) + "\n", elicit.Answer{Action: "cancel"}},
+		{"garbage", session, "x\ny\nz\n2\n", elicit.Answer{Action: "decline"}},
+		{"eof", session, "", elicit.Answer{Action: "cancel"}},
+		{"eof without newline", session, "2", elicit.Answer{Action: "cancel"}},
+		{"eof after invalid", session, "x\n", elicit.Answer{Action: "cancel"}},
+		{"long line", session, strings.Repeat("2", 5000) + "\n", elicit.Answer{Action: "cancel"}},
 	} {
 		got, _ := ask(t, tc.p, tc.input)
 		if !reflect.DeepEqual(got, tc.want) {
@@ -84,7 +80,7 @@ func TestAskRendering(t *testing.T) {
 	for _, want := range []string{
 		"codex-cu asks: Allow Computer Use to use \"Calculator\"?\n",
 		"  Note: Computer use\n", "  Risk: medium\n", "  Details: {\"app\":\"Calculator\"}\n",
-		"1) Decline (default)", "2) Allow once", "3) Allow for this session", "4) Always allow", "Choice [1]: ",
+		"  1) Decline (default)  2) Allow once  3) Allow for this session\nChoice [1]: ",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
@@ -109,6 +105,9 @@ func TestAskRendering(t *testing.T) {
 func TestAskInvalidPromptCancels(t *testing.T) {
 	if a, out := ask(t, elicit.Prompt{Message: "a\x1b[1m"}, "2\n"); a.Action != "cancel" || out != "" {
 		t.Fatalf("answer %+v, output %q", a, out)
+	}
+	if a, out := ask(t, elicit.Prompt{Message: "m", Persist: []string{"session", "always"}}, "3\n"); a.Action != "cancel" || out != "" {
+		t.Fatalf("always: answer %+v, output %q", a, out)
 	}
 }
 

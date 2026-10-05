@@ -146,7 +146,7 @@ func (p Prompt) Valid() error {
 	}
 	switch strings.Join(p.Persist, ",") {
 	case "":
-	case "session", "always", "session,always":
+	case "session":
 		if len(p.Fields) > 0 {
 			return errInvalid
 		}
@@ -194,7 +194,7 @@ func (a Answer) Valid() error {
 	default:
 		return errInvalid
 	}
-	if a.Persist != "" && a.Persist != "session" && a.Persist != "always" || len(a.Content) > maxFields {
+	if a.Persist != "" && a.Persist != "session" || len(a.Content) > maxFields {
 		return errInvalid
 	}
 	for k, v := range a.Content {

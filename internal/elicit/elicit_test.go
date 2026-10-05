@@ -65,7 +65,7 @@ func TestCleanIdempotent(t *testing.T) {
 func approval() elicit.Prompt {
 	return elicit.Prompt{
 		Message: `Allow Computer Use to use "Calculator"?`, Subtitle: "Computer use", RiskLevel: "medium",
-		Details: `{"app":"Calculator"}`, Persist: []string{"session", "always"},
+		Details: `{"app":"Calculator"}`, Persist: []string{"session"},
 	}
 }
 
@@ -80,7 +80,7 @@ func form() elicit.Prompt {
 }
 
 func TestPromptValid(t *testing.T) {
-	for _, p := range []elicit.Prompt{approval(), form(), {Message: "m"}, {Message: "m", Persist: []string{"always"}}} {
+	for _, p := range []elicit.Prompt{approval(), form(), {Message: "m"}} {
 		if err := p.Valid(); err != nil {
 			t.Fatalf("Valid(%+v) = %v", p, err)
 		}
@@ -96,7 +96,8 @@ func TestPromptValid(t *testing.T) {
 		"dirty details":      func(p *elicit.Prompt) { p.Details = "a\nb" },
 		"persist forever":    func(p *elicit.Prompt) { p.Persist = []string{"forever"} },
 		"duplicate persist":  func(p *elicit.Prompt) { p.Persist = []string{"session", "session"} },
-		"persist order":      func(p *elicit.Prompt) { p.Persist = []string{"always", "session"} },
+		"persist always":     func(p *elicit.Prompt) { p.Persist = []string{"always"} },
+		"session and always": func(p *elicit.Prompt) { p.Persist = []string{"session", "always"} },
 		"persist and fields": func(p *elicit.Prompt) { p.Fields = form().Fields },
 	}
 	for name, mutate := range bad {
@@ -175,7 +176,7 @@ func TestPromptSizeFitsFrame(t *testing.T) {
 		if err := p.Valid(); err == nil && len(frame) > elicit.MaxBody {
 			t.Fatalf("%q: valid prompt makes a %d-byte frame", r, len(frame))
 		}
-		small := elicit.Prompt{Message: long(500), Details: long(500), Persist: []string{"session", "always"}}
+		small := elicit.Prompt{Message: long(500), Details: long(500), Persist: []string{"session"}}
 		if err := small.Valid(); err != nil {
 			t.Fatalf("%q: approval at caps rejected: %v", r, err)
 		}
@@ -206,7 +207,6 @@ func TestAnswerValid(t *testing.T) {
 		{Action: "decline"},
 		{Action: "cancel"},
 		{Action: "accept", Persist: "session"},
-		{Action: "accept", Persist: "always"},
 		{Action: "accept", Content: map[string]any{"a": "x", "b": 1.5, "c": true}},
 	}
 	for _, a := range good {
@@ -219,6 +219,7 @@ func TestAnswerValid(t *testing.T) {
 		{Action: "allow"},
 		{Action: "decline", Persist: "session"},
 		{Action: "accept", Persist: "forever"},
+		{Action: "accept", Persist: "always"},
 		{Action: "cancel", Content: map[string]any{"a": "x"}},
 		{Action: "accept", Content: map[string]any{"a": map[string]any{}}},
 		{Action: "accept", Content: map[string]any{"a": nil}},
@@ -254,11 +255,9 @@ func TestCheck(t *testing.T) {
 		}
 	}
 	one := approval()
-	one.Persist = []string{"session"}
 	for _, a := range []elicit.Answer{{Action: "accept"}, {Action: "decline"}, {Action: "cancel"}, {Action: "accept", Persist: "session"}} {
 		ok(one, a)
 	}
-	ok(approval(), elicit.Answer{Action: "accept", Persist: "always"})
 	fail(one, elicit.Answer{Action: "accept", Persist: "always"})
 	fail(elicit.Prompt{Message: "m"}, elicit.Answer{Action: "accept", Persist: "session"})
 	fail(one, elicit.Answer{Action: "accept", Content: map[string]any{"allow": true}})

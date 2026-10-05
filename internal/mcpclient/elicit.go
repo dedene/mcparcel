@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -102,28 +103,71 @@ func promptFrom(params *mcp.ElicitParams, forms bool) (elicit.Prompt, bool) {
 	if v, ok := params.Meta["riskLevel"].(string); ok {
 		p.RiskLevel = elicit.Clean(v, 32)
 	}
-	switch v := params.Meta["tool_params_display"].(type) {
-	case nil:
-	case string:
-		p.Details = elicit.Clean(v, 500)
-	default:
-		if b, e := json.Marshal(v); e == nil {
-			p.Details = elicit.Clean(string(b), 500)
-		}
-	}
+	p.Details = details(params.Meta["tool_params_display"])
 	fields, ok := schemaFields(params.RequestedSchema)
 	if !ok || len(fields) > 0 && !forms {
 		return elicit.Prompt{}, false
 	}
 	p.Fields = fields
 	if persist, ok := params.Meta["persist"].([]any); ok && len(fields) == 0 {
-		for _, v := range []string{"session", "always"} {
-			if slices.Contains(persist, any(v)) {
-				p.Persist = append(p.Persist, v)
-			}
+		// "always" is never offered: the server does not store it.
+		if slices.Contains(persist, any("session")) {
+			p.Persist = []string{"session"}
 		}
 	}
 	return p, p.Valid() == nil
+}
+
+// details renders tool_params_display: "Name: value" entries joined by "; "
+// when each has a string display_name (else name) and a scalar value; a
+// string as is; anything else as compact JSON.
+func details(v any) string {
+	switch v := v.(type) {
+	case nil:
+		return ""
+	case string:
+		return elicit.Clean(v, 500)
+	case []any:
+		if s, ok := entries(v); ok {
+			return elicit.Clean(s, 500)
+		}
+	}
+	b, e := json.Marshal(v)
+	if e != nil {
+		return ""
+	}
+	return elicit.Clean(string(b), 500)
+}
+
+func entries(list []any) (string, bool) {
+	parts := make([]string, 0, len(list))
+	for _, raw := range list {
+		m, ok := raw.(map[string]any)
+		if !ok {
+			return "", false
+		}
+		label, _ := m["display_name"].(string)
+		if label = elicit.Clean(label, 500); label == "" {
+			name, _ := m["name"].(string)
+			label = elicit.Clean(name, 500)
+		}
+		if label == "" {
+			return "", false
+		}
+		var value string
+		switch v := m["value"].(type) {
+		case string:
+			value = v
+		case float64:
+			value = strconv.FormatFloat(v, 'f', -1, 64)
+		case bool:
+			value = strconv.FormatBool(v)
+		default:
+			return "", false
+		}
+		parts = append(parts, label+": "+elicit.Clean(value, 500))
+	}
+	return strings.Join(parts, "; "), true
 }
 
 // schemaFields reads a flat object schema of primitive properties, sorted by

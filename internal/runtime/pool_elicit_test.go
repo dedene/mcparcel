@@ -122,13 +122,13 @@ func TestPoolForwardsElicitation(t *testing.T) {
 	r.opts.Log = func(e string) { events <- e }
 	r.stdio("a", false)
 	r.start()
-	f := &fakePrompter{seen: make(chan elicit.Prompt, 10), answer: answer(elicit.Answer{Action: "accept", Persist: "always"})}
+	f := &fakePrompter{seen: make(chan elicit.Prompt, 10), answer: answer(elicit.Answer{Action: "accept", Persist: "session"})}
 	approval := map[string]string{"message": "Allow Computer Use to use Calculator?", "schema": "none", "persist": "session,always", "risk": "high", "subtitle": "Sub", "display": "click"}
 	res, d := r.elicit(testCtx(t), f.prompter(false), "", approval)
-	if res.Error != nil || len(d.Warnings) != 0 || !strings.Contains(string(d.Result), "action=accept persist=always") {
+	if res.Error != nil || len(d.Warnings) != 0 || !strings.Contains(string(d.Result), "action=accept persist=session") {
 		t.Fatal(string(res.Data), res.Error)
 	}
-	want := elicit.Prompt{Message: "Allow Computer Use to use Calculator?", Subtitle: "Sub", RiskLevel: "high", Details: "click", Persist: []string{"session", "always"}}
+	want := elicit.Prompt{Message: "Allow Computer Use to use Calculator?", Subtitle: "Sub", RiskLevel: "high", Details: "click", Persist: []string{"session"}}
 	if p := <-f.seen; !reflect.DeepEqual(p, want) {
 		t.Fatalf("%#v", p)
 	}

@@ -55,17 +55,17 @@ func TestElicitationAlwaysDeclined(t *testing.T) {
 func TestElicitationForwarded(t *testing.T) {
 	s := stdioSession(t, map[string]string{"MCP_TEST_LEGACY": "1"})
 	var seen []elicit.Prompt
-	answer := elicit.Answer{Action: "accept", Persist: "always"}
+	answer := elicit.Answer{Action: "accept", Persist: "session"}
 	asker := mcpclient.WithPrompter(ctx(t), &mcpclient.Prompter{Forms: true, Ask: func(_ context.Context, p elicit.Prompt) elicit.Answer {
 		seen = append(seen, p)
 		return answer
 	}})
 	approval := map[string]any{"message": "Allow Calculator?", "schema": "none", "persist": "session,always", "risk": "high", "display": "click"}
 	r, e := s.Call(asker, "elicit", approval, nil, nil)
-	if e != nil || resultText(t, r.JSON) != "action=accept persist=always" || r.Declined != "" || r.DeclineReason != "" {
+	if e != nil || resultText(t, r.JSON) != "action=accept persist=session" || r.Declined != "" || r.DeclineReason != "" {
 		t.Fatal(string(r.JSON), r.Declined, e)
 	}
-	want := elicit.Prompt{Message: "Allow Calculator?", RiskLevel: "high", Details: "click", Persist: []string{"session", "always"}}
+	want := elicit.Prompt{Message: "Allow Calculator?", RiskLevel: "high", Details: "click", Persist: []string{"session"}}
 	if len(seen) != 1 || !reflect.DeepEqual(seen[0], want) {
 		t.Fatalf("%#v", seen)
 	}

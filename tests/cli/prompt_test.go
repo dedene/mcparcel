@@ -14,7 +14,7 @@ import (
 const (
 	dirty       = "message=Allow \x1b[31mComputer\x1b[0m Use \x1b]8;;https://evil.example\x07link\x1b]8;;\x07 \u202eto use Calculator?\x1b"
 	clean       = "Allow Computer Use link to use Calculator?"
-	allOptions  = "  1) Decline (default)  2) Allow once  3) Allow for this session  4) Always allow\n"
+	allOptions  = "  1) Decline (default)  2) Allow once  3) Allow for this session\n"
 	youDeclined = "You declined the server's request: " + clean
 	canceled    = "The server's request was canceled without an answer: " + clean
 	unsupported = "The server asked for input MCParcel cannot show, so MCParcel declined it: " + clean
@@ -89,9 +89,9 @@ func (r *rig) warning(v result) (string, string) {
 
 func TestTerminalPromptBlackBox(t *testing.T) {
 	r := promptRig(t)
-	r.typed("fixture-terminal", "4\n")
+	r.typed("fixture-terminal", "3\n")
 	v := r.human("schema=none", "persist=session,always", "risk=high", "display=click (10,20)")
-	if v.stdout != "action=accept persist=always\n" {
+	if v.stdout != "action=accept persist=session\n" {
 		t.Fatalf("%+v", v)
 	}
 	want := "fixture asks: " + clean + "\n  Risk: high\n  Details: click (10,20)\n" + allOptions + "Choice [1]: "
@@ -113,9 +113,9 @@ func TestTerminalPromptBlackBox(t *testing.T) {
 	if v.stdout != "action=cancel\n" || !strings.Contains(v.stderr, canceled+"\n") {
 		t.Fatalf("%+v", v)
 	}
-	r.typed("fixture-terminal", "2\n")
-	v = r.human("schema=none", "persist=session")
-	if v.stdout != "action=accept\n" || !strings.Contains(v.stderr, "  1) Decline (default)  2) Allow once  3) Allow for this session\n") || strings.Contains(v.stderr, "Always allow") || strings.Contains(v.stderr, "declined") {
+	r.typed("fixture-terminal", "4\n4\n2\n")
+	v = r.human("schema=none", "persist=session,always")
+	if v.stdout != "action=accept\n" || !strings.Contains(v.stderr, allOptions) || strings.Count(v.stderr, "Invalid choice.") != 2 || strings.Contains(v.stderr, "Always") || strings.Contains(v.stderr, "declined") {
 		t.Fatalf("%+v", v)
 	}
 	r.typed("fixture-terminal", "2\ny\ny\n")
@@ -127,17 +127,17 @@ func TestTerminalPromptBlackBox(t *testing.T) {
 
 func TestPromptUnavailableBlackBox(t *testing.T) {
 	r := promptRig(t)
-	r.typed("fixture-terminal", "4\n")
-	text, warning := r.warning(r.call("fixture.elicit", dirty, "schema=none", "persist=always"))
+	r.typed("fixture-terminal", "3\n")
+	text, warning := r.warning(r.call("fixture.elicit", dirty, "schema=none", "persist=session"))
 	if text != "action=decline" || !strings.HasPrefix(warning, "The server asked for approval and MCParcel declined it because no prompt was possible: ") {
 		t.Fatal(text, warning)
 	}
-	if v := r.human("schema=none", "persist=always"); v.stdout != "action=accept persist=always\n" {
+	if v := r.human("schema=none", "persist=session"); v.stdout != "action=accept persist=session\n" {
 		t.Fatalf("fixture-terminal consumed by --json: %+v", v)
 	}
 	r.approvalDialog(true)
-	r.typed("fixture-dialog-answer", "Always allow\n")
-	v := r.human("schema=none", "persist=always", "--no-input")
+	r.typed("fixture-dialog-answer", "Allow for this session\n")
+	v := r.human("schema=none", "persist=session", "--no-input")
 	if v.stdout != "action=decline\n" || !strings.Contains(v.stderr, "no prompt was possible") || strings.Contains(v.stderr, "asks:") {
 		t.Fatalf("%+v", v)
 	}
@@ -161,12 +161,13 @@ func TestDialogPromptBlackBox(t *testing.T) {
 		r.typed("fixture-dialog-args", "-")
 		return argv
 	}
+	// The server offers "always"; the dialog never shows it or accepts it.
 	r.typed("fixture-dialog-answer", "Always allow\n")
 	text, warning := r.warning(r.call("fixture.elicit", dirty, "schema=none", "persist=session,always", "risk=high"))
-	if text != "action=accept persist=always" || warning != "" {
+	if text != "action=cancel" || warning != canceled {
 		t.Fatal(text, warning)
 	}
-	if argv := args(); !slices.Equal(argv, []string{"MCParcel: fixture", clean + "\nRisk: high", "300", "Decline", "Allow once", "Always allow"}) {
+	if argv := args(); !slices.Equal(argv, []string{"MCParcel: fixture", clean + "\nRisk: high", "300", "Decline", "Allow once", "Allow for this session"}) {
 		t.Fatalf("%q", argv)
 	}
 	r.typed("fixture-dialog-answer", "Allow for this session\n")
