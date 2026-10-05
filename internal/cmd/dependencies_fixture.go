@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -229,5 +230,36 @@ func newBrowser(paths config.Paths) func(context.Context, string) error {
 		}
 		_, err = f.Write(body)
 		return err
+	}
+}
+
+// newTerminal never reads a terminal: StateDir/fixture-terminal holds the
+// typed lines, read once and shared by the process's prompts. Absent means
+// no terminal.
+func newTerminal(paths config.Paths, _, _ *os.File) func(context.Context) io.Reader {
+	b, err := os.ReadFile(filepath.Join(paths.StateDir, "fixture-terminal"))
+	if err != nil {
+		return nil
+	}
+	typed := strings.NewReader(string(b))
+	return func(context.Context) io.Reader { return typed }
+}
+
+// newDialog never runs osascript: it keeps argv in StateDir/fixture-dialog-args
+// and returns StateDir/fixture-dialog-answer (absent: no button).
+func newDialog(paths config.Paths) func(context.Context, []string) (string, error) {
+	return func(_ context.Context, argv []string) (string, error) {
+		b, err := json.Marshal(argv)
+		if err != nil {
+			return "", err
+		}
+		if err = os.WriteFile(filepath.Join(paths.StateDir, "fixture-dialog-args"), b, 0o600); err != nil {
+			return "", err
+		}
+		b, err = os.ReadFile(filepath.Join(paths.StateDir, "fixture-dialog-answer"))
+		if errors.Is(err, os.ErrNotExist) {
+			return "", nil
+		}
+		return string(b), err
 	}
 }

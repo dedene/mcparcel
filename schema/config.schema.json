@@ -115,6 +115,10 @@
         "keepAlive": {
           "type": "boolean",
           "default": false
+        },
+        "approvalDialog": {
+          "type": "boolean",
+          "default": false
         }
       },
       "required": [],

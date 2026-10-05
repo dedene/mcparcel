@@ -13,6 +13,7 @@ import (
 
 	"github.com/dedene/mcparcel/internal/args"
 	"github.com/dedene/mcparcel/internal/config"
+	"github.com/dedene/mcparcel/internal/elicit"
 	"github.com/dedene/mcparcel/internal/output"
 	runtimeclient "github.com/dedene/mcparcel/internal/runtime"
 )
@@ -22,7 +23,7 @@ type CallCmd struct {
 	Assignments []string `arg:"" optional:"" sep:"none" help:"Arguments as key=value, key:value or key:=json."`
 	Args        string   `name:"args" help:"Arguments as one JSON object."`
 	ArgsFile    string   `name:"args-file" help:"Read a JSON object from a file, or - for stdin."`
-	Timeout     string   `name:"timeout" help:"Positive call duration, including queue and initialization."`
+	Timeout     string   `name:"timeout" help:"Positive call duration, including queue and initialization; time spent answering a prompt is not counted."`
 	Meta        string   `name:"meta" help:"JSON object sent as the call's _meta."`
 }
 
@@ -131,6 +132,7 @@ func (c *CallCmd) Run(ctx context.Context, s *Streams, opts *CommandOptions) err
 	if err != nil {
 		return err
 	}
+	client.Prompt, client.OnElicit = promptFor(ctx, s, opts, client.Paths, connection)
 	response, err := client.Call(ctx, runtimeclient.CallRequest{Connection: connection, Tool: tool, Arguments: raw, Timeout: timeout, Meta: meta})
 	if !opts.JSON {
 		for _, w := range response.Data.Warnings {
@@ -145,6 +147,44 @@ func (c *CallCmd) Run(ctx context.Context, s *Streams, opts *CommandOptions) err
 		return failure
 	}
 	return writeSuccess(s, opts, response.Data)
+}
+
+// promptFor picks where the call's server may ask its user: the terminal,
+// else the opt-in native dialog, else nowhere (the daemon declines).
+func promptFor(ctx context.Context, s *Streams, opts *CommandOptions, paths config.Paths, connection string) (string, func(context.Context, elicit.Prompt) elicit.Answer) {
+	if opts.NoInput {
+		return "", nil
+	}
+	if !opts.JSON {
+		in, _ := s.In.(*os.File)
+		errOut, _ := s.Err.(*os.File)
+		if open := newTerminal(paths, in, errOut); open != nil {
+			return "terminal", func(ctx context.Context, p elicit.Prompt) elicit.Answer {
+				a := elicit.Ask(ctx, open(ctx), s.Err, connection, p)
+				if a.Action == "cancel" {
+					// Ctrl-D, Ctrl-C and the timeout leave the cursor after the prompt.
+					fmt.Fprintln(s.Err)
+				}
+				return a
+			}
+		}
+	}
+	state, err := config.ReadState(ctx, paths)
+	if err != nil || state.Local.Runtime == nil || !state.Local.Runtime.ApprovalDialog {
+		return "", nil
+	}
+	show := newDialog(paths)
+	return "dialog", func(ctx context.Context, p elicit.Prompt) elicit.Answer {
+		argv := elicit.DialogArgs(connection, p)
+		if argv == nil {
+			return elicit.Answer{Action: "cancel"}
+		}
+		button, err := show(ctx, argv)
+		if err != nil {
+			return elicit.Answer{Action: "cancel"}
+		}
+		return elicit.DialogAnswer(p, strings.TrimSuffix(button, "\n"))
+	}
 }
 
 func parsePayload(ctx context.Context, assignments []string, inline string, input io.Reader) (args.Raw, error) {

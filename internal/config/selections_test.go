@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -112,6 +113,24 @@ func TestLocalSourcesAndAliases(t *testing.T) {
 		if _, err := config.DecodeLocal([]byte(strings.Replace(raw, tt.old, tt.replacement, 1))); !errors.Is(err, config.ErrConfig) {
 			t.Fatal(tt, err)
 		}
+	}
+}
+
+func TestLocalRuntimeApprovalDialog(t *testing.T) {
+	local, err := config.DecodeLocal([]byte(`{"schemaVersion":1,"runtime":{"keepAlive":true}}`))
+	if err != nil || local.Runtime == nil || local.Runtime.ApprovalDialog {
+		t.Fatal("default", local.Runtime, err)
+	}
+	local, err = config.DecodeLocal([]byte(`{"schemaVersion":1,"runtime":{"approvalDialog":true}}`))
+	if err != nil || local.Runtime == nil || !local.Runtime.ApprovalDialog {
+		t.Fatal("set", local.Runtime, err)
+	}
+	b, err := json.Marshal(local.Runtime)
+	if err != nil || string(b) != `{"approvalDialog":true}` {
+		t.Fatal(string(b), err)
+	}
+	if _, err = config.DecodeLocal([]byte(`{"schemaVersion":1,"runtime":{"approvalDialog":"yes"}}`)); !errors.Is(err, config.ErrConfig) {
+		t.Fatal("string", err)
 	}
 }
 

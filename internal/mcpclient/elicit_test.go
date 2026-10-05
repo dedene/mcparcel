@@ -1,12 +1,16 @@
 package mcpclient_test
 
 import (
+	"context"
 	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/dedene/mcparcel/internal/elicit"
+	"github.com/dedene/mcparcel/internal/mcpclient"
 )
 
 func resultText(t *testing.T, raw json.RawMessage) string {
@@ -27,7 +31,7 @@ func TestElicitationAlwaysDeclined(t *testing.T) {
 	if e != nil || r.IsError || resultText(t, r.JSON) != "action=decline" {
 		t.Fatal(string(r.JSON), e)
 	}
-	if !strings.HasPrefix(r.Declined, "Allow Computer Use to use [31mCalculator? xxx") || utf8.RuneCountInString(r.Declined) > 303 || strings.IndexFunc(r.Declined, func(c rune) bool { return unicode.IsControl(c) || unicode.Is(unicode.Cf, c) }) >= 0 {
+	if !strings.HasPrefix(r.Declined, "Allow Computer Use to use Calculator? xxx") || r.DeclineReason != "unavailable" || utf8.RuneCountInString(r.Declined) > 300 || strings.IndexFunc(r.Declined, func(c rune) bool { return unicode.IsControl(c) || unicode.Is(unicode.Cf, c) }) >= 0 {
 		t.Fatalf("declined message not sanitized: %q", r.Declined)
 	}
 	r, e = s.Call(ctx(t), "elicit", map[string]any{"message": "Allow?", "then": "error"}, nil, nil)
@@ -45,6 +49,49 @@ func TestElicitationAlwaysDeclined(t *testing.T) {
 	}
 	if r = call(t, s, "counter", nil); r.Declined != "" {
 		t.Fatal("decline leaked into the next call")
+	}
+}
+
+func TestElicitationForwarded(t *testing.T) {
+	s := stdioSession(t, map[string]string{"MCP_TEST_LEGACY": "1"})
+	var seen []elicit.Prompt
+	answer := elicit.Answer{Action: "accept", Persist: "always"}
+	asker := mcpclient.WithPrompter(ctx(t), &mcpclient.Prompter{Forms: true, Ask: func(_ context.Context, p elicit.Prompt) elicit.Answer {
+		seen = append(seen, p)
+		return answer
+	}})
+	approval := map[string]any{"message": "Allow Calculator?", "schema": "none", "persist": "session,always", "risk": "high", "display": "click"}
+	r, e := s.Call(asker, "elicit", approval, nil, nil)
+	if e != nil || resultText(t, r.JSON) != "action=accept persist=always" || r.Declined != "" || r.DeclineReason != "" {
+		t.Fatal(string(r.JSON), r.Declined, e)
+	}
+	want := elicit.Prompt{Message: "Allow Calculator?", RiskLevel: "high", Details: "click", Persist: []string{"session", "always"}}
+	if len(seen) != 1 || !reflect.DeepEqual(seen[0], want) {
+		t.Fatalf("%#v", seen)
+	}
+	answer = elicit.Answer{Action: "accept", Content: map[string]any{"allow": true}}
+	if r, e = s.Call(asker, "elicit", map[string]any{"message": "Allow?"}, nil, nil); e != nil || resultText(t, r.JSON) != `action=accept content={"allow":true}` || r.Declined != "" {
+		t.Fatal(string(r.JSON), e)
+	}
+	for action, reason := range map[string]string{"decline": "declined", "cancel": "canceled"} {
+		answer = elicit.Answer{Action: action}
+		r, e = s.Call(asker, "elicit", approval, nil, nil)
+		if e != nil || resultText(t, r.JSON) != "action="+action || r.Declined != "Allow Calculator?" || r.DeclineReason != reason {
+			t.Fatal(string(r.JSON), r.Declined, r.DeclineReason, e)
+		}
+	}
+	answer = elicit.Answer{Action: "accept", Persist: "always"}
+	if r, e = s.Call(asker, "elicit", map[string]any{"message": "Allow?", "persist": "session", "schema": "none"}, nil, nil); e != nil || resultText(t, r.JSON) != "action=cancel" || r.DeclineReason != "canceled" {
+		t.Fatal(string(r.JSON), e)
+	}
+	before := len(seen)
+	r, e = s.Call(ctx(t), "elicit", approval, nil, nil)
+	if e != nil || resultText(t, r.JSON) != "action=decline" || r.DeclineReason != "unavailable" || len(seen) != before {
+		t.Fatal(string(r.JSON), r.DeclineReason, e)
+	}
+	r, e = s.Call(asker, "elicit", map[string]any{"message": "Allow?", "schema": "nested"}, nil, nil)
+	if e != nil || resultText(t, r.JSON) != "action=decline" || r.DeclineReason != "unsupported" || len(seen) != before {
+		t.Fatal(string(r.JSON), r.DeclineReason, e)
 	}
 }
 

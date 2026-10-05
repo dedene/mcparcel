@@ -212,13 +212,19 @@ func lockFile(t *testing.T, p config.Paths) *os.File {
 
 func service(t *testing.T, h Handler, idle time.Duration) (*Client, <-chan error) {
 	t.Helper()
+	return serviceWith(t, DaemonOptions{Handler: h, IdleTimeout: idle})
+}
+
+// serviceWith serves o's handler, idle and prompt timeouts in-process.
+func serviceWith(t *testing.T, o DaemonOptions) (*Client, <-chan error) {
+	t.Helper()
 	t.Setenv("SHELL", "/bin/sh")
 	p, _ := testutil.IsolatedPaths(t)
 	ctx, c := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	lock := lockFile(t, p)
+	o.Paths, o.Version, o.Lock, o.LoginEnv, o.ShutdownTimeout = p, "dev", lockFile(t, p), map[string]string{"PATH": "/fixture"}, time.Second
 	go func() {
-		done <- Serve(ctx, DaemonOptions{Paths: p, Version: "dev", Lock: lock, LoginEnv: map[string]string{"PATH": "/fixture"}, Handler: h, IdleTimeout: idle, ShutdownTimeout: time.Second})
+		done <- Serve(ctx, o)
 		close(done)
 	}()
 	cl := &Client{Paths: p, Version: "dev"}

@@ -141,9 +141,9 @@ func (p *pool) Handle(ctx context.Context, id string, req Request, before func()
 			}
 		}
 	}
-	deadlineCtx, deadlineCancel := context.WithDeadline(workCtx, started.Add(duration))
+	deadline, deadlineCancel := withCallDeadline(workCtx, time.Until(started.Add(duration)))
 	defer deadlineCancel()
-	workCtx = deadlineCtx
+	workCtx = deadline
 	gate := p.gate(canonical)
 	if workCtx.Err() != nil {
 		return fail(workCtx.Err())
@@ -298,7 +298,7 @@ func (p *pool) Handle(ctx context.Context, id string, req Request, before func()
 			return fail(e)
 		}
 	}
-	result, e := entry.session.Call(callCtx, req.Tool, values, meta, func() error {
+	result, e := entry.session.Call(p.forwardPrompts(callCtx, deadline), req.Tool, values, meta, func() error {
 		current, e := p.opts.Load(p.opts.Paths)
 		if e != nil {
 			return poolError(e, nil, id, false)
@@ -340,8 +340,10 @@ func (p *pool) Handle(ctx context.Context, id string, req Request, before func()
 	resp.Dispatched = result.Dispatched
 	var warnings []output.Error
 	if result.Declined != "" {
-		p.opts.Log("elicitation_declined")
-		warnings = append(warnings, *output.ElicitationDeclined(result.Declined))
+		if result.DeclineReason == "unavailable" || result.DeclineReason == "unsupported" {
+			p.opts.Log("elicitation_declined")
+		}
+		warnings = append(warnings, *output.ElicitationDeclined(result.DeclineReason, result.Declined))
 	}
 	var adapterError *output.Error
 	certain := errors.As(e, &adapterError) && adapterError != nil && (adapterError.Code == "input_required" || adapterError.Code == "tool_error" || adapterError.Code == "elicitation_declined")

@@ -494,3 +494,17 @@ func TestBlackBoxBinariesInScratch(t *testing.T) {
 		t.Fatal("daemonPIDs did not find the daemon started from the scratch link")
 	}
 }
+
+// Positive control for tests/packaging: the tagged binary carries the fixture
+// stand-ins that the untagged release binary must not.
+func TestFixtureBinaryHasStandIns(t *testing.T) {
+	b, err := os.ReadFile(binaryA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, marker := range []string{"fixture-terminal", "fixture-dialog-answer", "fixture-keyring"} {
+		if !bytes.Contains(b, []byte(marker)) {
+			t.Fatal("tagged binary lacks", marker)
+		}
+	}
+}

@@ -19,7 +19,8 @@ type Source struct {
 	Pinned       bool   `json:"pinned"`
 }
 type RuntimeDefaults struct {
-	KeepAlive bool `json:"keepAlive,omitempty"`
+	KeepAlive      bool `json:"keepAlive,omitempty"`
+	ApprovalDialog bool `json:"approvalDialog,omitempty"`
 }
 type Local struct {
 	SchemaVersion      int                `json:"schemaVersion"`

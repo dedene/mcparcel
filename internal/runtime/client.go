@@ -13,6 +13,7 @@ import (
 
 	"github.com/dedene/mcparcel/internal/args"
 	"github.com/dedene/mcparcel/internal/config"
+	"github.com/dedene/mcparcel/internal/elicit"
 	"github.com/dedene/mcparcel/internal/output"
 )
 
@@ -52,6 +53,10 @@ type Client struct {
 	NoInput    bool
 	// OnAuthURL receives the authorization URL of a running login.
 	OnAuthURL func(string)
+	// Prompt ("terminal" or "dialog") and OnElicit let a call's server ask
+	// its user; OnElicit must return once its context ends.
+	Prompt   string
+	OnElicit func(context.Context, elicit.Prompt) elicit.Answer
 }
 type LoginData struct {
 	Connection string `json:"connection"`
@@ -189,6 +194,13 @@ func (c *Client) exchange(ctx context.Context, intent string, r Request, ensure 
 			}
 		}
 	}()
+	var asked *prompts
+	var answers <-chan ElicitAnswer
+	if r.Prompt != "" && c.OnElicit != nil {
+		asked = newPrompts(ctx, c.OnElicit)
+		answers = asked.answers
+		defer func() { asked.stop() }()
+	}
 	cancelCh := ctx.Done()
 	var grace *time.Timer
 	var graceCh <-chan time.Time
@@ -210,6 +222,13 @@ func (c *Client) exchange(ctx context.Context, intent string, r Request, ensure 
 			stop()
 			grace = time.NewTimer(max(0, time.Until(cancelDeadline)))
 			graceCh = grace.C
+			if asked != nil {
+				asked.stop()
+			}
+		case a := <-answers:
+			if cancelCh != nil {
+				_ = writeSocket(ctx, conn, makeWriter(), requestFrame("elicit_answer", id, a))
+			}
 		case <-graceCh:
 			return out, id, output.NewError("canceled", &output.Details{RequestID: id, Dispatched: attempted, Outcome: outcome(attempted)})
 		case v := <-ch:
@@ -221,6 +240,16 @@ func (c *Client) exchange(ctx context.Context, intent string, r Request, ensure 
 			}
 			if v.f.Kind == "dispatch" && r.Method == "call" {
 				out.Dispatched = true
+				continue
+			}
+			if v.f.Kind == "elicit" && asked != nil && out.Dispatched {
+				var e Elicit
+				if decodeBody(v.f.Body, &e) != nil {
+					return c.lost(ctx, id, attempted)
+				}
+				if cancelCh != nil {
+					asked.start(e)
+				}
 				continue
 			}
 			if v.f.Kind == "auth_url" && r.Method == "login" {
@@ -279,6 +308,9 @@ func (c *Client) Tools(ctx context.Context, id string, cached bool) (output.Tool
 
 func (c *Client) Call(ctx context.Context, req CallRequest) (CallResponse, error) {
 	r := Request{Method: "call", Connection: req.Connection, Tool: req.Tool, Arguments: req.Arguments, NoInput: c.NoInput, Meta: req.Meta}
+	if c.OnElicit != nil && !c.NoInput {
+		r.Prompt = c.Prompt
+	}
 	if req.Timeout > 0 {
 		r.Timeout = req.Timeout.String()
 	}

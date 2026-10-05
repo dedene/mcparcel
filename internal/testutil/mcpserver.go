@@ -4,7 +4,9 @@ package testutil
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strconv"
+	"strings"
 	"sync/atomic"
 
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
@@ -93,22 +95,47 @@ func NewFixtureServerWithOptions(opts FixtureOptions) *mcp.Server {
 		r.SetMeta(mcp.Meta{"fixture": "rich"})
 		return r, nil
 	})
-	server.AddTool(&mcp.Tool{Name: "elicit", InputSchema: map[string]any{"type": "object", "properties": map[string]any{"message": map[string]any{"type": "string"}, "then": map[string]any{"type": "string"}}}}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		var in struct{ Message, Then string }
+	str := map[string]any{"type": "string"}
+	server.AddTool(&mcp.Tool{Name: "elicit", InputSchema: map[string]any{"type": "object", "properties": map[string]any{"message": str, "then": str, "schema": str, "persist": str, "risk": str, "subtitle": str, "display": str}}}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		var in struct{ Message, Then, Schema, Persist, Risk, Subtitle, Display string }
 		_ = json.Unmarshal(req.Params.Arguments, &in)
-		res, err := req.Session.Elicit(ctx, &mcp.ElicitParams{Message: in.Message, RequestedSchema: map[string]any{"type": "object", "properties": map[string]any{"allow": map[string]any{"type": "boolean"}}}})
+		props := map[string]any{"allow": map[string]any{"type": "boolean"}}
+		switch in.Schema {
+		case "none":
+			props = map[string]any{}
+		case "nested":
+			props = map[string]any{"inner": map[string]any{"type": "object"}}
+		}
+		meta := mcp.Meta{}
+		for k, v := range map[string]string{"riskLevel": in.Risk, "subtitle": in.Subtitle, "tool_params_display": in.Display} {
+			if v != "" {
+				meta[k] = v
+			}
+		}
+		if in.Persist != "" {
+			meta["persist"] = strings.Split(in.Persist, ",")
+		}
+		res, err := req.Session.Elicit(ctx, &mcp.ElicitParams{Meta: meta, Message: in.Message, RequestedSchema: map[string]any{"type": "object", "properties": props}})
 		if err != nil {
 			return nil, err
 		}
+		text := "action=" + res.Action
+		if p, ok := res.Meta["persist"]; ok {
+			text += fmt.Sprint(" persist=", p)
+		}
+		if len(res.Content) > 0 {
+			b, _ := json.Marshal(res.Content)
+			text += " content=" + string(b)
+		}
 		switch in.Then {
 		case "error":
-			r := textResult("action=" + res.Action)
+			r := textResult(text)
 			r.IsError = true
 			return r, nil
 		case "rpc":
-			return nil, &jsonrpc.Error{Code: jsonrpc.CodeInternalError, Message: "action=" + res.Action}
+			return nil, &jsonrpc.Error{Code: jsonrpc.CodeInternalError, Message: text}
 		}
-		return textResult("action=" + res.Action), nil
+		return textResult(text), nil
 	})
 	server.AddTool(&mcp.Tool{Name: "meta", InputSchema: map[string]any{"type": "object"}}, func(_ context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		r := textResult("meta")

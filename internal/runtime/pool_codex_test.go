@@ -22,7 +22,8 @@ func TestPoolElicitationDeclinedNotice(t *testing.T) {
 	r.stdio("a", false)
 	r.personal.Connections["a"].Transport.Stdio.Env["MCP_POOL_LEGACY"] = config.Literal("1")
 	r.start()
-	notice := "The server asked for approval and MCParcel declined it: Allow Computer Use to use Calculator?"
+	notice := "The server asked for approval and MCParcel declined it because no prompt was possible: Allow Computer Use to use Calculator?"
+	next := "Run the call in a terminal without --no-input or --json, or set runtime.approvalDialog in config.json, or approve it in the server's own app, then retry."
 	for _, then := range []string{"", "error"} {
 		res := r.h.Handle(testCtx(t), testID, elicitRequest(then), func() error { return nil })
 		var d output.CallData
@@ -30,7 +31,7 @@ func TestPoolElicitationDeclinedNotice(t *testing.T) {
 			t.Fatal(string(res.Data), e)
 		}
 		w := d.Warnings[0]
-		if w.Code != "elicitation_declined" || w.Message != notice || w.NextAction != "Approve this in the server's own app, then retry." || !strings.Contains(string(d.Result), "action=decline") {
+		if w.Code != "elicitation_declined" || w.Message != notice || w.NextAction != next || !strings.Contains(string(d.Result), "action=decline") {
 			t.Fatal(string(res.Data))
 		}
 		if then == "error" {

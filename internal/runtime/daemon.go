@@ -15,6 +15,8 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/dedene/mcparcel/internal/config"
+	"github.com/dedene/mcparcel/internal/elicit"
+	"github.com/dedene/mcparcel/internal/mcpclient"
 	"github.com/dedene/mcparcel/internal/output"
 )
 
@@ -28,6 +30,8 @@ type DaemonOptions struct {
 	Log             io.Writer
 	IdleTimeout     time.Duration
 	ShutdownTimeout time.Duration
+	// PromptTimeout backs up the CLI's own elicit.PromptTimeout; set only in tests.
+	PromptTimeout time.Duration
 }
 
 var (
@@ -141,6 +145,9 @@ func Serve(ctx context.Context, opts DaemonOptions) error {
 	}
 	if opts.Log == nil {
 		opts.Log = io.Discard
+	}
+	if opts.PromptTimeout <= 0 {
+		opts.PromptTimeout = elicit.PromptTimeout + 5*time.Second
 	}
 	listenMu.Lock()
 	mask := unix.Umask(0o177)
@@ -316,24 +323,35 @@ func (s *daemonService) serveSocket(conn *net.UnixConn) {
 	s.work.Add(1)
 	s.mu.Unlock()
 	defer func() { s.mu.Lock(); delete(s.requests, key); s.last = time.Now(); s.mu.Unlock(); s.work.Done() }()
+	var prompter *socketPrompter
+	if req.Method == "call" && req.Prompt != "" {
+		prompter = newSocketPrompter(ctx, func(c context.Context, e Elicit) error {
+			return writeSocket(c, conn, g, requestFrame("elicit", id, e))
+		}, s.opts.PromptTimeout)
+	}
 	readerDone := make(chan struct{})
 	var protocol atomic.Bool
 	go func() {
 		defer close(readerDone)
-		f, e := ReadFrame(conn)
-		if e != nil {
-			cancel(context.Canceled)
-			return
-		}
-		if validateControl(f, id) != nil {
-			protocol.Store(true)
-			cancel(ErrInvalidFrame)
-			return
-		}
-		cancel(context.Canceled)
-		_, e = ReadFrame(conn)
-		if e == nil {
-			protocol.Store(true)
+		canceled := false
+		for {
+			f, e := ReadFrame(conn)
+			if e != nil {
+				cancel(context.Canceled)
+				return
+			}
+			var a ElicitAnswer
+			switch {
+			case validateControl(f, id, "cancel") == nil && !canceled:
+				canceled = true
+				cancel(context.Canceled)
+			case validateControl(f, id, "elicit_answer") == nil && prompter != nil && !canceled && decodeBody(f.Body, &a) == nil:
+				prompter.deliver(a)
+			default:
+				protocol.Store(true)
+				cancel(ErrInvalidFrame)
+				return
+			}
 		}
 	}()
 	before := func() error {
@@ -346,6 +364,9 @@ func (s *daemonService) serveSocket(conn *net.UnixConn) {
 		return nil
 	}
 	handleCtx := ctx
+	if prompter != nil {
+		handleCtx = mcpclient.WithPrompter(ctx, &mcpclient.Prompter{Ask: prompter.ask, Forms: req.Prompt == "terminal"})
+	}
 	if req.Method == "login" {
 		handleCtx = withAuthURLSender(ctx, func(u string) error {
 			return writeSocket(ctx, conn, g, requestFrame("auth_url", id, AuthURL{URL: u}))

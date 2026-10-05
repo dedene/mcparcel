@@ -48,7 +48,7 @@ also work via `npx mcparcel ...`. No global installation or Homebrew is required
 | `enable <mcp>...` / `disable <mcp>...` | Atomically update selection for supplied IDs |
 | `tools <mcp> [--cached]` | Live schema discovery or strictly cached schemas |
 | `tools enable <mcp> <tool>...` / `tools disable <mcp> <tool>...` | Change personal tool selection; cannot override source policy |
-| `call <mcp>.<tool> [key=value ...] [--args <json>] [--meta <json>]` | Invoke an enabled, allowed tool |
+| `call <mcp>.<tool> [key=value ...] [--args <json>] [--meta <json>]` | Invoke an enabled, allowed tool; a server's approval request during the call is shown as a prompt (see Approval prompts) |
 | `setup` | Interactive domain and connection editor |
 | `sync [<owner/repo>] [--apply [--accept <mcp>...]]` | Fetch and display update; only `--apply` changes active snapshot; `--accept` unblocks named connections whose execution or auth changed |
 | `import mcporter --file <path> [--bindings <file>] [--only <id>...] [--apply]` | Preview or apply supported imports, with explicit unresolved-field report; unbound `${NAME}` in env/header values becomes `env:NAME` with an `environment_reference` warning |
@@ -69,8 +69,8 @@ also work via `npx mcparcel ...`. No global installation or Homebrew is required
 | `version` / `--help` | Version and English usage |
 
 All commands provide `--json` except interactive `setup`; use selection/config
-commands for equivalent machine actions. `--no-input` never opens UI, browser or
-biometric prompts. Missing necessary input yields an error with the next action.
+commands for equivalent machine actions. `--no-input` never opens UI, browser,
+biometric or approval prompts (terminal or dialog). Missing necessary input yields an error with the next action.
 `setup --no-input`, `setup --json` and setup without a TTY fail without writing.
 
 `local` file updates can also change personal domain assignments; setup details
@@ -106,6 +106,7 @@ before live discovery; unknown names are marked unverified until schemas are loa
 - Coercion needs the tool's schema. `call` uses the cached schema when it matches
   the current config and auth identity, and loads it from the connection otherwise.
 - `--timeout 120s` changes the call deadline. Cancellation/timeout never replays it.
+  Time spent on an open approval prompt does not count toward it.
 - `--meta '<json object>'` sends the object as the `_meta` of that `tools/call`
   (for example Codex's `x-codex-turn-metadata`). At most 64 KiB as sent (compact JSON with `<`, `>` and `&`
   escaped as `<` and so on), one JSON object,
@@ -115,6 +116,46 @@ before live discovery; unknown names are marked unverified until schemas are loa
   `invalid_arguments` (exit 2) before the runtime is contacted. Given once only.
 - `--output-dir <path>` explicitly saves binary result blocks; `--json` always
   preserves complete protocol content, even when exports are requested.
+
+## Approval prompts
+
+A server can ask its user something in the middle of a call through MCP form
+elicitation (Codex computer use: `Allow Computer Use to use "<App>"?`). `call`
+shows that request only when stdin and stderr are both terminals, the CLI is in
+the terminal's foreground process group, and neither `--json` nor `--no-input` is
+given. The prompt goes to stderr and names the connection from the `call` target
+as the asker, then the server's message, `Note:` (subtitle), `Risk:` and
+`Details:`, each cleaned of control, escape, bidi and blank padding characters and
+capped. Input typed before the prompt appears is discarded. An approval offers
+`1) Decline (default)`, `2) Allow once`, and `3) Allow for this session` and
+`4) Always allow` only when the server offers them; an absent number is invalid
+input, and three invalid entries decline. A form with flat string, number,
+integer, boolean or string-enum fields offers `1) Decline (default) 2) Answer`,
+asks each field (a required one up to three times, then declines) and ends with
+`Send? [y/N]`. Anything else (nested objects, other schemas, URL mode) is declined
+without asking. Enter declines; Ctrl-D or the 5-minute prompt timeout cancel the
+request only. Ctrl-C or a closed terminal cancels the whole call, as at any other
+moment: the request is answered `cancel`, the call ends (exit 130 on Ctrl-C), and
+the daemon retires that connection's session, so a stateful server (Codex
+`cua_repl`) loses its REPL state. Time spent on an open prompt does not count toward `--timeout`
+or `callTimeout`. One prompt is open at a time per call. There is no flag,
+variable or setting that accepts for you.
+
+Without a terminal (or with `--json`), `runtime.approvalDialog: true` in
+`config.json` (default `false`) shows the approval as a native macOS dialog
+instead; `--no-input` never does. The dialog has at most three buttons: Decline
+(default), Allow once and the strongest persistence offered. It gives up after
+the same 5 minutes (cancel) and shows approvals only; forms are declined.
+
+Residual risk: MCParcel cannot prove that a human answered. An agent whose shell
+tool allocates a pseudo-terminal passes the terminal check and can type `4`
+itself, granting `Always allow` to its own request; a computer-use or
+accessibility agent can click the dialog. The daemon trusts the prompt mode the
+CLI declares, so any process running as the same user can speak the socket
+protocol and answer its own prompt. That is why the dialog is opt-in.
+`--no-input` binds only a cooperating caller; an agent that must not grant
+approvals needs OS-level isolation (another user, or a sandbox that denies the
+socket).
 
 ## Output and errors
 
@@ -150,11 +191,18 @@ Error codes distinguish `auth_required`, `auth_expired`, `config_required`,
 `runtime_version_mismatch`, `runtime_config_mismatch`, `auth_account_conflict` and
 `outcome_unknown`. `review_required` uses exit 4; `runtime_config_mismatch` exit 6;
 `auth_account_conflict` exit 3.
-`elicitation_declined` (exit 3) means the server asked for consent through MCP
-elicitation and MCParcel declined it, which it always does. Message:
-`The server asked for approval and MCParcel declined it: <server message>`, with
-the server's text reduced to one line of at most 300 characters without control
-characters; next action `Approve this in the server's own app, then retry.` It is
+`elicitation_declined` (exit 3) means the server asked for input through MCP
+elicitation and did not get an accept. The server's text is reduced to one line
+of at most 300 characters without control characters. The wording says why:
+
+| Reason | Message | Next action |
+| --- | --- | --- |
+| No prompt possible | `The server asked for approval and MCParcel declined it because no prompt was possible: <msg>` | `Run the call in a terminal without --no-input or --json, or set runtime.approvalDialog in config.json, or approve it in the server's own app, then retry.` |
+| Cannot be shown | `The server asked for input MCParcel cannot show, so MCParcel declined it: <msg>` | `Approve this in the server's own app, then retry.` |
+| You declined | `You declined the server's request: <msg>` | `Retry the call if you meant to allow it.` |
+| Canceled | `The server's request was canceled without an answer: <msg>` | `Retry the call and answer the prompt.` |
+
+Only the first non-accept of a call is reported; an accept adds nothing. It is
 the error when the server then failed the call with a JSON-RPC error; when the
 server still returned a result, that result is kept and the same notice is a
 `warnings` entry (exit 0, or 5 for `isError`). OAuth adds `auth_failed` (provider refused; only a
@@ -217,7 +265,8 @@ visible focus and plain ASCII fallback are required. No mandatory mouse or color
   or `enable <mcp>`. The diff names every changed field.
 - Expired auth: metadata still available; first protected call initiates auth
   (OAuth: returns `auth_required` pointing at `auth login`).
-- No-input agents: receive an actionable structured auth error instead of a prompt.
+- No-input agents: receive an actionable structured auth error instead of a prompt;
+  a server's approval request is declined with the "no prompt was possible" notice.
 
 ## Deferred surface
 

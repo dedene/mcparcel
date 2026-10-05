@@ -46,7 +46,7 @@ type CLI struct {
 	Config  ConfigCmd  `cmd:"" json:"-" help:"Validate and edit local configuration offline."`
 	Import  ImportCmd  `cmd:"" json:"-" help:"Preview and apply imported definitions offline."`
 	JSON    bool       `help:"Print one JSON envelope."`
-	NoInput bool       `help:"Do not initiate credential authorization."`
+	NoInput bool       `help:"Do not prompt or initiate credential authorization."`
 	Version VersionCmd `cmd:"" help:"Print the mcparcel version."`
 	Spike   SpikeCmd   `cmd:"" hidden:"" help:"Stage-1 feasibility probes. Removed before release."`
 	Tools   ToolsCmd   `cmd:"" help:"List a connection's tools."`

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
@@ -86,4 +86,12 @@ test('a non-executable native file gives one clear English error', () => {
   assert.equal(result.status, 1);
   assert.equal(result.stdout, '');
   assert.match(result.stderr, /^mcparcel: could not start the native executable: /);
+});
+
+// tests/cli checks that the tagged test binary does contain these markers.
+test('the release binary has no fixture stand-ins', () => {
+  const binary = readFileSync(path.join(packageDir, 'dist', 'mcparcel'));
+  for (const marker of ['fixture-terminal', 'fixture-dialog-answer', 'fixture-keyring']) {
+    assert.equal(binary.includes(marker), false, marker);
+  }
 });

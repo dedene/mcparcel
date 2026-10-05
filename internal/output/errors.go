@@ -99,11 +99,24 @@ func SourceNotRegisteredError() *Error {
 	return err
 }
 
-// ElicitationDeclined reports a declined elicitation with the server's
-// sanitized message in a fixed format.
-func ElicitationDeclined(text string) *Error {
+// ElicitationDeclined reports an elicitation that was not accepted, with the
+// server's sanitized message, worded by reason: unavailable (no prompt was
+// possible), unsupported, declined (by the user) or canceled.
+func ElicitationDeclined(reason, text string) *Error {
 	err := NewError("elicitation_declined", nil)
-	err.Message = "The server asked for approval and MCParcel declined it: " + text
+	switch reason {
+	case "unsupported":
+		err.Message = "The server asked for input MCParcel cannot show, so MCParcel declined it: " + text
+	case "declined":
+		err.Message = "You declined the server's request: " + text
+		err.NextAction = "Retry the call if you meant to allow it."
+	case "canceled":
+		err.Message = "The server's request was canceled without an answer: " + text
+		err.NextAction = "Retry the call and answer the prompt."
+	default:
+		err.Message = "The server asked for approval and MCParcel declined it because no prompt was possible: " + text
+		err.NextAction = "Run the call in a terminal without --no-input or --json, or set runtime.approvalDialog in config.json, or approve it in the server's own app, then retry."
+	}
 	return err
 }
 

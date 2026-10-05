@@ -111,8 +111,10 @@ enumerate/stop unrelated containers.
 
 The daemon writes a size-bounded, redacted log to
 `~/.local/state/mcparcel/daemon.log` (startup, captured PATH, connection opens and
-closes, auth session changes, declined elicitations (`elicitation_declined`, event
-name only), errors; never arguments, results, server messages or secret values).
+closes, auth session changes, elicitations (`elicitation_forwarded`, then
+`elicitation_accepted`, `elicitation_declined` or `elicitation_canceled`; an
+automatic decline logs `elicitation_declined` alone; event names only), errors;
+never arguments, results, server messages, prompt text, answers or secret values).
 `runtime status` prints its path.
 
 ## HTTP, tool discovery and results
@@ -152,15 +154,56 @@ not a quiet downgrade of the promise that all 32 remain usable.
 
 Elicitation (stage 8b): every connection advertises form elicitation, because some
 servers (Codex `cua_repl`) refuse to work without it and answer approved apps
-from their own saved approvals. Every `elicitation/create` is answered `decline`,
-before the SDK validates it, in any mode: it is a consent gate and MCParcel has no
-prompt. A decline during a call is reported with the server's message (untrusted:
-one line, control and format characters removed, 300 characters) as
-`elicitation_declined`: a `warnings` entry beside an unchanged result, or the error
-when the server answered the call with a JSON-RPC error. That error keeps the
-pooled session. Only the first decline of a call is reported; one outside a call
-is declined silently. Servers on protocol 2026-07-28 ask through multi-round-trip
-results instead, which still end in `input_required`.
+from their own saved approvals. MCParcel answers `elicitation/create` itself,
+before the SDK validates it, and never accepts without the user's answer:
+
+- Routing. A request is forwarded only to the CLI whose `tools/call` is in flight
+  on that session. Calls are serialized per pooled session, so there is at most
+  one. A request with no call in flight (connect, tool listing, after the call
+  returned) or from a caller that cannot prompt is declined, as before.
+- Who can prompt. The call's `request` frame carries `prompt`: `terminal`,
+  `dialog` or absent (decline). Never together with `noInput`, only on `call`.
+- Frames. The daemon sends one `elicit` frame (`promptId`, 32 hex characters, and
+  an already cleaned, capped prompt: message, subtitle, `riskLevel`,
+  `tool_params_display` as details, offered `persist`, fields) on the call's socket
+  after `dispatch`; the CLI answers with one `elicit_answer` frame (`promptId`,
+  `action`, `persist`, `content`). Both are capped at 64 KiB and decoded strictly;
+  a prompt that would not fit is declined as unsupported. One prompt at a time per
+  socket. An answer whose ID is not the open prompt's (stale, duplicate) is dropped;
+  an answer on a call that cannot prompt is a `protocol_error`. Before relaying,
+  the answer is checked against the prompt it answers (persistence offered, form
+  content types, required fields, enum values); a failed check becomes `cancel`.
+  Accept goes to the server with `content` for a form and `_meta.persist` when the
+  user picked a persistence. Version mismatch fails closed: binaries must match
+  exactly in the handshake, and an older daemon rejects the unknown field.
+- Scope. Approvals (no schema, or an object schema without properties) and forms
+  of flat string, number, integer, boolean and string-enum fields. A persistence
+  offer is shown only for an approval. URL mode, nested or other schemas, and any
+  form sent to a dialog are declined as unsupported without asking.
+- Lifecycle. While a prompt is open the call deadline is paused. The CLI closes
+  its prompt after 5 minutes and answers `cancel`; the daemon's own backstop is
+  5 minutes 5 seconds. A CLI disconnect (such as a closed terminal) or Ctrl-C
+  answers `cancel` and also cancels the call itself, which retires the pooled
+  session. The CLI discards terminal input typed before a prompt opens. Other connections
+  and other callers are not blocked while a prompt is open.
+
+Anything but an accept during a call is reported with the server's message
+(untrusted: one line, control and format characters removed, 300 characters) as
+`elicitation_declined`, worded by reason (no prompt possible, unsupported, declined
+by the user, canceled; see cli.md): a `warnings` entry beside an unchanged result,
+or the error when the server answered the call with a JSON-RPC error. That error
+keeps the pooled session. Only the first non-accept of a call is reported; one
+outside a call is declined silently. Servers on protocol 2026-07-28 ask through
+multi-round-trip results instead, which still end in `input_required`.
+
+Residual risk: the terminal check cannot tell a person from an agent whose shell
+tool allocates a pseudo-terminal and types the answer, and a computer-use or
+accessibility agent can click the native dialog. The daemon trusts the prompt
+mode a client declares, so any same-user process can speak the socket protocol
+and answer its own prompt; `--no-input` binds only cooperating callers. No code
+closes this gap inside the same-user trust boundary; the dialog is opt-in for
+that reason, and an agent that must not grant approvals needs OS-level isolation
+(another user, or a sandbox that denies the socket).
 
 `call --meta` sends a validated JSON object as the `tools/call` `_meta`; the SDK
 adds its own `io.modelcontextprotocol/*` keys under protocol 2026-07-28.
@@ -382,6 +425,15 @@ such. For a machine that stays on, `runtime.keepAlive: true` in `config.json`
 stored, so refreshing continues until the machine restarts; the next `mcparcel`
 use starts the daemon again. No launchd agent is installed.
 
+`runtime.approvalDialog: true` in `config.json` (default `false`) lets a call
+without a terminal (or with `--json`, never with `--no-input`) show a server's
+approval request as a native macOS dialog. The CLI runs `/usr/bin/osascript`
+with a fixed script and passes the title, text, timeout and button labels as argv,
+never as script source. Approvals only (forms are declined), at most three
+buttons: Decline (default), Allow once and the strongest persistence offered; it
+gives up after 5 minutes, which answers `cancel`. The CLI reads the setting only
+when it cannot prompt on the terminal; an unreadable config means no dialog.
+
 The loopback callback serves one self-contained page with no external requests:
 signed in, failed, expired, and state mismatch. Provider-supplied text is
 HTML-escaped. The page carries MCParcel's own identity; catalogs cannot restyle it.
@@ -393,7 +445,8 @@ owned-process graceful shutdown 5s then force. A definition's `startupTimeout`
 replaces the 30s for that connection's connect, initialize and tool listing
 (Codex `cua_repl` wants `120s`). The call deadline still bounds the whole call,
 startup included, so raise `callTimeout` with it; `tools` keeps its 180s request
-deadline. No automatic retry of tool calls.
+deadline. Time spent on an open approval prompt is excluded from the call
+deadline (startup and credential deadlines are not paused). No automatic retry of tool calls.
 Server tool errors preserve the MCP result and use exit 5. A disconnect after
 request dispatch uses `outcome_unknown`; prior-to-dispatch errors use connection
 or auth codes. CLI Ctrl-C cancels its call, not the daemon or other callers.

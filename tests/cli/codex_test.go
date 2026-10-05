@@ -7,7 +7,10 @@ import (
 	"testing"
 )
 
-const declined = "The server asked for approval and MCParcel declined it: Allow Computer Use to use Calculator?"
+const (
+	declined    = "The server asked for approval and MCParcel declined it because no prompt was possible: Allow Computer Use to use Calculator?"
+	declineNext = "Run the call in a terminal without --no-input or --json, or set runtime.approvalDialog in config.json, or approve it in the server's own app, then retry."
+)
 
 func TestElicitationDeclinedBlackBox(t *testing.T) {
 	r := newRig(t)
@@ -24,7 +27,7 @@ func TestElicitationDeclinedBlackBox(t *testing.T) {
 	if e := json.Unmarshal(v.envelope.Data, &d); e != nil || len(d.Warnings) != 1 || !strings.Contains(string(d.Result), "action=decline") {
 		t.Fatal(v.stdout, e)
 	}
-	if w := d.Warnings[0]; w.Code != "elicitation_declined" || w.Message != declined || w.NextAction != "Approve this in the server's own app, then retry." {
+	if w := d.Warnings[0]; w.Code != "elicitation_declined" || w.Message != declined || w.NextAction != declineNext {
 		t.Fatal(v.stdout)
 	}
 	v = r.check(r.run("call", "fixture.elicit", message, "then=rpc", "--json"), 3, "elicitation_declined")
@@ -35,7 +38,7 @@ func TestElicitationDeclinedBlackBox(t *testing.T) {
 		t.Fatal(v.stdout, e)
 	}
 	h := r.run("call", "fixture.elicit", message)
-	if h.code != 0 || h.stdout != "action=decline\n" || !strings.Contains(h.stderr, declined+"\n") || !strings.Contains(h.stderr, "Approve this in the server's own app, then retry.") {
+	if h.code != 0 || h.stdout != "action=decline\n" || !strings.Contains(h.stderr, declined+"\n") || !strings.Contains(h.stderr, declineNext) {
 		t.Fatalf("%+v", h)
 	}
 	log, e := os.ReadFile(r.paths.LogFile)

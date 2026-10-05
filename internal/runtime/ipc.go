@@ -45,13 +45,8 @@ func ReadFrame(r io.Reader) (Frame, error) {
 	if err := d.Decode(&f); err != nil {
 		return Frame{}, ErrInvalidFrame
 	}
-	if len(f.RequestID) != 32 || len(f.Body) == 0 || f.Kind == "" {
+	if !validID(f.RequestID) || len(f.Body) == 0 || f.Kind == "" {
 		return Frame{}, ErrInvalidFrame
-	}
-	for _, c := range f.RequestID {
-		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
-			return Frame{}, ErrInvalidFrame
-		}
 	}
 	obj, err := jsonutil.Decode(f.Body)
 	if err != nil {

@@ -5,11 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"sort"
-	"strings"
 	"sync"
 	"time"
-	"unicode"
-	"unicode/utf8"
 
 	sdkauth "github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
@@ -38,9 +35,11 @@ type (
 		IsError    bool
 		NeedsInput bool
 		Dispatched bool
-		// Declined is the sanitized message of an elicitation declined during
-		// the call, empty when there was none.
-		Declined string
+		// Declined is the sanitized message of the first elicitation not
+		// accepted during the call, empty when there was none; DeclineReason
+		// says why (see output.ElicitationDeclined).
+		Declined      string
+		DeclineReason string
 	}
 	Session interface {
 		Tools(context.Context) ([]json.RawMessage, error)
@@ -58,6 +57,8 @@ type session struct {
 	timeout   time.Duration
 	mu        sync.Mutex
 	declined  string
+	reason    string
+	prompter  *Prompter
 }
 
 func Connect(ctx context.Context, opts ConnectOptions) (Session, error) {
@@ -76,7 +77,7 @@ func Connect(ctx context.Context, opts ConnectOptions) (Session, error) {
 	}
 	s := &session{cleanup: cleanup, status: status, timeout: opts.ConnectTimeout, closeDone: make(chan struct{})}
 	client := mcp.NewClient(&mcp.Implementation{Name: "MCParcel", Version: opts.Version}, &mcp.ClientOptions{Capabilities: &mcp.ClientCapabilities{Elicitation: &mcp.ElicitationCapabilities{Form: &mcp.FormElicitationCapabilities{}}}, MultiRoundTrip: &mcp.MultiRoundTripOptions{Disabled: true}})
-	client.AddReceivingMiddleware(s.declineElicitation)
+	client.AddReceivingMiddleware(s.elicitation)
 	client.AddSendingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
 		return func(c context.Context, method string, req mcp.Request) (mcp.Result, error) {
 			r, e := next(c, method, req)
@@ -109,47 +110,6 @@ func Connect(ctx context.Context, opts ConnectOptions) (Session, error) {
 	}
 	s.sdk = sdk
 	return s, nil
-}
-
-// declineElicitation answers every elicitation/create with decline, before the
-// SDK validates it: a consent request is never accepted on the user's behalf.
-func (s *session) declineElicitation(next mcp.MethodHandler) mcp.MethodHandler {
-	return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
-		if method != "elicitation/create" {
-			return next(ctx, method, req)
-		}
-		text := ""
-		if r, ok := req.(*mcp.ElicitRequest); ok && r.Params != nil {
-			text = r.Params.Message
-		}
-		s.mu.Lock()
-		if s.declined == "" {
-			s.declined = sanitizeMessage(text)
-		}
-		s.mu.Unlock()
-		return &mcp.ElicitResult{Action: "decline"}, nil
-	}
-}
-
-// sanitizeMessage makes untrusted server text one line of at most 300 runes
-// without control or format characters.
-func sanitizeMessage(text string) string {
-	text = strings.Join(strings.Fields(strings.Map(func(r rune) rune {
-		if unicode.IsSpace(r) {
-			return ' '
-		}
-		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || r == utf8.RuneError {
-			return -1
-		}
-		return r
-	}, text)), " ")
-	if text == "" {
-		return "(no message)"
-	}
-	if runes := []rune(text); len(runes) > 300 {
-		text = string(runes[:300]) + "..."
-	}
-	return text
 }
 
 // authFailure finds a sign-in error in err's chain, else the transport's
@@ -261,11 +221,11 @@ func (s *session) Call(ctx context.Context, tool string, arguments, meta map[str
 	}
 	out.Dispatched = true
 	s.mu.Lock()
-	s.declined = ""
+	s.declined, s.reason, s.prompter = "", "", PrompterFrom(ctx)
 	s.mu.Unlock()
 	r, err := s.sdk.CallTool(auth.WithToolCall(ctx), &mcp.CallToolParams{Meta: meta, Name: tool, Arguments: arguments})
 	s.mu.Lock()
-	out.Declined = s.declined
+	out.Declined, out.DeclineReason, s.prompter = s.declined, s.reason, nil
 	s.mu.Unlock()
 	if err != nil {
 		if failure := authFailure(err, s.status); failure != nil {
@@ -276,7 +236,7 @@ func (s *session) Call(ctx context.Context, tool string, arguments, meta map[str
 		}
 		var wire *jsonrpc.Error
 		if out.Declined != "" && errors.As(err, &wire) {
-			return out, output.ElicitationDeclined(out.Declined)
+			return out, output.ElicitationDeclined(out.DeclineReason, out.Declined)
 		}
 		// SDK WireErrors can also originate locally, without a response-origin marker.
 		return out, contextError(err, true)

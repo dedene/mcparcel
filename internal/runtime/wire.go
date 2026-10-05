@@ -8,6 +8,7 @@ import (
 
 	"github.com/dedene/mcparcel/internal/args"
 	"github.com/dedene/mcparcel/internal/config"
+	"github.com/dedene/mcparcel/internal/elicit"
 	"github.com/dedene/mcparcel/internal/output"
 )
 
@@ -49,11 +50,26 @@ type Request struct {
 	Force      bool     `json:"force,omitempty"`
 	// Meta is a call's _meta object, validated by args.ParseMeta.
 	Meta json.RawMessage `json:"meta,omitempty"`
+	// Prompt is how a call's user can answer an elicitation: "terminal",
+	// "dialog" (no forms), or "" when nobody can.
+	Prompt string `json:"prompt,omitempty"`
 }
 
 // AuthURL streams a sign-in's authorization URL to the waiting CLI.
 type AuthURL struct {
 	URL string `json:"url"`
+}
+
+// Elicit forwards an elicitation of the in-flight call to its CLI.
+type Elicit struct {
+	PromptID string `json:"promptId"`
+	elicit.Prompt
+}
+
+// ElicitAnswer is the CLI's answer to the Elicit with the same PromptID.
+type ElicitAnswer struct {
+	PromptID string `json:"promptId"`
+	elicit.Answer
 }
 type Response struct {
 	Data       json.RawMessage `json:"data"`
@@ -72,6 +88,9 @@ func validateRequest(intent string, r Request) error {
 		return ErrInvalidFrame
 	}
 	if r.Meta != nil && r.Method != "call" {
+		return ErrInvalidFrame
+	}
+	if r.Prompt != "" && (r.Method != "call" || r.NoInput || r.Prompt != "terminal" && r.Prompt != "dialog") {
 		return ErrInvalidFrame
 	}
 	if (intent == "restart" || intent == "stop") && r.Method != intent || intent == "status" && r.Method != "status" || intent == "work" && r.Method != "tools" && r.Method != "call" && r.Method != "login" && r.Method != "logout" {
@@ -114,8 +133,8 @@ func validateRequest(intent string, r Request) error {
 	return nil
 }
 
-func validateControl(f Frame, id string) error {
-	if f.ProtocolVersion != ProtocolVersion || f.RequestID != id || f.Kind != "cancel" {
+func validateControl(f Frame, id, kind string) error {
+	if f.ProtocolVersion != ProtocolVersion || f.RequestID != id || f.Kind != kind {
 		return ErrInvalidFrame
 	}
 	return nil
@@ -151,10 +170,35 @@ func validateBody(f Frame) error {
 			return ErrInvalidFrame
 		}
 		return nil
+	case "elicit":
+		var v Elicit
+		if len(f.Body) > elicit.MaxBody || decodeBody(f.Body, &v) != nil || !validID(v.PromptID) || v.Valid() != nil {
+			return ErrInvalidFrame
+		}
+		return nil
+	case "elicit_answer":
+		var v ElicitAnswer
+		if len(f.Body) > elicit.MaxBody || decodeBody(f.Body, &v) != nil || !validID(v.PromptID) || v.Valid() != nil {
+			return ErrInvalidFrame
+		}
+		return nil
 	case "dispatch", "cancel":
 		var v struct{}
 		return decodeBody(f.Body, &v)
 	default:
 		return ErrInvalidFrame
 	}
+}
+
+// validID reports whether id is 32 lowercase hex characters.
+func validID(id string) bool {
+	if len(id) != 32 {
+		return false
+	}
+	for _, c := range id {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
 }
