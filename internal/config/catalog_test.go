@@ -10,7 +10,7 @@ import (
 	"github.com/dedene/mcparcel/internal/testutil"
 )
 
-const fullCatalog = `{"schemaVersion":1,"name":"Team","domains":{"dev":{"label":"Development"}},"credentialProfiles":{"team":{"description":"Team credentials"}},"connections":{"paper":{"label":"Paper","description":"Documents","domains":["dev"],"inputs":{"host":{"kind":"url","description":"Endpoint","default":"https://fixture.invalid"}},"credentialProfile":"team","transport":{"type":"http","url":{"input":"host"},"headers":{"X-Token":{"secret":"op://v/i/f"}},"mode":"sse"},"auth":{"type":"oauth","clientName":"Paper","scopes":["read","write"],"clientId":"public-client","clientSecret":{"secret":"op://v/i/secret"},"tokenEndpointAuthMethod":"client_secret_post","redirectUrl":"http://127.0.0.1/callback","issuerUrl":"https://issuer.invalid"},"toolPolicy":{"allow":["read"],"deny":["write"]},"lifecycle":{"idleTimeout":"5m"},"callTimeout":"30s"}}}`
+const fullCatalog = `{"schemaVersion":1,"name":"Team","domains":{"dev":{"label":"Development"}},"credentialProfiles":{"team":{"description":"Team credentials"}},"connections":{"paper":{"label":"Paper","description":"Documents","domains":["dev"],"inputs":{"host":{"kind":"url","description":"Endpoint","default":"https://fixture.invalid"}},"credentialProfile":"team","transport":{"type":"http","url":{"input":"host"},"headers":{"X-Token":{"secret":"op://v/i/f"}},"mode":"sse"},"auth":{"type":"oauth","clientName":"Paper","scopes":["read","write"],"clientId":"public-client","clientSecret":{"secret":"op://v/i/secret"},"tokenEndpointAuthMethod":"client_secret_post","redirectUrl":"http://127.0.0.1/callback","issuerUrl":"https://issuer.invalid"},"toolPolicy":{"allow":["read"],"deny":["write"]},"lifecycle":{"idleTimeout":"5m"},"callTimeout":"30s","startupTimeout":"120s"}}}`
 
 func TestStrictCatalog(t *testing.T) {
 	if _, err := config.DecodeCatalog([]byte(fullCatalog)); err != nil {
@@ -25,6 +25,9 @@ func TestStrictCatalog(t *testing.T) {
 		{"undeclaredInput", strings.Replace(fullCatalog, `"input":"host"`, `"input":"hidden-value"`, 1), "connections.paper.transport.url"},
 		{"undeclaredProfile", strings.Replace(fullCatalog, `"credentialProfile":"team"`, `"credentialProfile":"hidden-value"`, 1), "connections.paper.credentialProfile"},
 		{"undeclaredDomain", strings.Replace(fullCatalog, `"domains":["dev"]`, `"domains":["hidden-value"]`, 1), "connections.paper.domains"},
+		{"zeroStartup", strings.Replace(fullCatalog, `"startupTimeout":"120s"`, `"startupTimeout":"0s"`, 1), "connections.paper.startupTimeout"},
+		{"badStartup", strings.Replace(fullCatalog, `"startupTimeout":"120s"`, `"startupTimeout":"hidden-value"`, 1), "connections.paper.startupTimeout"},
+		{"emptyStartup", strings.Replace(fullCatalog, `"startupTimeout":"120s"`, `"startupTimeout":""`, 1), "connections.paper.startupTimeout"},
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {

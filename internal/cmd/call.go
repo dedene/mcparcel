@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"regexp"
@@ -21,6 +23,7 @@ type CallCmd struct {
 	Args        string   `name:"args" help:"Arguments as one JSON object."`
 	ArgsFile    string   `name:"args-file" help:"Read a JSON object from a file, or - for stdin."`
 	Timeout     string   `name:"timeout" help:"Positive call duration, including queue and initialization."`
+	Meta        string   `name:"meta" help:"JSON object sent as the call's _meta."`
 }
 
 var connectionID = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
@@ -63,7 +66,7 @@ func validateCallSources(c *CallCmd, flags map[string]int) error {
 	if len(c.Assignments) > 0 {
 		sources++
 	}
-	if sources > 1 || flags["--args"] > 0 && c.Args == "" || flags["--args-file"] > 0 && c.ArgsFile == "" {
+	if sources > 1 || flags["--args"] > 0 && c.Args == "" || flags["--args-file"] > 0 && c.ArgsFile == "" || flags["--meta"] > 1 || flags["--meta"] > 0 && c.Meta == "" {
 		return output.NewError("invalid_arguments", nil)
 	}
 	if flags["--timeout"] > 0 {
@@ -85,6 +88,18 @@ func (c *CallCmd) Run(ctx context.Context, s *Streams, opts *CommandOptions) err
 		timeout, err = time.ParseDuration(c.Timeout)
 		if err != nil || timeout <= 0 {
 			return output.NewError("invalid_arguments", nil)
+		}
+	}
+	var meta json.RawMessage
+	if c.Meta != "" {
+		// Validate the bytes the IPC frame carries: encoding compacts and HTML-escapes.
+		if meta, err = json.Marshal(json.RawMessage(c.Meta)); err != nil {
+			meta = json.RawMessage(c.Meta)
+		}
+		if _, err = args.ParseMeta(meta); err != nil {
+			failure := output.NewError("invalid_arguments", nil)
+			failure.Message = err.Error()
+			return failure
 		}
 	}
 	var raw args.Raw
@@ -116,7 +131,12 @@ func (c *CallCmd) Run(ctx context.Context, s *Streams, opts *CommandOptions) err
 	if err != nil {
 		return err
 	}
-	response, err := client.Call(ctx, runtimeclient.CallRequest{Connection: connection, Tool: tool, Arguments: raw, Timeout: timeout})
+	response, err := client.Call(ctx, runtimeclient.CallRequest{Connection: connection, Tool: tool, Arguments: raw, Timeout: timeout, Meta: meta})
+	if !opts.JSON {
+		for _, w := range response.Data.Warnings {
+			fmt.Fprintf(s.Err, "%s\n%s\n", w.Message, w.NextAction)
+		}
+	}
 	if err != nil {
 		failure := safeFailure(err)
 		if failure.Code == "tool_error" || failure.Code == "input_required" {

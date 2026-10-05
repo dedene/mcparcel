@@ -26,6 +26,9 @@ type (
 		OnWrite   func()
 		Crash     func()
 		LookupEnv func(string) string
+		// Legacy rejects server/discover, so the client falls back to the
+		// initialize handshake that server-to-client requests need.
+		Legacy bool
 	}
 )
 

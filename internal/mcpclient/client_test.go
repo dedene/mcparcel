@@ -58,7 +58,7 @@ func httpSession(t *testing.T, server *mcp.Server, wrap func(http.Handler) http.
 
 func call(t *testing.T, s mcpclient.Session, name string, args map[string]any) mcpclient.Result {
 	t.Helper()
-	r, e := s.Call(ctx(t), name, args, nil)
+	r, e := s.Call(ctx(t), name, args, nil, nil)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -155,8 +155,8 @@ func TestToolsPagination(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	want := []string{"counter", "echo", "echo.dotted", "env", "fail", "rich", "typed", "wait", "write_drop"}
-	if strings.Join(listNames(t, items), ",") != strings.Join(want, ",") || pages.Load() != 5 {
+	want := []string{"counter", "echo", "echo.dotted", "elicit", "env", "fail", "meta", "rich", "typed", "wait", "write_drop"}
+	if strings.Join(listNames(t, items), ",") != strings.Join(want, ",") || pages.Load() != 6 {
 		t.Fatalf("names/pages %v/%d", listNames(t, items), pages.Load())
 	}
 }
@@ -191,7 +191,7 @@ func TestToolsIgnoresSDKTTL(t *testing.T) {
 			found = true
 		}
 	}
-	if !found || pages.Load() != 10 {
+	if !found || pages.Load() != 12 {
 		t.Fatalf("schema changed=%v pages=%d", found, pages.Load())
 	}
 }
@@ -258,7 +258,7 @@ func TestNoAutomaticMultiRoundTrip(t *testing.T) {
 		}
 	})
 	s := httpSession(t, server, nil)
-	r, e := s.Call(ctx(t), "echo", nil, nil)
+	r, e := s.Call(ctx(t), "echo", nil, nil, nil)
 	code(t, e, "input_required")
 	if !r.NeedsInput || !r.Dispatched || len(r.JSON) == 0 || calls.Load() != 1 {
 		t.Fatal("input required replayed or lost")
@@ -269,7 +269,7 @@ func TestNoCallReplay(t *testing.T) {
 	paths, _ := testutil.IsolatedPaths(t)
 	marker := paths.Home + "/marker"
 	s := stdioSession(t, map[string]string{"MCP_TEST_MARKER": marker})
-	r, e := s.Call(ctx(t), "write_drop", nil, nil)
+	r, e := s.Call(ctx(t), "write_drop", nil, nil, nil)
 	code(t, e, "outcome_unknown")
 	data, err := os.ReadFile(marker)
 	if err != nil || string(data) != "1" || !r.Dispatched {
@@ -289,7 +289,7 @@ func TestBeforeDispatchFailure(t *testing.T) {
 		}
 	})
 	s := httpSession(t, server, nil)
-	r, e := s.Call(ctx(t), "counter", nil, func() error { return output.NewError("canceled", nil) })
+	r, e := s.Call(ctx(t), "counter", nil, nil, func() error { return output.NewError("canceled", nil) })
 	code(t, e, "canceled")
 	if r.Dispatched || calls.Load() != 0 {
 		t.Fatal("dispatched rejected request")
@@ -317,7 +317,7 @@ func TestCallCancellationBoundaries(t *testing.T) {
 			defer cancel()
 			if mode == "before" {
 				cancel()
-				r, e := s.Call(c, "wait", nil, nil)
+				r, e := s.Call(c, "wait", nil, nil, nil)
 				code(t, e, "canceled")
 				if r.Dispatched {
 					t.Fatal("canceled before dispatch")
@@ -325,7 +325,7 @@ func TestCallCancellationBoundaries(t *testing.T) {
 				return
 			}
 			if mode == "callback" {
-				r, e := s.Call(c, "wait", nil, func() error { cancel(); return nil })
+				r, e := s.Call(c, "wait", nil, nil, func() error { cancel(); return nil })
 				code(t, e, "canceled")
 				if r.Dispatched {
 					t.Fatal("canceled callback dispatched")
@@ -342,7 +342,7 @@ func TestCallCancellationBoundaries(t *testing.T) {
 				err error
 			}
 			out := make(chan answer, 1)
-			go func() { r, e := s.Call(c, "wait", nil, nil); out <- answer{r, e} }()
+			go func() { r, e := s.Call(c, "wait", nil, nil, nil); out <- answer{r, e} }()
 			select {
 			case <-started:
 			case <-ctx(t).Done():
@@ -406,7 +406,7 @@ func TestBeforeDispatchErrorsAreSafe(t *testing.T) {
 		err  error
 		code string
 	}{{context.Canceled, "canceled"}, {context.DeadlineExceeded, "timeout"}, {errors.New("SECRET-CANARY"), "internal_error"}} {
-		r, e := s.Call(ctx(t), "counter", nil, func() error { return tt.err })
+		r, e := s.Call(ctx(t), "counter", nil, nil, func() error { return tt.err })
 		code(t, e, tt.code)
 		if r.Dispatched || strings.Contains(e.Error(), "SECRET-CANARY") {
 			t.Fatal("unsafe callback error")

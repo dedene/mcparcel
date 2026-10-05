@@ -29,6 +29,9 @@ import (
 func TestMain(m *testing.M) {
 	if os.Getenv("MCP_TEST_STDIO") == "1" {
 		mode := os.Getenv("MCP_TEST_MODE")
+		if strings.HasPrefix(mode, "rmcp") {
+			os.Exit(rmcpLike(mode))
+		}
 		if mode == "stall" {
 			if path := os.Getenv("MCP_TEST_PID"); path != "" {
 				_ = os.WriteFile(path, []byte(strconv.Itoa(os.Getpid())), 0o600)
@@ -70,7 +73,7 @@ func TestMain(m *testing.M) {
 			previous, _ := os.ReadFile(path)
 			count, _ := strconv.Atoi(string(previous))
 			_ = os.WriteFile(path, []byte(strconv.Itoa(count+1)), 0o600)
-		}, Crash: func() { os.Exit(0) }}
+		}, Crash: func() { os.Exit(0) }, Legacy: os.Getenv("MCP_TEST_LEGACY") == "1"}
 		if e := testutil.NewFixtureServerWithOptions(opts).Run(context.Background(), &mcp.StdioTransport{}); e != nil {
 			os.Exit(1)
 		}
@@ -209,7 +212,7 @@ func TestConnectTimeout(t *testing.T) {
 
 func TestAdapterDiagnosticsDiscarded(t *testing.T) {
 	s := stdioSession(t, nil)
-	r, e := s.Call(ctx(t), "write_drop", nil, nil)
+	r, e := s.Call(ctx(t), "write_drop", nil, nil, nil)
 	code(t, e, "outcome_unknown")
 	if strings.Contains(e.Error()+string(r.JSON), "DIAGNOSTIC-SENTINEL") {
 		t.Fatal("stderr leaked")

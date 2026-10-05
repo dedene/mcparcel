@@ -65,7 +65,7 @@ func (p *pool) session(ctx context.Context, id, hash string, c config.Connection
 	if e != nil {
 		return nil, nil, e
 	}
-	timeout := p.opts.ConnectTimeout
+	timeout := startupTimeout(p.opts.ConnectTimeout, c)
 	if login != nil {
 		timeout = loginTimeout
 	}
@@ -107,6 +107,15 @@ func (p *pool) session(ctx context.Context, id, hash string, c config.Connection
 	p.mu.Unlock()
 	p.opts.Log("connection_opened")
 	return entry, handler, nil
+}
+
+// startupTimeout bounds connect, initialize and tool listing: the
+// connection's startupTimeout when set, else the pool default.
+func startupTimeout(base time.Duration, c config.Connection) time.Duration {
+	if d, e := time.ParseDuration(c.StartupTimeout); e == nil && d > 0 {
+		return d
+	}
+	return base
 }
 
 func (p *pool) retire(id string, entry *poolEntry) {

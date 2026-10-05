@@ -48,6 +48,7 @@ type Connection struct {
 	ToolPolicy        *ToolPolicy      `json:"toolPolicy,omitempty"`
 	Lifecycle         *Lifecycle       `json:"lifecycle,omitempty"`
 	CallTimeout       string           `json:"callTimeout,omitempty"`
+	StartupTimeout    string           `json:"startupTimeout,omitempty"`
 }
 type Catalog struct {
 	SchemaVersion      int                           `json:"schemaVersion"`

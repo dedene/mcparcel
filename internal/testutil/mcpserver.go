@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"sync/atomic"
 
+	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -92,5 +93,37 @@ func NewFixtureServerWithOptions(opts FixtureOptions) *mcp.Server {
 		r.SetMeta(mcp.Meta{"fixture": "rich"})
 		return r, nil
 	})
+	server.AddTool(&mcp.Tool{Name: "elicit", InputSchema: map[string]any{"type": "object", "properties": map[string]any{"message": map[string]any{"type": "string"}, "then": map[string]any{"type": "string"}}}}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		var in struct{ Message, Then string }
+		_ = json.Unmarshal(req.Params.Arguments, &in)
+		res, err := req.Session.Elicit(ctx, &mcp.ElicitParams{Message: in.Message, RequestedSchema: map[string]any{"type": "object", "properties": map[string]any{"allow": map[string]any{"type": "boolean"}}}})
+		if err != nil {
+			return nil, err
+		}
+		switch in.Then {
+		case "error":
+			r := textResult("action=" + res.Action)
+			r.IsError = true
+			return r, nil
+		case "rpc":
+			return nil, &jsonrpc.Error{Code: jsonrpc.CodeInternalError, Message: "action=" + res.Action}
+		}
+		return textResult("action=" + res.Action), nil
+	})
+	server.AddTool(&mcp.Tool{Name: "meta", InputSchema: map[string]any{"type": "object"}}, func(_ context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		r := textResult("meta")
+		r.StructuredContent = map[string]any{"meta": req.Params.Meta}
+		return r, nil
+	})
+	if opts.Legacy {
+		server.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
+			return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+				if method == "server/discover" {
+					return nil, &jsonrpc.Error{Code: jsonrpc.CodeMethodNotFound, Message: "expect initialized request"}
+				}
+				return next(ctx, method, req)
+			}
+		})
+	}
 	return server
 }

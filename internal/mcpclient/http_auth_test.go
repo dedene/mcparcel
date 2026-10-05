@@ -100,7 +100,7 @@ func TestHTTP401ToolCallNotOutcomeUnknown(t *testing.T) {
 			next.ServeHTTP(w, r)
 		})
 	})
-	r, err := s.Call(context.Background(), "counter", nil, nil)
+	r, err := s.Call(context.Background(), "counter", nil, nil, nil)
 	code(t, err, "auth_required")
 	if !r.Dispatched || calls.Load() != 1 {
 		t.Fatal("call replay")
@@ -197,7 +197,7 @@ func TestOAuth401DoesNotReplayTool(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r, err := s.Call(ctx(t), "counter", nil, nil)
+	r, err := s.Call(ctx(t), "counter", nil, nil, nil)
 	code(t, err, "auth_expired")
 	if !r.Dispatched || calls.Load() != 1 {
 		t.Fatal("tool call replayed", calls.Load())

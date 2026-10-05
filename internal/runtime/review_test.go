@@ -18,7 +18,7 @@ func (s *discoveryFailureSession) Tools(context.Context) ([]json.RawMessage, err
 	return nil, errors.New("dead session")
 }
 
-func (s *discoveryFailureSession) Call(context.Context, string, map[string]any, func() error) (mcpclient.Result, error) {
+func (s *discoveryFailureSession) Call(context.Context, string, map[string]any, map[string]any, func() error) (mcpclient.Result, error) {
 	panic("unexpected call")
 }
 func (s *discoveryFailureSession) Close(context.Context) error { s.closed = true; return nil }

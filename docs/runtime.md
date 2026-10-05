@@ -111,7 +111,8 @@ enumerate/stop unrelated containers.
 
 The daemon writes a size-bounded, redacted log to
 `~/.local/state/mcparcel/daemon.log` (startup, captured PATH, connection opens and
-closes, auth session changes, errors; never arguments, results or secret values).
+closes, auth session changes, declined elicitations (`elicitation_declined`, event
+name only), errors; never arguments, results, server messages or secret values).
 `runtime status` prints its path.
 
 ## HTTP, tool discovery and results
@@ -148,6 +149,28 @@ whether real workflows need resources/prompts, roots, elicitation or sampling.
 Provide resource/prompt operations if observed; do not advertise unsupported client
 capabilities. A required missing capability blocks that connection's parity gate,
 not a quiet downgrade of the promise that all 32 remain usable.
+
+Elicitation (stage 8b): every connection advertises form elicitation, because some
+servers (Codex `cua_repl`) refuse to work without it and answer approved apps
+from their own saved approvals. Every `elicitation/create` is answered `decline`,
+before the SDK validates it, in any mode: it is a consent gate and MCParcel has no
+prompt. A decline during a call is reported with the server's message (untrusted:
+one line, control and format characters removed, 300 characters) as
+`elicitation_declined`: a `warnings` entry beside an unchanged result, or the error
+when the server answered the call with a JSON-RPC error. That error keeps the
+pooled session. Only the first decline of a call is reported; one outside a call
+is declined silently. Servers on protocol 2026-07-28 ask through multi-round-trip
+results instead, which still end in `input_required`.
+
+`call --meta` sends a validated JSON object as the `tools/call` `_meta`; the SDK
+adds its own `io.modelcontextprotocol/*` keys under protocol 2026-07-28.
+
+Handshake: SDK v1.8.0 first sends `server/discover` (protocol 2026-07-28) and
+falls back to `initialize` (2025-11-25) on any error reply. A server that rejects
+the probe with an error, as rmcp does, connects normally; what it logs on stderr
+is discarded like all child stderr. A server that ignores the probe holds the
+handshake until the startup deadline (`timeout`), and one that exits on it fails
+with `connection_failed`; MCParcel does not work around either.
 
 ## 1Password sessions
 
@@ -368,7 +391,11 @@ HTML-escaped. The page carries MCParcel's own identity; catalogs cannot restyle 
 ## Failure contract
 
 Default deadlines: connection 30s, auth 120s, call 120s (overridable per call),
-owned-process graceful shutdown 5s then force. No automatic retry of tool calls.
+owned-process graceful shutdown 5s then force. A definition's `startupTimeout`
+replaces the 30s for that connection's connect, initialize and tool listing
+(Codex `cua_repl` wants `120s`). The call deadline still bounds the whole call,
+startup included, so raise `callTimeout` with it; `tools` keeps its 180s request
+deadline. No automatic retry of tool calls.
 Server tool errors preserve the MCP result and use exit 5. A disconnect after
 request dispatch uses `outcome_unknown`; prior-to-dispatch errors use connection
 or auth codes. CLI Ctrl-C cancels its call, not the daemon or other callers.

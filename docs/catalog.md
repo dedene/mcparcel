@@ -107,6 +107,7 @@ unions and unsupported schema versions are errors. No ignored config fields.
 | `toolPolicy` | Optional `{allow: [exact names], deny: [exact names]}`; omitted allow means all, empty allow means none; deny wins |
 | `lifecycle` | Optional `{idleTimeout: "session"}` default, or positive duration; session keeps used processes until daemon stop/auth expiry |
 | `callTimeout` | Positive duration, default `120s`; override via CLI per call |
+| `startupTimeout` | Optional positive duration, default `30s`: limit for connect, initialize and tool listing of this connection; not part of the connection hash |
 
 Value is exactly one of: a literal string, `{input: "name"}`, or
 `{secret: "op://vault/item/field", prefix?: "Bearer ", suffix?: ""}`.

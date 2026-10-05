@@ -70,7 +70,7 @@ func runFixture() int {
 				_ = f.Close()
 			}
 		}
-	}, Crash: func() { os.Exit(9) }}
+	}, Crash: func() { os.Exit(9) }, Legacy: os.Getenv("MCPARCEL_FIXTURE_LEGACY") == "1"}
 	server := testutil.NewFixtureServerWithOptions(opts)
 	server.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
 		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {

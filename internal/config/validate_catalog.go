@@ -63,6 +63,11 @@ func validateConnection(c *Connection, path string, profiles map[string]ProfileR
 	if d, err := time.ParseDuration(c.CallTimeout); err != nil || d <= 0 {
 		return fieldError(path+".callTimeout", "positive duration required")
 	}
+	if c.StartupTimeout != "" {
+		if d, err := time.ParseDuration(c.StartupTimeout); err != nil || d <= 0 {
+			return fieldError(path+".startupTimeout", "positive duration required")
+		}
+	}
 	if c.CredentialProfile != "" {
 		if _, ok := profiles[c.CredentialProfile]; !ok {
 			return fieldError(path+".credentialProfile", "undeclared requirement")

@@ -65,7 +65,7 @@ func TestIdempotencyHeadersDoNotReplayToolCalls(t *testing.T) {
 			if _, e := s.Tools(ctx(t)); e != nil {
 				t.Fatal(e)
 			}
-			result, e := s.Call(ctx(t), "counter", nil, nil)
+			result, e := s.Call(ctx(t), "counter", nil, nil, nil)
 			code(t, e, "outcome_unknown")
 			if !result.Dispatched || effects.Load() != 1 {
 				t.Fatalf("tool effects=%d", effects.Load())
@@ -105,7 +105,7 @@ func TestOversizedHTTPResponses(t *testing.T) {
 				_, e := s.Tools(ctx(t))
 				code(t, e, "protocol_error")
 			} else {
-				r, e := s.Call(ctx(t), "counter", nil, nil)
+				r, e := s.Call(ctx(t), "counter", nil, nil, nil)
 				code(t, e, "outcome_unknown")
 				if !r.Dispatched {
 					t.Fatal("not dispatched")

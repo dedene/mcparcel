@@ -34,6 +34,7 @@ type CallRequest struct {
 	Tool       string
 	Arguments  args.Raw
 	Timeout    time.Duration
+	Meta       json.RawMessage
 }
 type CallResponse struct {
 	Data       output.CallData
@@ -277,7 +278,7 @@ func (c *Client) Tools(ctx context.Context, id string, cached bool) (output.Tool
 }
 
 func (c *Client) Call(ctx context.Context, req CallRequest) (CallResponse, error) {
-	r := Request{Method: "call", Connection: req.Connection, Tool: req.Tool, Arguments: req.Arguments, NoInput: c.NoInput}
+	r := Request{Method: "call", Connection: req.Connection, Tool: req.Tool, Arguments: req.Arguments, NoInput: c.NoInput, Meta: req.Meta}
 	if req.Timeout > 0 {
 		r.Timeout = req.Timeout.String()
 	}

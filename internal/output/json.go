@@ -15,6 +15,7 @@ type CallData struct {
 	Connection string          `json:"connection"`
 	Tool       string          `json:"tool"`
 	Result     json.RawMessage `json:"result"`
+	Warnings   []Error         `json:"warnings,omitempty"`
 }
 type ToolList struct {
 	Connection      string            `json:"connection"`

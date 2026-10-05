@@ -223,7 +223,7 @@ func (p *pool) Handle(ctx context.Context, id string, req Request, before func()
 		defer stop()
 		callCtx = bounded
 	}
-	discover, stop := context.WithTimeout(callCtx, p.opts.ConnectTimeout)
+	discover, stop := context.WithTimeout(callCtx, startupTimeout(p.opts.ConnectTimeout, c))
 	items, e := entry.session.Tools(discover)
 	stop()
 	if e != nil {
@@ -292,7 +292,13 @@ func (p *pool) Handle(ctx context.Context, id string, req Request, before func()
 		}
 		return r
 	}
-	result, e := entry.session.Call(callCtx, req.Tool, values, func() error {
+	var meta map[string]any
+	if req.Meta != nil {
+		if meta, e = args.ParseMeta(req.Meta); e != nil {
+			return fail(e)
+		}
+	}
+	result, e := entry.session.Call(callCtx, req.Tool, values, meta, func() error {
 		current, e := p.opts.Load(p.opts.Paths)
 		if e != nil {
 			return poolError(e, nil, id, false)
@@ -332,8 +338,13 @@ func (p *pool) Handle(ctx context.Context, id string, req Request, before func()
 		return nil
 	})
 	resp.Dispatched = result.Dispatched
+	var warnings []output.Error
+	if result.Declined != "" {
+		p.opts.Log("elicitation_declined")
+		warnings = append(warnings, *output.ElicitationDeclined(result.Declined))
+	}
 	var adapterError *output.Error
-	certain := errors.As(e, &adapterError) && adapterError != nil && (adapterError.Code == "input_required" || adapterError.Code == "tool_error")
+	certain := errors.As(e, &adapterError) && adapterError != nil && (adapterError.Code == "input_required" || adapterError.Code == "tool_error" || adapterError.Code == "elicitation_declined")
 	if result.Dispatched && !certain && (e != nil || callCtx.Err() != nil) {
 		p.retire(canonical, entry)
 	}
@@ -350,7 +361,7 @@ func (p *pool) Handle(ctx context.Context, id string, req Request, before func()
 		resp.Error = poolError(e, context.Cause(callCtx), id, result.Dispatched)
 	}
 	if result.Dispatched && (resp.Error == nil || resp.Error.Code == "tool_error" || resp.Error.Code == "input_required") {
-		resp.Data, e = json.Marshal(output.CallData{Connection: canonical, Tool: req.Tool, Result: result.JSON})
+		resp.Data, e = json.Marshal(output.CallData{Connection: canonical, Tool: req.Tool, Result: result.JSON, Warnings: warnings})
 		if e != nil {
 			resp.Error = poolError(output.NewError("protocol_error", nil), nil, id, true)
 		}

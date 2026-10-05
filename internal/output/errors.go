@@ -75,6 +75,7 @@ var registry = map[string]errorSpec{
 	"invalid_schema":           {6, "The server returned an invalid tool schema.", "Check the MCP server implementation."},
 	"tool_not_found":           {2, "The tool is not advertised by this connection.", "Run mcparcel tools for this connection."},
 	"protocol_error":           {6, "The runtime or MCP response is invalid.", "Check the daemon log and server compatibility."},
+	"elicitation_declined":     {3, "The server asked for approval and MCParcel declined it.", "Approve this in the server's own app, then retry."},
 	"input_required":           {6, "The MCP server requires an unsupported interactive response.", "Use a client that supports this server interaction."},
 	"canceled":                 {130, "The operation was canceled.", ""},
 
@@ -95,6 +96,14 @@ func SourceNotRegisteredError() *Error {
 	err := NewError("catalog_unavailable", nil)
 	err.Message = "This catalog is not registered."
 	err.NextAction = "Run 'mcparcel add <owner/repo>' to register a catalog."
+	return err
+}
+
+// ElicitationDeclined reports a declined elicitation with the server's
+// sanitized message in a fixed format.
+func ElicitationDeclined(text string) *Error {
+	err := NewError("elicitation_declined", nil)
+	err.Message = "The server asked for approval and MCParcel declined it: " + text
 	return err
 }
 

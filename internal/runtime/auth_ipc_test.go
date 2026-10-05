@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"sync"
 	"testing"
 
@@ -36,6 +37,30 @@ func TestAuthRequestValidation(t *testing.T) {
 			if validateRequest("status", tc.r) == nil {
 				t.Fatal("login and logout need the work intent")
 			}
+			if e := validateBody(frame("request", tc.r)); (e == nil) != tc.ok {
+				t.Fatal(e)
+			}
+		})
+	}
+}
+
+func TestCallMetaWireValidation(t *testing.T) {
+	empty := args.Raw{Values: map[string]args.Value{}}
+	for name, tc := range map[string]struct {
+		r  Request
+		ok bool
+	}{
+		"call meta":       {Request{Method: "call", Tool: "t", Arguments: empty, Meta: json.RawMessage(`{"x-codex-turn-metadata":{"turn_id":"1"}}`)}, true},
+		"call no meta":    {Request{Method: "call", Tool: "t", Arguments: empty}, true},
+		"call array":      {Request{Method: "call", Tool: "t", Arguments: empty, Meta: json.RawMessage(`[1]`)}, false},
+		"call null":       {Request{Method: "call", Tool: "t", Arguments: empty, Meta: json.RawMessage(`null`)}, false},
+		"call reserved":   {Request{Method: "call", Tool: "t", Arguments: empty, Meta: json.RawMessage(`{"progressToken":"p"}`)}, false},
+		"tools meta":      {Request{Method: "tools", Connection: "a", Arguments: empty, Meta: json.RawMessage(`{}`)}, false},
+		"login meta":      {Request{Method: "login", Connection: "a", Arguments: empty, Meta: json.RawMessage(`{}`)}, false},
+		"status meta":     {Request{Method: "status", Arguments: empty, Meta: json.RawMessage(`{}`)}, false},
+		"call large meta": {Request{Method: "call", Tool: "t", Arguments: empty, Meta: json.RawMessage(`{"k":"` + strings.Repeat("a", args.MaxMetaBytes) + `"}`)}, false},
+	} {
+		t.Run(name, func(t *testing.T) {
 			if e := validateBody(frame("request", tc.r)); (e == nil) != tc.ok {
 				t.Fatal(e)
 			}

@@ -548,6 +548,13 @@
           "pattern": "^[^\\x00]*$",
           "$comment": "MCParcel also validates semantic URL/path/duration/reference rules.",
           "default": "120s"
+        },
+        "startupTimeout": {
+          "type": "string",
+          "pattern": "^[^\\x00]*$",
+          "minLength": 1,
+          "$comment": "Positive duration bounding connect, initialize and tool listing; default 30s.",
+          "default": "30s"
         }
       },
       "required": [

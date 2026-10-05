@@ -41,7 +41,7 @@ func TestPoolStdioFixture(t *testing.T) {
 			_, _ = f.WriteString("write\n")
 			_ = f.Close()
 		}
-	}, Crash: func() { os.Exit(0) }}
+	}, Crash: func() { os.Exit(0) }, Legacy: os.Getenv("MCP_POOL_LEGACY") == "1"}
 	e := testutil.NewFixtureServerWithOptions(opts).Run(context.Background(), &mcp.StdioTransport{})
 	if e != nil {
 		os.Exit(2)
@@ -87,8 +87,8 @@ func (s *observedSession) Tools(ctx context.Context) ([]json.RawMessage, error) 
 	return items, e
 }
 
-func (s *observedSession) Call(ctx context.Context, name string, a map[string]any, b func() error) (mcpclient.Result, error) {
-	return s.Session.Call(ctx, name, a, func() error {
+func (s *observedSession) Call(ctx context.Context, name string, a, meta map[string]any, b func() error) (mcpclient.Result, error) {
+	return s.Session.Call(ctx, name, a, meta, func() error {
 		if e := b(); e != nil {
 			return e
 		}

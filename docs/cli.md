@@ -48,7 +48,7 @@ also work via `npx mcparcel ...`. No global installation or Homebrew is required
 | `enable <mcp>...` / `disable <mcp>...` | Atomically update selection for supplied IDs |
 | `tools <mcp> [--cached]` | Live schema discovery or strictly cached schemas |
 | `tools enable <mcp> <tool>...` / `tools disable <mcp> <tool>...` | Change personal tool selection; cannot override source policy |
-| `call <mcp>.<tool> [key=value ...] [--args <json>]` | Invoke an enabled, allowed tool |
+| `call <mcp>.<tool> [key=value ...] [--args <json>] [--meta <json>]` | Invoke an enabled, allowed tool |
 | `setup` | Interactive domain and connection editor |
 | `sync [<owner/repo>] [--apply [--accept <mcp>...]]` | Fetch and display update; only `--apply` changes active snapshot; `--accept` unblocks named connections whose execution or auth changed |
 | `import mcporter --file <path> [--bindings <file>] [--only <id>...] [--apply]` | Preview or apply supported imports, with explicit unresolved-field report; unbound `${NAME}` in env/header values becomes `env:NAME` with an `environment_reference` warning |
@@ -106,6 +106,13 @@ before live discovery; unknown names are marked unverified until schemas are loa
 - Coercion needs the tool's schema. `call` uses the cached schema when it matches
   the current config and auth identity, and loads it from the connection otherwise.
 - `--timeout 120s` changes the call deadline. Cancellation/timeout never replays it.
+- `--meta '<json object>'` sends the object as the `_meta` of that `tools/call`
+  (for example Codex's `x-codex-turn-metadata`). At most 64 KiB as sent (compact JSON with `<`, `>` and `&`
+  escaped as `<` and so on), one JSON object,
+  no duplicate keys. Keys the SDK or the MCP specification reserve are rejected:
+  `progressToken` and any prefix whose second label is `modelcontextprotocol` or
+  `mcp` (such as `io.modelcontextprotocol/`). Any of these fail with
+  `invalid_arguments` (exit 2) before the runtime is contacted. Given once only.
 - `--output-dir <path>` explicitly saves binary result blocks; `--json` always
   preserves complete protocol content, even when exports are requested.
 
@@ -121,7 +128,9 @@ object and no ANSI or diagnostic lines on stdout. Top-level contract:
 Failure uses `ok:false`, `data:null` and `{code,message,nextAction?,details?}` as
 `error`. MCP `isError` uses `ok:false` but retains the complete result in `data`.
 For call output, `data` contains `connection`, `tool`, `result` (unmodified MCP
-CallToolResult), and optional `artifacts`. List output includes `items`, relevant
+CallToolResult), optional `artifacts` and optional `warnings`: a list of
+`{code,message,nextAction}` notices about the call that leave `result` untouched.
+Human mode prints each warning's message and next action on stderr. List output includes `items`, relevant
 source revisions and cache age. Secret bindings remain references, never values.
 
 | Exit | Meaning |
@@ -140,7 +149,15 @@ Error codes distinguish `auth_required`, `auth_expired`, `config_required`,
 `config_conflict`, `connection_unavailable`, `review_required`, `tool_denied`,
 `runtime_version_mismatch`, `runtime_config_mismatch`, `auth_account_conflict` and
 `outcome_unknown`. `review_required` uses exit 4; `runtime_config_mismatch` exit 6;
-`auth_account_conflict` exit 3. OAuth adds `auth_failed` (provider refused; only a
+`auth_account_conflict` exit 3.
+`elicitation_declined` (exit 3) means the server asked for consent through MCP
+elicitation and MCParcel declined it, which it always does. Message:
+`The server asked for approval and MCParcel declined it: <server message>`, with
+the server's text reduced to one line of at most 300 characters without control
+characters; next action `Approve this in the server's own app, then retry.` It is
+the error when the server then failed the call with a JSON-RPC error; when the
+server still returned a result, that result is kept and the same notice is a
+`warnings` entry (exit 0, or 5 for `isError`). OAuth adds `auth_failed` (provider refused; only a
 sanitized OAuth error code is shown), `keychain_unavailable` (Keychain could not
 read or store the sign-in, or it is too large) and `auth_callback_unavailable`
 (fixed callback port in use), all exit 3. Catalog commands add `invalid_repository` (exit 2,

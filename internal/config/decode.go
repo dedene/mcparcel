@@ -369,6 +369,9 @@ func checkRequired(v any, typ reflect.Type, path string) error {
 			required = []string{"schemaVersion", "revision", "connections"}
 		case reflect.TypeFor[Connection]():
 			required = []string{"transport"}
+			if text, ok := obj["startupTimeout"].(string); ok && text == "" {
+				return fieldError(path+".startupTimeout", "positive duration required")
+			}
 		case reflect.TypeFor[Stdio]():
 			required = []string{"command"}
 		case reflect.TypeFor[HTTP]():

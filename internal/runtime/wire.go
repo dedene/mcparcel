@@ -47,6 +47,8 @@ type Request struct {
 	Timeout    string   `json:"timeout,omitempty"`
 	NoInput    bool     `json:"noInput,omitempty"`
 	Force      bool     `json:"force,omitempty"`
+	// Meta is a call's _meta object, validated by args.ParseMeta.
+	Meta json.RawMessage `json:"meta,omitempty"`
 }
 
 // AuthURL streams a sign-in's authorization URL to the waiting CLI.
@@ -69,6 +71,9 @@ func validateRequest(intent string, r Request) error {
 	if r.Arguments.Values == nil {
 		return ErrInvalidFrame
 	}
+	if r.Meta != nil && r.Method != "call" {
+		return ErrInvalidFrame
+	}
 	if (intent == "restart" || intent == "stop") && r.Method != intent || intent == "status" && r.Method != "status" || intent == "work" && r.Method != "tools" && r.Method != "call" && r.Method != "login" && r.Method != "logout" {
 		return ErrInvalidFrame
 	}
@@ -76,6 +81,11 @@ func validateRequest(intent string, r Request) error {
 	case "call":
 		if r.Tool == "" || r.Cached || r.Force {
 			return ErrInvalidFrame
+		}
+		if r.Meta != nil {
+			if _, e := args.ParseMeta(r.Meta); e != nil {
+				return ErrInvalidFrame
+			}
 		}
 		if r.Timeout != "" {
 			d, e := time.ParseDuration(r.Timeout)
