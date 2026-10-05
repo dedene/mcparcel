@@ -165,12 +165,10 @@ results instead, which still end in `input_required`.
 `call --meta` sends a validated JSON object as the `tools/call` `_meta`; the SDK
 adds its own `io.modelcontextprotocol/*` keys under protocol 2026-07-28.
 
-Handshake: SDK v1.8.0 first sends `server/discover` (protocol 2026-07-28) and
-falls back to `initialize` (2025-11-25) on any error reply. A server that rejects
-the probe with an error, as rmcp does, connects normally; what it logs on stderr
-is discarded like all child stderr. A server that ignores the probe holds the
-handshake until the startup deadline (`timeout`), and one that exits on it fails
-with `connection_failed`; MCParcel does not work around either.
+Handshake: stdio connections start with the classic `initialize` (2025-11-25) and
+never send the newer `server/discover` probe, because a strict stdio server may
+ignore the probe or exit on it (Codex's `cua_repl` exits). HTTP connections let SDK
+v1.8.0 probe first and fall back to `initialize` on an error reply.
 
 ## 1Password sessions
 

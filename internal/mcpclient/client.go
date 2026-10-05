@@ -88,7 +88,12 @@ func Connect(ctx context.Context, opts ConnectOptions) (Session, error) {
 	})
 	c, cancel := context.WithTimeout(ctx, opts.ConnectTimeout)
 	defer cancel()
-	sdk, err := client.Connect(c, transport, nil)
+	// A strict stdio server may ignore or exit on the server/discover probe.
+	var session *mcp.ClientSessionOptions
+	if opts.Connection.Transport.Stdio != nil {
+		session = &mcp.ClientSessionOptions{ProtocolVersion: "2025-11-25"}
+	}
+	sdk, err := client.Connect(c, transport, session)
 	if err != nil {
 		cleanup(context.Background())
 		if failure := authFailure(err, status); failure != nil {

@@ -143,7 +143,7 @@ func sortImportIssues(issues []ImportIssue) {
 }
 
 var importFields = map[string]string{
-	"command": "string", "baseUrl": "string", "args": "array", "env": "map", "headers": "map", "description": "string", "auth": "string", "clientName": "string", "oauthClientId": "string", "oauthClientSecret": "string", "oauthRedirectUrl": "string", "oauthScope": "string", "oauthTokenEndpointAuthMethod": "string",
+	"command": "string", "baseUrl": "string", "args": "array", "env": "map", "headers": "map", "description": "string", "auth": "string", "clientName": "string", "oauthClientId": "string", "oauthClientSecret": "string", "oauthRedirectUrl": "string", "oauthScope": "string", "oauthTokenEndpointAuthMethod": "string", "lifecycle": "string",
 }
 
 func convertImportEntry(id string, raw any, bindings map[string]CredentialBinding, used map[string]bool) (ImportEntry, Connection) {

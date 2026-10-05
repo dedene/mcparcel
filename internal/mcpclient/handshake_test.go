@@ -7,7 +7,6 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/dedene/mcparcel/internal/mcpclient"
 )
@@ -74,16 +73,20 @@ func TestHandshakeFallsBackFromRejectedDiscover(t *testing.T) {
 	}
 }
 
-// The SDK sends server/discover first and falls back only on an error reply:
-// a server that ignores the probe holds the handshake until the connect
-// deadline, and one that exits leaves nothing to fall back to.
-func TestHandshakeDiscoverVariantsSDKCannotSurvive(t *testing.T) {
-	for mode, want := range map[string]string{"rmcp_silent": "timeout", "rmcp_exit": "connection_failed"} {
+// A stdio server may ignore a first request other than initialize, or exit on
+// it (the real rmcp-based cua_repl does). Stdio connections therefore start
+// with the classic initialize and never send server/discover.
+func TestStdioHandshakeIsClassicInitialize(t *testing.T) {
+	for _, mode := range []string{"rmcp_silent", "rmcp_exit"} {
 		t.Run(mode, func(t *testing.T) {
-			opts := stdioOpts(t, map[string]string{"MCP_TEST_MODE": mode})
-			opts.ConnectTimeout = 300 * time.Millisecond
-			_, e := mcpclient.Connect(ctx(t), opts)
-			code(t, e, want)
+			s, e := mcpclient.Connect(ctx(t), stdioOpts(t, map[string]string{"MCP_TEST_MODE": mode}))
+			if e != nil {
+				t.Fatal(e)
+			}
+			defer s.Close(ctx(t))
+			if items, e := s.Tools(ctx(t)); e != nil || strings.Join(listNames(t, items), ",") != "js" {
+				t.Fatal(items, e)
+			}
 		})
 	}
 }

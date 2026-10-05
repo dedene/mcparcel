@@ -351,6 +351,14 @@ func TestImportUnknownField(t *testing.T) {
 	}
 }
 
+// mcporter's lifecycle is accepted and ignored: the daemon always keeps sessions.
+func TestImportLifecycleIgnored(t *testing.T) {
+	r := converted(t, []byte(`{"mcpServers":{"repl":{"command":"fixture","lifecycle":"keep-alive"}}}`), nil)
+	if row := importRow(t, r, "repl"); !row.Applicable || len(row.Unresolved) != 0 {
+		t.Fatal(r)
+	}
+}
+
 func TestImportRootRules(t *testing.T) {
 	for _, raw := range []string{`{}`, `null`, `{"mcpServers":null}`, `{"mcpServers":{},"typo":true}`, `{"mcpServers":{"bad":{"command":"a","command":"b"}}}`, `{"mcpServers":{},"imports":null}`, `{"mcpServers":{},"imports":[1]}`, `{"mcpServers":{}} {}`} {
 		_, e := ImportMcporter([]byte(raw), nil)
