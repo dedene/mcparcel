@@ -71,9 +71,13 @@ unless their definition explicitly defines a managed process.
 
 Before admission and immediately before dispatch, read the current config revision.
 An already running daemon observes metadata changes without requiring metadata
-commands to start it. Disable/remove/apply blocks new work immediately; existing
-calls drain until their deadline, then owned affected connections close. Changed
-connections reopen lazily with the new config. Explicit auth lock/expiry instead
+commands to start it. Disable/remove/apply blocks new work immediately; a call
+already dispatched runs until it ends or reaches its deadline. The next request
+the daemon handles, for any connection, closes the pooled session (and any process
+it owns) of every disabled, removed, under-review or changed connection once its
+last call has ended. The daemon does not watch config files, so until that request
+the session stays open but unreachable. Changed connections reopen lazily with the
+new config. Explicit auth lock/expiry instead
 cancels protected calls as specified below. Store/revision synchronization must
 make a completed disable effective for every subsequent dispatch.
 
@@ -138,21 +142,30 @@ large result still arrives. A shutdown cancels a response write in flight; a
 response written after its request ended (canceled or forced) is capped at the
 shutdown timeout.
 
-Try Streamable HTTP initialization first for `auto`; use legacy SSE only for a
-recognized transport mismatch, before any tool call. The MCP Go SDK v1.8.0 does
+`auto` (and an omitted mode) uses Streamable HTTP. The MCP Go SDK v1.8.0 does
 not fall back by itself and reports a mismatch as an untyped error carrying only
-the HTTP status text, so `auto` uses MCParcel's own pre-flight request to
-recognize a mismatch. Its SSE client transport also has no OAuth hook. Legacy SSE
-support is built only if the stage-1 probe finds a server that needs it. No fallback on auth failure,
-rate limits, general network failure or a failed tool execution. Persist negotiated
-mode in the connection state. Validate redirects; never forward authorization to
-a changed origin. Insecure internal HTTP requires explicit per-connection consent.
+the HTTP status text, so when every POST of the connect (`server/discover`, then
+`initialize`) is refused with 400, 404 or 405 and nothing else explains the
+failure, MCParcel
+sends one diagnostic GET to the endpoint (5s limit, first 4 KiB read). A
+`200 text/event-stream` answer that announces `event: endpoint` makes the connect
+fail with `runtime_unsupported` ("This server speaks only legacy SSE"); anything
+else stays `connection_failed`. The probe sends no MCP message and nothing falls
+back. `streamable` never probes. Mode `sse` is `runtime_unsupported` before any
+effect: legacy SSE support is built only once a server that needs it is recorded
+(the SDK's SSE client transport also has no OAuth hook). No probe after auth
+failure, rate limits, server errors or general network failure, and no retry of a
+failed tool execution. MCP HTTP requests never follow redirects: any 3xx answer,
+or a request to another origin, is `connection_failed`, so authorization never
+reaches a changed origin. Insecure internal HTTP requires explicit per-connection
+consent.
 
-`tools` follows pagination with repeated-cursor detection and updates an identity-
-and config-scoped schema cache. `tools --cached` cannot authenticate or connect.
-A list-changed notification invalidates the cache; missing tools get a precise error.
+`tools` and every `call` discover tools live from the connection, following
+pagination with repeated-cursor detection; the SDK's list cache is disabled. There
+is no schema cache yet: `tools --cached` cannot authenticate or connect and always
+returns `schema_cache_miss`. A tool missing from the live list is `tool_not_found`.
 `call` checks enabled state and both tool filters before resolving secrets, then
-coerces and validates arguments against the live/cached current schema
+coerces and validates arguments against the live schema
 (jsonschema-go, draft-07 and 2020-12, local refs only, with a nil loader so nothing
 is fetched) and calls the SDK. A schema that cannot be checked safely (another
 draft, remote/dynamic/unresolvable refs, a `$ref` cycle through in-place

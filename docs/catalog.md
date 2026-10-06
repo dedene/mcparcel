@@ -101,7 +101,7 @@ unions and unsupported schema versions are errors. No ignored config fields.
 | stdio `inheritEnv` | Optional explicit list beyond the safe base environment; no wildcard |
 | HTTP `url` | Literal URL or `{input}`; no embedded username/password |
 | HTTP `headers` | Map to Value; protected OAuth Authorization header cannot also be configured here |
-| HTTP `mode` | `auto` (default), `streamable` or `sse` |
+| HTTP `mode` | `auto` (default), `streamable` or `sse`; `sse` passes validation but is `runtime_unsupported` at runtime |
 | HTTP `allowInsecureHttp` | `never` default; `loopback`, or `explicit` for a deliberately configured internal endpoint |
 | `auth` | Omitted or `{type: "oauth", ...}`; API-key auth uses env/header bindings |
 | `toolPolicy` | Optional `{allow: [exact names], deny: [exact names]}`; omitted allow means all, empty allow means none; deny wins |

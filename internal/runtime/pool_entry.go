@@ -19,6 +19,7 @@ type poolEntry struct {
 	timer          *time.Timer
 	oauth          *auth.OAuthHandler
 	closeOnce      sync.Once
+	sweeping       bool // a sweep is waiting to retire it; guarded by pool.mu
 }
 
 // session returns the pooled entry for id, connecting when needed. login
@@ -116,6 +117,61 @@ func startupTimeout(base time.Duration, c config.Connection) time.Duration {
 		return d
 	}
 	return base
+}
+
+// sweep retires pooled sessions the snapshot no longer admits (disabled,
+// removed, under review, unsupported) or whose config hash changed. Each
+// retire waits for the connection's gate, so an in-flight call drains first,
+// and rechecks the then-current config so a newer entry is never retired.
+func (p *pool) sweep(snapshot config.Snapshot) {
+	p.mu.Lock()
+	if p.closed {
+		p.mu.Unlock()
+		return
+	}
+	entries := make(map[string]*poolEntry, len(p.entries))
+	for id, entry := range p.entries {
+		entries[id] = entry
+	}
+	p.mu.Unlock()
+	var stale []string
+	for id, entry := range entries {
+		if staleEntry(snapshot, id, entry) {
+			stale = append(stale, id)
+		}
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, id := range stale {
+		entry := entries[id]
+		if p.closed || p.entries[id] != entry || entry.sweeping {
+			continue
+		}
+		entry.sweeping = true
+		p.sweeps.Add(1)
+		go func() {
+			defer p.sweeps.Done()
+			gate := p.gate(id)
+			<-gate
+			defer func() { gate <- struct{}{} }()
+			current, e := p.opts.Load(p.opts.Paths)
+			if e != nil || !staleEntry(current, id, entry) {
+				p.mu.Lock()
+				entry.sweeping = false
+				p.mu.Unlock()
+				return
+			}
+			p.retire(id, entry)
+		}()
+	}
+}
+
+func staleEntry(snapshot config.Snapshot, id string, entry *poolEntry) bool {
+	if _, _, e := snapshot.RuntimeConnection(id); e != nil {
+		return true
+	}
+	hash, e := snapshot.ConnectionHash(id)
+	return e != nil || hash != entry.hash
 }
 
 func (p *pool) retire(id string, entry *poolEntry) {

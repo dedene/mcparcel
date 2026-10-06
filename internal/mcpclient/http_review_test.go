@@ -48,7 +48,7 @@ func TestLegacyInitializationDoesNotOpenStandaloneSSE(t *testing.T) {
 		fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":"2025-11-25","capabilities":{},"serverInfo":{"name":"fixture","version":"test"}}}`, msg.ID)
 	}))
 	defer hs.Close()
-	tr, cleanup, _, err := makeTransport(ConnectOptions{Connection: config.Connection{Transport: config.Transport{HTTP: &config.HTTP{URL: config.Literal(hs.URL)}}}}, nil)
+	tr, cleanup, _, _, err := makeTransport(ConnectOptions{Connection: config.Connection{Transport: config.Transport{HTTP: &config.HTTP{URL: config.Literal(hs.URL)}}}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

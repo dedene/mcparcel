@@ -40,6 +40,7 @@ type pool struct {
 	requests map[*poolWork]context.CancelCauseFunc
 	workers  sync.WaitGroup
 	expiry   sync.WaitGroup
+	sweeps   sync.WaitGroup
 	stopOnce sync.Once
 	stopDone chan struct{}
 	stopErr  error
@@ -109,6 +110,7 @@ func (p *pool) Handle(ctx context.Context, id string, req Request, before func()
 	if e != nil {
 		return fail(e)
 	}
+	p.sweep(snapshot)
 	canonical, c, e := snapshot.RuntimeConnection(req.Connection)
 	if e != nil {
 		return fail(e)
@@ -427,6 +429,7 @@ func (p *pool) Shutdown(ctx context.Context, force bool) error {
 			closing.Wait()
 			p.workers.Wait()
 			p.expiry.Wait()
+			p.sweeps.Wait()
 			if p.opts.Credentials != nil {
 				if e := p.opts.Credentials.Close(); e != nil {
 					p.stopErr = poolError(e, nil, "", false)

@@ -1,12 +1,15 @@
 package mcpclient
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -25,6 +28,9 @@ type headerTransport struct {
 	unauthorized bool
 	tap          *callTap
 	limit        int // bytes per response; 0 means 16 MiB
+	// refused is 1 while every POST so far was answered 400, 404 or 405,
+	// -1 once any POST got another answer or no answer, 0 before the first.
+	refused int
 }
 
 func (t *headerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -60,6 +66,15 @@ func (t *headerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		clone.Header.Set(k, v)
 	}
 	resp, err := t.base.RoundTrip(clone)
+	if clone.Method == http.MethodPost {
+		t.mu.Lock()
+		if err != nil || resp.StatusCode != 400 && resp.StatusCode != 404 && resp.StatusCode != 405 {
+			t.refused = -1
+		} else if t.refused == 0 {
+			t.refused = 1
+		}
+		t.mu.Unlock()
+	}
 	if err != nil {
 		return nil, output.NewError("connection_failed", nil)
 	}
@@ -103,24 +118,67 @@ func (t *headerTransport) status() error {
 	return t.failure
 }
 
-func makeTransport(opts ConnectOptions, tap *callTap) (mcp.Transport, func(context.Context), func() error, error) {
+// legacySSE returns runtime_unsupported when every POST was refused with
+// 400, 404 or 405 and a GET on the endpoint answers 200 text/event-stream whose
+// first 4 KiB contain an `event: endpoint` line. Anything else returns nil.
+// It is diagnosis only: no MCP message is sent and nothing falls back.
+func (t *headerTransport) legacySSE(ctx context.Context, endpoint string) error {
+	t.mu.Lock()
+	refused := t.refused
+	t.mu.Unlock()
+	if refused != 1 {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil
+	}
+	req.Header.Set("Accept", "text/event-stream")
+	resp, err := t.RoundTrip(req)
+	if err != nil {
+		return nil
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != 200 || !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream") {
+		return nil
+	}
+	lines := bufio.NewScanner(io.LimitReader(resp.Body, 4096))
+	for lines.Scan() {
+		line := strings.TrimSpace(lines.Text())
+		if strings.HasPrefix(line, ":") {
+			continue
+		}
+		if name, ok := strings.CutPrefix(line, "event:"); ok && strings.TrimSpace(name) == "endpoint" {
+			failure := output.NewError("runtime_unsupported", nil)
+			failure.Message = "This server speaks only legacy SSE, which MCParcel does not support yet."
+			return failure
+		}
+	}
+	return nil
+}
+
+// makeTransport returns the transport, its cleanup, the sticky HTTP status and
+// a diagnosis for a failed connect (nil for stdio and mode "streamable").
+func makeTransport(opts ConnectOptions, tap *callTap) (mcp.Transport, func(context.Context), func() error, func(context.Context) error, error) {
 	if opts.MaxMessageBytes <= 0 {
 		opts.MaxMessageBytes = defaultMaxMessageBytes
 	}
 	if opts.Connection.Transport.Stdio != nil {
 		transport, close, err := startProcess(opts, tap)
-		return transport, close, func() error { return nil }, err
+		return transport, close, func() error { return nil }, nil, err
 	}
 	if opts.Connection.Transport.HTTP == nil {
-		return nil, nil, nil, output.NewError("connection_failed", nil)
+		return nil, nil, nil, nil, output.NewError("connection_failed", nil)
 	}
 	endpoint, err := config.LiteralText(opts.Connection.Transport.HTTP.URL)
 	if err != nil {
-		return nil, nil, nil, output.NewError("config_required", nil)
+		return nil, nil, nil, nil, output.NewError("config_required", nil)
 	}
 	origin, err := url.Parse(endpoint)
 	if err != nil || origin.Host == "" || origin.User != nil || origin.Scheme != "http" && origin.Scheme != "https" {
-		return nil, nil, nil, output.NewError("connection_failed", nil)
+		return nil, nil, nil, nil, output.NewError("connection_failed", nil)
 	}
 	headers := map[string]string{}
 	for k, v := range opts.Headers {
@@ -129,7 +187,11 @@ func makeTransport(opts ConnectOptions, tap *callTap) (mcp.Transport, func(conte
 	base := &http.Transport{Proxy: nil}
 	rt := &headerTransport{base: base, origin: origin, headers: headers, oauth: opts.OAuth != nil, tap: tap, limit: opts.MaxMessageBytes}
 	client := &http.Client{Transport: rt, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	return &mcp.StreamableClientTransport{Endpoint: endpoint, HTTPClient: client, MaxRetries: -1, DisableStandaloneSSE: true, MaxEventSize: opts.MaxMessageBytes + 1, OAuthHandler: opts.OAuth}, func(context.Context) { base.CloseIdleConnections() }, rt.status, nil
+	var diagnose func(context.Context) error
+	if mode := opts.Connection.Transport.HTTP.Mode; mode == "" || mode == "auto" {
+		diagnose = func(ctx context.Context) error { return rt.legacySSE(ctx, endpoint) }
+	}
+	return &mcp.StreamableClientTransport{Endpoint: endpoint, HTTPClient: client, MaxRetries: -1, DisableStandaloneSSE: true, MaxEventSize: opts.MaxMessageBytes + 1, OAuthHandler: opts.OAuth}, func(context.Context) { base.CloseIdleConnections() }, rt.status, diagnose, nil
 }
 
 type boundedResponseBody struct {

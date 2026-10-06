@@ -46,7 +46,7 @@ also work via `npx mcparcel ...`. No global installation or Homebrew is required
 | `list` | Enabled selections; clearly mark unavailable entries; no live connection |
 | `inspect <mcp>` | Effective non-secret config, origin, requirements, blockers and revision |
 | `enable <mcp>...` / `disable <mcp>...` | Atomically update selection for supplied IDs |
-| `tools <mcp> [--cached]` | Live schema discovery or strictly cached schemas |
+| `tools <mcp> [--cached]` | Live schema discovery; `--cached` has no cache yet and always returns `schema_cache_miss` |
 | `tools enable <mcp> <tool>...` / `tools disable <mcp> <tool>...` | Change personal tool selection; cannot override source policy |
 | `call <mcp>.<tool> [key=value ...] [--args <json>] [--meta <json>]` | Invoke an enabled, allowed tool; a server's approval request during the call is shown as a prompt (see Approval prompts) |
 | `setup` | Interactive domain and connection editor |
@@ -117,8 +117,8 @@ before live discovery; unknown names are marked unverified until schemas are loa
   file and `--args-file -` from stdin. The three are mutually exclusive with each
   other and with assignments. Values are payloads, not shell expressions.
 - Duplicate keys fail. No dot-path nesting and no function-call syntax in v1.
-- Coercion needs the tool's schema. `call` uses the cached schema when it matches
-  the current config and auth identity, and loads it from the connection otherwise.
+- Coercion needs the tool's schema. `call` reads the tool's schema live from the
+  connection before every call.
 - `--timeout 120s` changes the call deadline. Cancellation/timeout never replays it.
   Time spent on an open approval prompt does not count toward it.
 - `--meta '<json object>'` sends the object as the `_meta` of that `tools/call`

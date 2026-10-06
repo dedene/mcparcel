@@ -81,7 +81,7 @@ func Connect(ctx context.Context, opts ConnectOptions) (Session, error) {
 		opts.MaxMessageBytes = defaultMaxMessageBytes
 	}
 	tap := &callTap{}
-	transport, cleanup, status, err := makeTransport(opts, tap)
+	transport, cleanup, status, diagnose, err := makeTransport(opts, tap)
 	if err != nil {
 		return nil, err
 	}
@@ -106,15 +106,20 @@ func Connect(ctx context.Context, opts ConnectOptions) (Session, error) {
 	}
 	sdk, err := client.Connect(c, transport, session)
 	if err != nil {
-		cleanup(context.Background())
+		defer cleanup(context.Background())
 		if failure := authFailure(err, status); failure != nil {
 			return nil, failure
 		}
 		if c.Err() != nil {
 			return nil, contextError(c.Err(), false)
 		}
-		if status() != nil {
-			return nil, status()
+		failure := status()
+		if failure == nil && diagnose != nil {
+			// Before cleanup, so cleanup also drops the probe's connection.
+			failure = diagnose(c)
+		}
+		if failure != nil {
+			return nil, failure
 		}
 		return nil, output.NewError("connection_failed", nil)
 	}
