@@ -109,6 +109,10 @@ func TestPoolOAuthNotSignedInFailsFast(t *testing.T) {
 	if res.Error.Message != "Sign-in required for a." || r.connects.Load() != 0 {
 		t.Fatal(res.Error.Message, r.connects.Load())
 	}
+	// Marked connections are listed anyway; nothing is written for them.
+	if _, e := r.opts.Keyring.Get(auth.KeyringService, "local:a"); e != auth.ErrNoSession {
+		t.Fatal("stored", e)
+	}
 }
 
 func TestPoolOAuthKeyringMissingIsUnavailable(t *testing.T) {
@@ -203,12 +207,16 @@ func TestPoolLoginHeaderKeyRejected(t *testing.T) {
 }
 
 func TestPoolLoginNoInput(t *testing.T) {
-	r, _, _ := oauthRig(t, testutil.AuthServerOptions{Registration: true}, false)
+	r, _, kr := oauthRig(t, testutil.AuthServerOptions{Registration: true}, false)
 	r.start()
 	b := &loginBrowser{}
 	signInAction(t, r.login(testCtx(t), b, true))
 	if r.connects.Load() != 0 || b.count() != 0 {
 		t.Fatal("effects")
+	}
+	// No server answered, so nothing is remembered.
+	if _, e := kr.Get(auth.KeyringService, "local:a"); e != auth.ErrNoSession {
+		t.Fatal("stored", e)
 	}
 }
 
@@ -255,6 +263,36 @@ func TestPoolUnmarked401RewritesNextAction(t *testing.T) {
 	}
 	if o := <-r.captured; o.OAuth != nil {
 		t.Fatal("handler without a stored session")
+	}
+}
+
+// An unmarked connection whose server asked for sign-in is remembered in its
+// Keychain item (URL only, no token), so auth status lists it.
+func TestPoolUnmarked401RemembersSignInRequired(t *testing.T) {
+	r, _, kr := oauthRig(t, testutil.AuthServerOptions{Registration: true}, false)
+	u := *r.personal.Connections["a"].Transport.HTTP.URL.Literal
+	r.start()
+	signInAction(t, r.call(testCtx(t), "a", "counter"))
+	s, e := auth.LoadOAuth(testCtx(t), kr, "local:a")
+	if e != nil || s.URL != u || s.RefreshToken != "" || s.Issuer != "" || s.Failure != nil {
+		t.Fatal(s, e)
+	}
+	raw, _ := kr.Get(auth.KeyringService, "local:a")
+	signInAction(t, r.call(testCtx(t), "a", "counter"))
+	if again, _ := kr.Get(auth.KeyringService, "local:a"); again != raw {
+		t.Fatal("item rewritten")
+	}
+}
+
+func TestPoolUnmarked401KeepsRecordedFailure(t *testing.T) {
+	r, as, kr := oauthRig(t, testutil.AuthServerOptions{Registration: true}, false)
+	u := *r.personal.Connections["a"].Transport.HTTP.URL.Literal
+	storeState(t, kr, auth.OAuthState{Version: 1, URL: u, Issuer: as.URL, Resource: u, TokenURL: as.URL + "/token", Failure: &auth.OAuthFailure{At: 1, Code: "invalid_grant"}})
+	raw, _ := kr.Get(auth.KeyringService, "local:a")
+	r.start()
+	signInAction(t, r.call(testCtx(t), "a", "counter"))
+	if after, _ := kr.Get(auth.KeyringService, "local:a"); after != raw {
+		t.Fatal("recorded failure overwritten")
 	}
 }
 
@@ -321,6 +359,27 @@ func TestOAuthLogEventsWritten(t *testing.T) {
 	}
 }
 
+func TestSignInFailureLogWritten(t *testing.T) {
+	p, _ := testutil.IsolatedPaths(t)
+	w, e := OpenLog(p)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e = WriteSignInFailure(w, "callback", "access_denied"); e != nil {
+		t.Fatal(e)
+	}
+	for _, bad := range [][2]string{{"elsewhere", "x"}, {"callback", "SECRET code"}, {"callback", "https://x.invalid/?code=SECRET"}, {"callback", ""}} {
+		if WriteSignInFailure(w, bad[0], bad[1]) == nil {
+			t.Fatalf("accepted %q", bad)
+		}
+	}
+	_ = w.Close()
+	b, e := os.ReadFile(p.LogFile)
+	if e != nil || string(b) != `{"event":"oauth_sign_in_failed","stage":"callback","code":"access_denied"}`+"\n" {
+		t.Fatalf("%q %v", b, e)
+	}
+}
+
 func TestPoolHeaderKey401KeepsEnvAction(t *testing.T) {
 	r := newRig(t)
 	r.opts.Keyring = &testutil.MemKeyring{}
@@ -337,5 +396,8 @@ func TestPoolHeaderKey401KeepsEnvAction(t *testing.T) {
 	}
 	if o := <-r.captured; o.OAuth != nil {
 		t.Fatal("handler on a header-key connection")
+	}
+	if _, e := r.opts.Keyring.Get(auth.KeyringService, "local:a"); e != auth.ErrNoSession {
+		t.Fatal("stored", e)
 	}
 }

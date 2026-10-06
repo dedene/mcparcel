@@ -36,6 +36,25 @@ func TestVersionPrintsToStdout(t *testing.T) {
 	}
 }
 
+func TestVersionFlagMatchesVersionCommand(t *testing.T) {
+	_, want, _ := run(t, "version")
+	for _, args := range [][]string{{"--version"}, {"--version", "call"}, {"tools", "--version"}} {
+		code, stdout, stderr := run(t, args...)
+		if code != ExitOK || stdout != want || stderr != "" {
+			t.Fatalf("%v: exit %d stdout %q stderr %q, want %q", args, code, stdout, stderr, want)
+		}
+	}
+	defer func(v, c, d string) { version, commit, date = v, c, d }(version, commit, date)
+	version, commit, date = "1.2.3", "abc1234", "2026-10-06"
+	_, want, _ = run(t, "version")
+	if _, got, _ := run(t, "--version"); got != want || got != "mcparcel 1.2.3 (abc1234, 2026-10-06)\n" {
+		t.Fatalf("--version %q, version %q", got, want)
+	}
+	if _, help, _ := run(t, "--help"); !strings.Contains(help, "--version") {
+		t.Fatalf("help does not list --version:\n%s", help)
+	}
+}
+
 func TestHelpIsEnglishAndExitsZero(t *testing.T) {
 	code, stdout, _ := run(t, "--help")
 	if code != ExitOK {

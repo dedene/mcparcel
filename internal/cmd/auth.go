@@ -23,7 +23,7 @@ type (
 		MCP string `arg:"" required:"" help:"Connection to sign in to."`
 	}
 	AuthStatusCmd struct {
-		MCP string `arg:"" optional:"" help:"Connection to show; all signed-in or OAuth connections when omitted."`
+		MCP string `arg:"" optional:"" help:"Connection to show; when omitted, OAuth connections, signed-in ones and ones whose server asked for sign-in."`
 	}
 	AuthLogoutCmd struct {
 		MCP string `arg:"" required:"" help:"Connection whose stored sign-in to remove."`

@@ -48,7 +48,7 @@ func (p *pool) oauthHandler(ctx context.Context, id, name string, c config.Conne
 	if e != nil {
 		return nil, e
 	}
-	opts := auth.OAuthOptions{Account: id, Name: name, Label: c.Label, URL: u, Auth: c.Auth, Keyring: p.opts.Keyring, Log: p.opts.Log, Login: login}
+	opts := auth.OAuthOptions{Account: id, Name: name, Label: c.Label, URL: u, Auth: c.Auth, Keyring: p.opts.Keyring, Log: p.opts.Log, LogSignInFailure: p.opts.SignInFailure, Login: login}
 	if c.Auth != nil {
 		if opts.Client.ID, e = oauthClientValue(c.Auth.ClientID, values); e != nil {
 			return nil, e
@@ -74,6 +74,20 @@ func (p *pool) oauthHandler(ctx context.Context, id, name string, c config.Conne
 	}
 	opts.State = &state
 	return auth.NewOAuthHandler(opts), nil
+}
+
+// rememberSignIn records that an unmarked connection's server asked for
+// sign-in: a Keychain item holding only its URL, which auth status lists as
+// sign-in required and which no session can use. An existing item is kept.
+func (p *pool) rememberSignIn(ctx context.Context, canonical string, c config.Connection) {
+	u, e := config.LiteralText(c.Transport.HTTP.URL)
+	if e != nil || p.opts.Keyring == nil {
+		return
+	}
+	ctx = context.WithoutCancel(ctx)
+	if _, e = auth.LoadOAuth(ctx, p.opts.Keyring, canonical); errors.Is(e, auth.ErrNoSession) {
+		_ = auth.SaveOAuth(ctx, p.opts.Keyring, canonical, auth.OAuthState{Version: 1, URL: u})
+	}
 }
 
 // oauthClientValue resolves a client ID or secret: a literal, or a resolved

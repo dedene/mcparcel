@@ -60,13 +60,13 @@ also work via `npx mcparcel ...`. No global installation or Homebrew is required
 | `config profile set <name> --file <profile.json>` | Save a validated credential profile containing references only |
 | `config profile bind <mcp> <profile>` | Bind the connection's declared credential requirement |
 | `auth login <mcp>` | Browser sign-in for an HTTP connection; prints the URL on stderr and opens the browser; `--no-input` returns `auth_required` once the connection is known to use sign-in; JSON `{connection, signedIn}` (`signedIn: false` when the server never asked for sign-in) |
-| `auth status [<mcp>]` | Offline, never starts the runtime: per HTTP connection `{connection, signedIn, refreshToken, accessTokenExpiresAt?, lastRefreshFailure?: {at, code}}` in `items`; no token. Without `<mcp>`: enabled HTTP connections marked OAuth or holding a sign-in |
+| `auth status [<mcp>]` | Offline, never starts the runtime: per HTTP connection `{connection, signedIn, refreshToken, accessTokenExpiresAt?, lastRefreshFailure?: {at, code}}` in `items`; no token. Without `<mcp>`: enabled HTTP connections marked OAuth, holding a sign-in, or whose server asked for sign-in (an unmarked connection whose call or login got `auth_required`; shown as `sign-in required`) |
 | `auth lock` | End in-memory credential sessions and block stored OAuth reuse until reauthorization |
 | `auth refresh <mcp>` | Invalidate credential lease; next call resolves/reconnects as necessary |
 | `auth logout <mcp>` | Remove the Keychain sign-in through the runtime (starts it if needed); JSON `{connection, removed, providerRevoked}`; `providerRevoked` is always false for now |
 | `doctor [<mcp>] [--live]` | Local prerequisite checks; only explicit live mode connects to specified MCP |
 | `runtime status` / `runtime restart [--force]` / `runtime stop [--force]` | Inspect, restart or stop the daemon; restart and stop refuse active calls unless forced; restart recaptures the login environment and drops pooled sessions, so changed `env:` values apply; stop on a stopped runtime succeeds |
-| `version` / `--help` | Version and English usage |
+| `version` / `--version` / `--help` | Version (`--version` prints the same line as `version`, before any command runs) and English usage |
 
 All commands provide `--json` except interactive `setup`; use selection/config
 commands for equivalent machine actions. `--no-input` never opens UI, browser,

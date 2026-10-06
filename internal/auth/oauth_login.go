@@ -45,7 +45,7 @@ func (h *OAuthHandler) login(ctx context.Context, req *http.Request, resp *http.
 func (h *OAuthHandler) loginLocked(ctx context.Context, req *http.Request, resp *http.Response) error {
 	issuer, resource, asm, found, err := discoverIssuer(ctx, h.client, h.opts.URL, resp.Header.Values("WWW-Authenticate"))
 	if err != nil {
-		return h.authFailed(fmt.Sprintf("Could not discover the authorization server for %s.", h.opts.Label))
+		return h.signInFailed("discovery", failureCode(err, "discovery_failed"), h.authFailed(fmt.Sprintf("Could not discover the authorization server for %s.", h.opts.Label)))
 	}
 	client := h.client
 	// Without PRM only the MCP URL fallback gives an issuer with a path.
@@ -54,23 +54,40 @@ func (h *OAuthHandler) loginLocked(ctx context.Context, req *http.Request, resp 
 		defer client.CloseIdleConnections()
 	}
 	if h.auth.IssuerURL != "" && !issuersEqual(h.auth.IssuerURL, issuer) {
-		return h.authFailed("The authorization server does not match auth.issuerUrl.")
+		return h.signInFailed("discovery", "issuer_mismatch", h.authFailed("The authorization server does not match auth.issuerUrl."))
 	}
 	if h.opts.Client.ID == "" && asm != nil && asm.RegistrationEndpoint == "" {
-		return h.authFailed("The authorization server offers no dynamic client registration; add auth.clientId to this connection's definition.")
+		return h.signInFailed("registration", "registration_unsupported", h.authFailed("The authorization server offers no dynamic client registration; add auth.clientId to this connection's definition."))
 	}
 	cb, err := h.listenCallback()
 	if err != nil {
-		return err
+		return h.signInFailed("callback", failureCode(err, "callback_failed"), err)
 	}
 	defer cb.shutdown()
+	// Where a failing Authorize stopped: the SDK calls the hooks below on
+	// this goroutine, in order (registration, scopes, callback, token).
+	stage, failCode := "registration", ""
 	cfg := &sdkauth.AuthorizationCodeHandlerConfig{
-		RedirectURL:              cb.redirect,
-		AuthorizationCodeFetcher: cb.fetch,
-		RequestRefreshToken:      true,
-		AcceptUnadvertisedIss:    true,
-		Client:                   client,
+		RedirectURL: cb.redirect,
+		AuthorizationCodeFetcher: func(ctx context.Context, args *sdkauth.AuthorizationArgs) (*sdkauth.AuthorizationResult, error) {
+			res, err := cb.fetch(ctx, args)
+			switch {
+			case !cb.answered:
+				failCode = failureCode(ctx.Err(), "")
+			case err != nil:
+				stage, failCode = "callback", cb.code
+			case asm != nil && issuerMismatch(res.Iss, asm):
+				stage, failCode = "callback", "issuer_mismatch"
+			default:
+				stage = "token_exchange"
+			}
+			return res, err
+		},
+		RequestRefreshToken:   true,
+		AcceptUnadvertisedIss: true,
+		Client:                client,
 		ScopeFilter: func(discovered []string) []string {
+			stage = "authorization"
 			if len(h.auth.Scopes) > 0 {
 				return h.auth.Scopes
 			}
@@ -78,8 +95,10 @@ func (h *OAuthHandler) loginLocked(ctx context.Context, req *http.Request, resp 
 		},
 		NewTokenSource: func(_ context.Context, c *oauth2.Config, tok *oauth2.Token) (oauth2.TokenSource, error) {
 			if asm != nil && c.Endpoint.TokenURL != asm.TokenEndpoint {
+				failCode = "metadata_changed"
 				return nil, h.authFailed("The authorization server metadata changed during sign-in.")
 			}
+			stage = "token_save"
 			s := OAuthState{Version: 1, URL: h.opts.URL, Issuer: issuer, Resource: resource, TokenURL: c.Endpoint.TokenURL, AuthStyle: int(c.Endpoint.AuthStyle), RefreshToken: tok.RefreshToken, AccessExpiry: unixOrZero(tok.Expiry)}
 			if h.opts.Client.ID == "" {
 				s.ClientID, s.ClientSecret = c.ClientID, c.ClientSecret
@@ -111,6 +130,12 @@ func (h *OAuthHandler) loginLocked(ctx context.Context, req *http.Request, resp 
 	if err == nil {
 		err = sdk.Authorize(ctx, req, resp)
 	}
+	if err != nil {
+		if failCode == "" {
+			failCode = failureCode(err, stage+"_failed")
+		}
+		_ = h.signInFailed(stage, failCode, err)
+	}
 	err = h.loginError(err)
 	cb.finish(err)
 	return err
@@ -133,6 +158,56 @@ func (h *OAuthHandler) loginError(err error) error {
 	return h.authFailed(fmt.Sprintf("Sign-in to %s failed.", h.opts.Label))
 }
 
+// signInFailed logs where and why a sign-in failed and returns err. Only the
+// stage and a sanitized code are logged: never a token, code, state or URL.
+func (h *OAuthHandler) signInFailed(stage, code string, err error) error {
+	if h.opts.LogSignInFailure != nil {
+		h.opts.LogSignInFailure(stage, sanitizeCode(code, "error"))
+	}
+	return err
+}
+
+// failureCode classifies a sign-in error: an OAuth error code, an HTTP
+// status, a timeout or network failure, an MCParcel error code, else fallback.
+func failureCode(err error, fallback string) string {
+	var re *oauth2.RetrieveError
+	var reg *oauthex.ClientRegistrationError
+	var ne net.Error
+	var safe *output.Error
+	switch {
+	case err == nil:
+		return fallback
+	case errors.As(err, &re):
+		if re.ErrorCode == "" && re.Response != nil {
+			return fmt.Sprintf("http_%d", re.Response.StatusCode)
+		}
+		return sanitizeCode(re.ErrorCode, fallback)
+	case errors.As(err, &reg):
+		return sanitizeCode(reg.ErrorCode, fallback)
+	case errors.Is(err, context.DeadlineExceeded):
+		return "timeout"
+	case errors.Is(err, context.Canceled):
+		return "canceled"
+	case errors.As(err, &safe) && safe != nil:
+		return safe.Code
+	case errors.As(err, &ne):
+		if ne.Timeout() {
+			return "timeout"
+		}
+		return "network_error"
+	}
+	return fallback
+}
+
+// issuerMismatch mirrors the SDK's RFC 9207 check (unadvertised iss accepted)
+// so a rejected callback is logged as such.
+func issuerMismatch(iss string, asm *oauthex.AuthServerMeta) bool {
+	if iss == "" {
+		return asm.AuthorizationResponseIssParameterSupported
+	}
+	return iss != asm.Issuer
+}
+
 func (h *OAuthHandler) authFailed(message string) *output.Error {
 	e := output.NewError("auth_failed", nil)
 	e.Message = message
@@ -140,9 +215,12 @@ func (h *OAuthHandler) authFailed(message string) *output.Error {
 	return e
 }
 
+// callbackResult is what the browser brought back; code is the sanitized
+// provider error code of a failed callback.
 type callbackResult struct {
-	res *sdkauth.AuthorizationResult
-	err error
+	res  *sdkauth.AuthorizationResult
+	err  error
+	code string
 }
 
 // callback is the loopback redirect endpoint of one sign-in.
@@ -154,6 +232,11 @@ type callback struct {
 	srv      *http.Server
 	result   chan callbackResult
 	outcome  chan error
+
+	// Set by fetch on the Authorize goroutine: the browser answered, and the
+	// failure code it brought.
+	answered bool
+	code     string
 
 	mu    sync.Mutex
 	state string
@@ -220,6 +303,7 @@ func (cb *callback) fetch(ctx context.Context, args *sdkauth.AuthorizationArgs) 
 	}
 	select {
 	case r := <-cb.result:
+		cb.answered, cb.code = true, r.code
 		return r.res, r.err
 	case <-ctx.Done():
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
@@ -269,10 +353,10 @@ func (cb *callback) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusGone)
 	case q.Get("error") != "":
 		p.State, p.Code, p.Detail = "failed", sanitizeCode(q.Get("error"), "error"), q.Get("error_description")
-		cb.result <- callbackResult{err: cb.h.authFailed(fmt.Sprintf("Sign-in to %s failed: %s.", cb.h.opts.Label, p.Code))}
+		cb.result <- callbackResult{err: cb.h.authFailed(fmt.Sprintf("Sign-in to %s failed: %s.", cb.h.opts.Label, p.Code)), code: p.Code}
 	case q.Get("code") == "":
 		p.State, p.Code = "failed", "invalid_request"
-		cb.result <- callbackResult{err: cb.h.authFailed(fmt.Sprintf("Sign-in to %s failed: invalid_request.", cb.h.opts.Label))}
+		cb.result <- callbackResult{err: cb.h.authFailed(fmt.Sprintf("Sign-in to %s failed: invalid_request.", cb.h.opts.Label)), code: "invalid_request"}
 	default:
 		cb.result <- callbackResult{res: &sdkauth.AuthorizationResult{Code: q.Get("code"), State: q.Get("state"), Iss: q.Get("iss")}}
 		p.State = "failed"

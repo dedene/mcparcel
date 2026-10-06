@@ -54,6 +54,9 @@ type CLI struct {
 	Auth    AuthCmd    `cmd:"" help:"Sign in to, inspect or sign out of OAuth connections."`
 	Runtime RuntimeCmd `cmd:"" help:"Inspect, restart or stop the runtime."`
 	Daemon  DaemonCmd  `cmd:"" hidden:""`
+
+	// VersionFlag is --version; it prints what the version command prints.
+	VersionFlag versionFlag `name:"version" help:"Print the mcparcel version and exit."`
 }
 
 type CommandOptions struct {

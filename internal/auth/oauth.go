@@ -30,6 +30,7 @@ type LoginOptions struct{ ShowURL func(string) error }
 // OAuthOptions configures one connection's handler. Account is the Keychain
 // account, Name the connection name shown in next actions, Label the display
 // name. Auth nil means defaults. Login nil means session mode from State.
+// LogSignInFailure receives the stage and error class of a failed sign-in.
 type OAuthOptions struct {
 	Account, Name, Label, URL string
 	Auth                      *config.OAuth
@@ -37,6 +38,7 @@ type OAuthOptions struct {
 	State                     *OAuthState
 	Keyring                   Keyring
 	Log                       func(string)
+	LogSignInFailure          func(stage, code string)
 	Login                     *LoginOptions
 }
 

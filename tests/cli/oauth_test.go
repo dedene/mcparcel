@@ -255,6 +255,10 @@ func TestOAuthDeniedBlackBox(t *testing.T) {
 	if n := r.as.Requests("/authorize"); n != 1 {
 		t.Fatalf("authorize requests: %d", n)
 	}
+	r.check(r.run("runtime", "stop", "--json"), 0, "")
+	if b, e := os.ReadFile(r.paths.LogFile); e != nil || !strings.Contains(string(b), `{"event":"oauth_sign_in_failed","stage":"callback","code":"access_denied"}`) {
+		t.Fatalf("daemon log %q %v", b, e)
+	}
 }
 
 func TestOAuthPreconfiguredClientBlackBox(t *testing.T) {
@@ -278,13 +282,26 @@ func TestOAuthPreconfiguredClientBlackBox(t *testing.T) {
 
 func TestUnmarkedHTTP401BlackBox(t *testing.T) {
 	r := newOAuthRig(t, testutil.AuthServerOptions{Registration: true}, nil)
+	if all := r.authStatus(); len(all) != 0 {
+		t.Fatalf("listed before any call: %+v", all)
+	}
 	started := time.Now()
 	v := r.check(r.run("call", "n.echo", "text=hi", "--json"), 3, "auth_required")
 	if time.Since(started) > 5*time.Second || !strings.Contains(v.stdout, "mcparcel auth login n") {
 		t.Fatal(time.Since(started), v.stdout)
 	}
+	// The server asked for sign-in, so the list now shows the connection.
+	if all := r.authStatus(); len(all) != 1 || all[0].Connection != "local:n" || all[0].SignedIn || all[0].RefreshToken || all[0].LastRefreshFailure != nil {
+		t.Fatalf("%+v", all)
+	}
+	if human := r.run("auth", "status"); human.code != 0 || human.stdout != "local:n  sign-in required\n" {
+		t.Fatalf("%q", human.stdout)
+	}
 	r.login(0, "")
 	r.call("n.echo", "text=hi")
+	if all := r.authStatus(); len(all) != 1 || !all[0].SignedIn {
+		t.Fatalf("%+v", all)
+	}
 }
 
 func TestHeaderKey401BlackBox(t *testing.T) {

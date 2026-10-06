@@ -349,7 +349,9 @@ and prints no token. `auth lock` is not built yet.
   client (`clientId`/`clientSecret`, env refs allowed) else DCR, PKCE S256, state,
   RFC 9207 `iss`, issuer/resource binding. Loopback listener on 127.0.0.1 (random
   port unless `redirectUrl` fixes it); port in use: `auth_callback_unavailable`.
-  The callback page (signed in, failed, expired, mismatch) is embedded, no JS.
+  The callback page (signed in, failed, expired, mismatch) is embedded, no JS;
+  it follows the browser's light or dark preference and declares
+  `color-scheme: light dark`.
   The OAuth HTTP client never follows a redirect of a token or registration
   request; metadata GETs follow at most 10, never to http from https or into
   loopback.
@@ -382,11 +384,22 @@ and prints no token. `auth lock` is not built yet.
   refresh; a 403 gives `auth_failed`.
 - Unmarked HTTP connections without a credential header are OAuth-capable: a 401
   gives `auth_required` pointing at `auth login`, and a stored session is used
-  when present (one Keychain read per new session). A connection with a credential
+  when present (one Keychain read per new session). The first such
+  `auth_required` from the server (call, tools or login; not `--no-input` login,
+  which contacts nothing) writes a Keychain item holding only the URL, so
+  `auth status` lists the connection as `sign-in required`; an existing item is
+  kept, sign-in replaces it and `auth logout` removes it. Servers are never
+  probed for the list. A connection with a credential
   header answers 401 as `auth_required` naming its `env:` variables; `auth login`
   rejects it (`invalid_arguments`).
 - Log events: `oauth_signed_in`, `oauth_refreshed`, `oauth_refresh_failed`,
-  `oauth_signed_out`. Never token, code, verifier or provider text.
+  `oauth_signed_out`, and `oauth_sign_in_failed` with `stage` (`discovery`,
+  `registration`, `authorization`, `callback`, `token_exchange`, `token_save`)
+  and `code`: the provider's OAuth error code when it is a plain token (e.g.
+  `access_denied`, `invalid_client`), else a class such as `http_500`,
+  `timeout`, `network_error`, `canceled`, `issuer_mismatch`,
+  `registration_unsupported` or `<stage>_failed`. Never token, code, state,
+  verifier, URL, connection name or provider text.
 - Deferred: implicit login, keep-alive refresh, `auth lock`, failure history,
   client reuse, `tokenEndpointAuthMethod` enforcement, provider revocation.
 

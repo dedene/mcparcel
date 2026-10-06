@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"regexp"
 	"sync"
 
 	"github.com/dedene/mcparcel/internal/config"
@@ -70,6 +71,34 @@ func WriteLog(w io.Writer, event string, path *string) error {
 		Event string  `json:"event"`
 		Path  *string `json:"capturedPath,omitempty"`
 	}{event, path})
+	if e != nil {
+		return e
+	}
+	b = append(b, '\n')
+	n, e := w.Write(b)
+	if e == nil && n != len(b) {
+		e = io.ErrShortWrite
+	}
+	return e
+}
+
+var (
+	signInStages = map[string]bool{"discovery": true, "registration": true, "authorization": true, "callback": true, "token_exchange": true, "token_save": true}
+	signInCode   = regexp.MustCompile(`^[a-z0-9_.-]{1,64}$`)
+)
+
+// WriteSignInFailure logs why a sign-in failed: the stage and a sanitized
+// error class or OAuth error code. Anything else is refused, so no token,
+// code, state value, URL or provider text reaches the log.
+func WriteSignInFailure(w io.Writer, stage, code string) error {
+	if !signInStages[stage] || !signInCode.MatchString(code) {
+		return errors.New("invalid sign-in failure")
+	}
+	b, e := json.Marshal(struct {
+		Event string `json:"event"`
+		Stage string `json:"stage"`
+		Code  string `json:"code"`
+	}{"oauth_sign_in_failed", stage, code})
 	if e != nil {
 		return e
 	}

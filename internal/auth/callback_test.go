@@ -62,6 +62,38 @@ func TestCallbackEscapesProviderError(t *testing.T) {
 	}
 }
 
+// TestCallbackDarkTheme pins what a dark-mode browser needs: no data-theme on
+// <html> (which would switch the dark rules off), a dark block keyed on
+// prefers-color-scheme alone, and a color-scheme declaration so the browser
+// also draws its own parts (canvas, scrollbars) dark.
+func TestCallbackDarkTheme(t *testing.T) {
+	for _, state := range []string{"signed_in", "failed", "expired", "mismatch"} {
+		got := render(t, callbackPage{State: state, Label: "Linear", Name: "linear"})
+		html, _, _ := strings.Cut(got, ">")
+		if html != `<!doctype html` {
+			t.Fatalf("%s: unexpected prologue %q", state, html)
+		}
+		rest := got[len(html)+1:]
+		if tag, _, _ := strings.Cut(rest, ">"); tag != `<html lang="en"` {
+			t.Fatalf("%s: <html> carries attributes beyond lang: %q", state, tag)
+		}
+		for _, want := range []string{
+			`<meta name="color-scheme" content="light dark">`,
+			`:root{color-scheme:light dark;--bg:#F4F4EC;`,
+			`@media (prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#1B201B;`,
+			`:root[data-theme=light]{color-scheme:light}`,
+			`:root[data-theme=dark]{color-scheme:dark;--bg:#1B201B;`,
+		} {
+			if !strings.Contains(got, want) {
+				t.Fatalf("%s: missing %q", state, want)
+			}
+		}
+		if strings.Contains(got, "data-theme=\"") || strings.Contains(got, "data-theme='") {
+			t.Fatalf("%s: page hard-codes a theme", state)
+		}
+	}
+}
+
 func TestCallbackNoExternalRequests(t *testing.T) {
 	for _, state := range []string{"signed_in", "failed", "expired", "mismatch"} {
 		got := render(t, callbackPage{State: state, Label: "Linear", Name: "linear", Code: "access_denied", Detail: "see https://x.invalid"})

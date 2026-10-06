@@ -22,6 +22,7 @@ type PoolOptions struct {
 	Version         string
 	Credentials     auth.Resolver
 	Log             func(event string)
+	SignInFailure   func(stage, code string) // logs a failed sign-in; see WriteSignInFailure
 	Keychain        func(ctx context.Context, name string) (string, error)
 	Keyring         auth.Keyring // OAuth sessions; nil fails marked connections with keychain_unavailable
 	Load            func(config.Paths) (config.Snapshot, error)
@@ -57,6 +58,9 @@ func NewPool(opts PoolOptions) Handler {
 	}
 	if opts.Log == nil {
 		opts.Log = func(string) {}
+	}
+	if opts.SignInFailure == nil {
+		opts.SignInFailure = func(string, string) {}
 	}
 	if opts.ConnectTimeout <= 0 {
 		opts.ConnectTimeout = 30 * time.Second
@@ -182,6 +186,9 @@ func (p *pool) Handle(ctx context.Context, id string, req Request, before func()
 				resp.Error.NextAction = "mcparcel auth login " + req.Connection
 				if resp.Error.Message == output.NewError("auth_required", nil).Message {
 					resp.Error.Message = "Sign-in required for " + req.Connection + "."
+				}
+				if c.Auth == nil {
+					p.rememberSignIn(ctx, canonical, c)
 				}
 			}
 		}()
