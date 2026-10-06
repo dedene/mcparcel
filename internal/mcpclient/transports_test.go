@@ -106,9 +106,9 @@ func TestOversizedHTTPResponses(t *testing.T) {
 				code(t, e, "protocol_error")
 			} else {
 				r, e := s.Call(ctx(t), "counter", nil, nil, nil)
-				code(t, e, "outcome_unknown")
-				if !r.Dispatched {
-					t.Fatal("not dispatched")
+				code(t, e, "result_too_large")
+				if !r.Dispatched || !r.Retire {
+					t.Fatal("not dispatched or not retired")
 				}
 			}
 		})

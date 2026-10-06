@@ -1,11 +1,15 @@
 package output
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
+	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/dedene/mcparcel/internal/elicit"
 )
 
 func WriteHuman(w io.Writer, data any) error {
@@ -80,31 +84,52 @@ func WriteHuman(w io.Writer, data any) error {
 	return writeOnce(w, []byte(b.String()))
 }
 
+var blockType = regexp.MustCompile(`^[a-z_]{1,32}$`)
+
+// humanCall prints text blocks cleaned for the terminal and one label per other
+// block; it never fails on an odd block shape. Without text blocks it prints
+// structuredContent as compact JSON.
 func humanCall(b *strings.Builder, data CallData) error {
-	var result struct {
-		Content []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
-		} `json:"content"`
-	}
-	if err := json.Unmarshal(data.Result, &result); err != nil {
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(data.Result, &top); err != nil {
 		return NewError("protocol_error", nil)
 	}
-	for _, block := range result.Content {
-		switch block.Type {
-		case "text":
-			b.WriteString(block.Text)
-			b.WriteByte('\n')
-		case "image":
-			b.WriteString("[image]\n")
-		case "audio":
-			b.WriteString("[audio]\n")
+	saved := map[int]string{}
+	for _, a := range data.Artifacts {
+		saved[a.Index] = a.Path
+	}
+	var content []json.RawMessage
+	_ = json.Unmarshal(top["content"], &content)
+	texts := 0
+	for i, raw := range content {
+		var block map[string]json.RawMessage
+		var kind, text string
+		_ = json.Unmarshal(raw, &block)
+		_ = json.Unmarshal(block["type"], &kind)
+		switch path, ok := saved[i]; {
+		case kind == "text" && isString(block["text"]) && json.Unmarshal(block["text"], &text) == nil:
+			texts++
+			b.WriteString(elicit.CleanLines(text))
+		case ok && (kind == "image" || kind == "audio"):
+			b.WriteString("[" + kind + " saved: " + elicit.CleanLines(path) + "]")
+		case blockType.MatchString(kind):
+			b.WriteString("[" + kind + "]")
 		default:
-			b.WriteString("[resource]\n")
+			b.WriteString("[content]")
+		}
+		b.WriteByte('\n')
+	}
+	if structured := top["structuredContent"]; texts == 0 && len(structured) > 0 && string(structured) != "null" {
+		var compact bytes.Buffer
+		if json.Compact(&compact, structured) == nil {
+			b.WriteString(elicit.CleanLines(compact.String()))
+			b.WriteByte('\n')
 		}
 	}
 	return nil
 }
+
+func isString(raw json.RawMessage) bool { return len(raw) > 0 && raw[0] == '"' }
 
 func humanTools(b *strings.Builder, data ToolList) error {
 	type tool struct {

@@ -96,8 +96,22 @@ before live discovery; unknown names are marked unverified until schemas are loa
   a property typed `string` stays a string (`id=007` is `"007"`); `integer`,
   `number`, `boolean`, `array` and `object` properties are parsed as JSON, so
   `limit=5` and `queries='[{"q":"x"}]'` arrive typed. A value that does not parse
-  as the declared type fails with exit 2 and names the expected type. A property
-  with no declared type, a union type or no schema entry is sent as a string.
+  as the declared type fails with exit 2 and names the expected type. The type is
+  looked up through local `$ref`s (`#/$defs/...`, `#/definitions/...`, also a
+  `$ref` at the schema root), one-item `allOf` wrappers and nullable unions
+  (`type: [T, "null"]`, or `anyOf`/`oneOf` of T and `null`): such a property
+  coerces as T, and the literal `null` becomes JSON null unless T is `string`. A
+  property with no declared type, any other union or no schema entry is sent as
+  a string; use `key:=json` for those.
+- The coerced arguments are then validated against the tool's input schema
+  (draft-07 or 2020-12) before the call is sent. A mismatch fails with
+  `invalid_arguments` (exit 2) and nothing is dispatched; the message names the
+  schema path and keyword (`... at /properties/limit (minimum).`, or the missing
+  required names), never the value. Remote `$ref`s are never fetched. When the
+  schema cannot be checked locally (another draft, a remote, dynamic or
+  unresolvable ref, a cyclic or oversized schema, or arguments too large or deep
+  to check within the validation work budget), the call is sent unvalidated with
+  a `schema_unchecked` warning and the server checks the arguments.
 - `key:=json` always parses the value as JSON, whatever the schema says.
 - `--args <json>` takes a JSON object inline; `--args-file path` reads one from a
   file and `--args-file -` from stdin. The three are mutually exclusive with each
@@ -114,8 +128,25 @@ before live discovery; unknown names are marked unverified until schemas are loa
   `progressToken` and any prefix whose second label is `modelcontextprotocol` or
   `mcp` (such as `io.modelcontextprotocol/`). Any of these fail with
   `invalid_arguments` (exit 2) before the runtime is contacted. Given once only.
-- `--output-dir <path>` explicitly saves binary result blocks; `--json` always
-  preserves complete protocol content, even when exports are requested.
+- `--output-dir <path>` saves the result's top-level `image` and `audio` content
+  blocks as files in that directory. It must name an existing directory, given
+  once; otherwise `call` fails with `invalid_arguments` (exit 2) before reading
+  input or contacting the runtime. Each file is new: named
+  `mcparcel-<UTC stamp>-<6 hex>-<index>.<ext>` (`index` is the block's position
+  in `content`; the extension comes from a fixed `mimeType` table, else `.bin`),
+  mode 0600, created exclusively, so an existing file or symlink is never
+  followed or overwritten and no server text reaches the name. Resource blobs,
+  nested blocks and other types are not saved; more than 256 image/audio blocks
+  saves nothing. Every block is base64-decoded before the first file is
+  created, so invalid data writes nothing. `data.artifacts` lists what was
+  written as `{index,type,mimeType,path,bytes}` with an absolute `path`; it is
+  absent when nothing was written. `--json` still carries the complete result,
+  base64 included. If saving fails after a successful call, `call` exits 1 with
+  `export_failed`, keeping `data.result` and any `artifacts` already written; do
+  not call the tool again just to export. When the call itself failed with a
+  result (`tool_error`, `input_required`), the blocks are still saved and an
+  export failure is a `warnings` entry instead. Without `--output-dir`, nothing
+  from a result is ever written to disk.
 
 ## Approval prompts
 
@@ -176,13 +207,18 @@ Failure uses `ok:false`, `data:null` and `{code,message,nextAction?,details?}` a
 For call output, `data` contains `connection`, `tool`, `result` (unmodified MCP
 CallToolResult), optional `artifacts` and optional `warnings`: a list of
 `{code,message,nextAction}` notices about the call that leave `result` untouched.
-Human mode prints each warning's message and next action on stderr. List output includes `items`, relevant
+Human mode prints each warning's message and next action on stderr. Human call
+output prints text blocks, `[image saved: <path>]` or `[audio saved: <path>]` for
+exported blocks and `[<type>]` for any other block (`[content]` when the type is
+not a short lowercase name); when there is no text block it prints
+`structuredContent` as compact JSON. Server text is stripped of terminal escape
+sequences, control characters other than newline and tab, and bidi controls. List output includes `items`, relevant
 source revisions and cache age. Secret bindings remain references, never values.
 
 | Exit | Meaning |
 | --- | --- |
 | 0 | Success |
-| 1 | Unexpected internal failure |
+| 1 | Unexpected internal failure, or `export_failed` (the call succeeded but `--output-dir` could not save its blocks) |
 | 2 | Usage, invalid config, missing input or ambiguous ID |
 | 3 | Authentication required/denied/expired |
 | 4 | Disabled/unavailable connection or denied tool |
@@ -196,6 +232,17 @@ Error codes distinguish `auth_required`, `auth_expired`, `config_required`,
 `runtime_version_mismatch`, `runtime_config_mismatch`, `auth_account_conflict` and
 `outcome_unknown`. `review_required` uses exit 4; `runtime_config_mismatch` exit 6;
 `auth_account_conflict` exit 3.
+`server_error` (exit 6) means the server answered the call with a JSON-RPC error
+instead of a result: the message carries the server's text cleaned to one line of
+at most 300 characters (never the error's `data`), and `details` has
+`dispatched`, `requestId` and `rpcCode` (the JSON-RPC code; 0 is a legal code) but
+no `outcome`, since the server reported the failure. `result_too_large` (exit 6)
+means the tool's answer exceeded a size limit (16 MiB per MCP message) and was
+not received; it has `dispatched` and `outcome:"unknown"`, because the tool may
+have run. `export_failed` (exit 1) means the call finished but `--output-dir`
+could not save its blocks; `data` keeps the result. A `protocol_error` after dispatch, such as a result that is not strict
+JSON (duplicate keys, invalid UTF-8, nested deeper than 125 levels, a non-boolean
+`isError`), also has `outcome:"unknown"`. Do not blindly retry any of these.
 `elicitation_declined` (exit 3) means the server asked for input through MCP
 elicitation and did not get an accept. The server's text is reduced to one line
 of at most 300 characters without control characters. The wording says why:

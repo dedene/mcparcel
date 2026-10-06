@@ -14,7 +14,11 @@ import (
 
 const (
 	ProtocolVersion = 1
-	MaxFrameBytes   = 16 * 1024 * 1024
+	// MaxFrameBytes bounds every frame the daemon reads.
+	MaxFrameBytes = 16 << 20
+	// MaxResponseFrameBytes bounds the frames the CLI reads, so a 16 MiB MCP
+	// result still fits after encoding/json escapes it.
+	MaxResponseFrameBytes = 64 << 20
 )
 
 var (

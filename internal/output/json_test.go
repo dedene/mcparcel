@@ -164,7 +164,7 @@ func TestHumanBlocks(t *testing.T) {
 	}
 	b.Reset()
 	data.Result = json.RawMessage(`{"content":[{"type":"resource","resource":{"uri":"fixture://resource"}},{"type":"resource_link","uri":"fixture://link"}]}`)
-	if err := WriteHuman(&b, data); err != nil || b.String() != "[resource]\n[resource]\n" {
+	if err := WriteHuman(&b, data); err != nil || b.String() != "[resource]\n[resource_link]\n" {
 		t.Fatal(b.String(), err)
 	}
 }

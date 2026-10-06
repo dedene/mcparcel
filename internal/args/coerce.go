@@ -13,18 +13,16 @@ import (
 var ErrInvalidSchema = errors.New("invalid tool schema")
 
 func Coerce(raw Raw, inputSchema json.RawMessage) (map[string]any, error) {
-	var properties map[string]any
+	var root, properties map[string]any
 	if len(inputSchema) > 0 {
 		v, err := jsonutil.Decode(inputSchema)
 		schema, ok := v.(map[string]any)
 		if err != nil || !ok {
 			return nil, ErrInvalidSchema
 		}
-		if p, exists := schema["properties"]; exists {
-			properties, ok = p.(map[string]any)
-			if !ok {
-				return nil, ErrInvalidSchema
-			}
+		root = schema
+		if properties, err = rootProperties(schema); err != nil {
+			return nil, err
 		}
 	}
 	keys := make([]string, 0, len(raw.Values))
@@ -46,20 +44,10 @@ func Coerce(raw Raw, inputSchema json.RawMessage) (map[string]any, error) {
 				return nil, fmt.Errorf("%w: argument %q requires valid JSON", ErrInvalidArgs, key)
 			}
 		} else {
-			typ := ""
-			if property, ok := properties[key].(map[string]any); ok {
-				direct := true
-				for _, name := range []string{"$ref", "anyOf", "oneOf", "allOf"} {
-					if _, exists := property[name]; exists {
-						direct = false
-					}
-				}
-				if direct {
-					typ, _ = property["type"].(string)
-				}
-			}
-			v, err = coerceText(key, value.Text, typ)
-			if err != nil {
+			typ, nullable := propertyType(root, properties[key])
+			if nullable && typ != "string" && value.Text == "null" {
+				v = nil
+			} else if v, err = coerceText(key, value.Text, typ); err != nil {
 				return nil, err
 			}
 		}

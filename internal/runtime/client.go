@@ -183,7 +183,7 @@ func (c *Client) exchange(ctx context.Context, intent string, r Request, ensure 
 	defer close(readerStop)
 	go func() {
 		for {
-			f, e := ReadFrame(conn)
+			f, e := readFrame(conn, MaxResponseFrameBytes)
 			select {
 			case ch <- readResult{f, e}:
 			case <-readerStop:
@@ -320,6 +320,10 @@ func (c *Client) Call(ctx context.Context, req CallRequest) (CallResponse, error
 		if de := decodeBody(resp.Data, &out.Data); de != nil && e == nil {
 			e = de
 		}
+	}
+	if len(out.Data.Artifacts) > 0 {
+		// Only the CLI saves files; a daemon naming artifacts is broken or hostile.
+		return CallResponse{RequestID: id, Dispatched: resp.Dispatched}, output.NewError("protocol_error", &output.Details{RequestID: id, Dispatched: resp.Dispatched, Outcome: outcome(resp.Dispatched)})
 	}
 	return out, e
 }

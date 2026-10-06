@@ -52,6 +52,12 @@ func authURLSender(ctx context.Context) func(string) error {
 	return send
 }
 
+// writeDeadline bounds one frame write to a peer that stops reading: 2s, plus
+// 1s per 4 MiB so a large result survives a briefly busy CLI.
+func writeDeadline(size int) time.Duration {
+	return 2*time.Second + time.Duration(size/(4<<20))*time.Second
+}
+
 type writerGate chan struct{}
 
 func makeWriter() writerGate { g := make(writerGate, 1); g <- struct{}{}; return g }
@@ -63,13 +69,26 @@ func writeSocketFrame(ctx context.Context, c *net.UnixConn, g writerGate, f Fram
 	if e := ctx.Err(); e != nil {
 		return e
 	}
+	buf, e := encodeFrame(f)
+	if e != nil {
+		return e
+	}
+	return writeSocketBytes(ctx, c, g, buf, beforeWrite)
+}
+
+// writeSocketBytes writes one encoded frame. Encoding a large result takes
+// time of its own, so callers encode before their write budget starts.
+func writeSocketBytes(ctx context.Context, c *net.UnixConn, g writerGate, buf []byte, beforeWrite func()) error {
+	if e := ctx.Err(); e != nil {
+		return e
+	}
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-g:
 	}
 	defer func() { g <- struct{}{} }()
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(writeDeadline(len(buf)))
 	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
 		deadline = d
 	}
@@ -86,7 +105,7 @@ func writeSocketFrame(ctx context.Context, c *net.UnixConn, g writerGate, f Fram
 	if beforeWrite != nil {
 		beforeWrite()
 	}
-	e := WriteFrame(c, f)
+	e := writeEncoded(c, buf)
 	close(done)
 	<-exited
 	_ = c.SetWriteDeadline(time.Time{})
@@ -242,6 +261,24 @@ func (s *daemonService) stop(force bool) {
 	})
 }
 
+// writeResponse writes an encoded response under the size-scaled write
+// deadline. While the request is live a shutdown cancels the write through
+// ctx; a response written after ctx ended is capped at the shutdown timeout,
+// so it cannot hold a shutdown.
+func (s *daemonService) writeResponse(ctx context.Context, conn *net.UnixConn, g writerGate, buf []byte) error {
+	budget := writeDeadline(len(buf))
+	if ctx.Err() != nil {
+		budget = min(budget, s.opts.ShutdownTimeout)
+	}
+	writeCtx, c := context.WithTimeout(context.Background(), budget)
+	defer c()
+	if ctx.Err() == nil {
+		stop := context.AfterFunc(ctx, c)
+		defer stop()
+	}
+	return writeSocketBytes(writeCtx, conn, g, buf, nil)
+}
+
 func (s *daemonService) serveSocket(conn *net.UnixConn) {
 	defer func() { _ = conn.Close() }()
 	hello, id, e := ServerHandshake(conn, s.opts.Version, os.Getpid(), configRoot(s.opts.Paths.ConfigDir))
@@ -257,14 +294,11 @@ func (s *daemonService) serveSocket(conn *net.UnixConn) {
 	_ = conn.SetReadDeadline(time.Time{})
 	send := func(r Response) {
 		// Encode before the write budget starts: a large result must not spend it.
-		frame := requestFrame("response", id, r)
-		writeCtx, c := context.WithTimeout(context.Background(), min(2*time.Second, s.opts.ShutdownTimeout))
-		defer c()
-		if ctx.Err() == nil {
-			stop := context.AfterFunc(ctx, c)
-			defer stop()
+		buf, e := encodeFrame(requestFrame("response", id, r))
+		if e != nil {
+			return
 		}
-		_ = writeSocket(writeCtx, conn, g, frame)
+		_ = s.writeResponse(ctx, conn, g, buf)
 	}
 	if e != nil {
 		if !errors.Is(e, io.EOF) {

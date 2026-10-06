@@ -119,9 +119,24 @@ never arguments, results, server messages, prompt text, answers or secret values
 
 ## HTTP, tool discovery and results
 
-HTTP responses and SSE events are bounded at 16 MiB; the standalone SSE
-listening stream is disabled, and a failed tool discovery retires the session so
-the next call reconnects.
+Each MCP message is bounded at 16 MiB: a stdio line, or an HTTP response
+including the notifications and requests streamed before the result (an SSE
+event therefore too). A call answer over the limit is reported as
+`result_too_large` (exit 6, `dispatched`, `outcome:"unknown"`) and retires the
+session; a pretty-printed stdio message over the limit hits the SDK's own bound
+and stays `outcome_unknown`. The standalone SSE listening stream is disabled, and
+a failed tool discovery retires the session so the next call reconnects.
+
+IPC frames the daemon reads (requests, answers) stay at 16 MiB. Response frames,
+read only by the CLI, may reach 64 MiB, because `encoding/json` escapes `<`, `>`
+and `&` (sixfold) when the daemon re-encodes a result. Call data over 63 MiB is
+`result_too_large` without retiring the session. The CLI and the daemon check
+frames as strict JSON in one pass that keeps no values. The daemon encodes a
+frame before its write budget starts; the budget is 2 seconds plus 1 second per
+4 MiB of frame, so a CLI that stops reading cannot hold a connection, while a
+large result still arrives. A shutdown cancels a response write in flight; a
+response written after its request ended (canceled or forced) is capped at the
+shutdown timeout.
 
 Try Streamable HTTP initialization first for `auto`; use legacy SSE only for a
 recognized transport mismatch, before any tool call. The MCP Go SDK v1.8.0 does
@@ -137,20 +152,53 @@ a changed origin. Insecure internal HTTP requires explicit per-connection consen
 and config-scoped schema cache. `tools --cached` cannot authenticate or connect.
 A list-changed notification invalidates the cache; missing tools get a precise error.
 `call` checks enabled state and both tool filters before resolving secrets, then
-validates arguments against the live/cached current schema and calls the SDK.
-No schema/tool result text is treated as CLI instructions.
+coerces and validates arguments against the live/cached current schema
+(jsonschema-go, draft-07 and 2020-12, local refs only, with a nil loader so nothing
+is fetched) and calls the SDK. A schema that cannot be checked safely (another
+draft, remote/dynamic/unresolvable refs, a `$ref` cycle through in-place
+applicators (`allOf`/`anyOf`/`oneOf`, `not`, `if`/`then`/`else`,
+`dependentSchemas` and draft-07 `dependencies`), more than 1000 applicator paths,
+a validator panic) is not given to the validator; the call goes out with a
+`schema_unchecked` warning. `const`/`enum`/`default`/`examples` values are data,
+but a property or definition with one of those names is still a schema. Before
+validating, the daemon bounds the validator's work for these arguments: an upper
+bound over every branch, pattern and conditional per argument node, weighted by
+the size of the value checked (a failing branch prints it), at most 500,000
+units; past that the call also goes out `schema_unchecked`. Type lookup for
+coercion inspects at most 1024 subschemas per argument. Validator messages are
+rebuilt from schema path and keyword, by unwrapping the validator's error chain
+rather than parsing its text, so argument values never reach the error. No schema/tool result text is treated as CLI instructions.
+
+Call results are kept raw: the daemon captures the server's `tools/call` answer
+below the SDK's typed decoding (the stdio connection, or a tee on the HTTP
+response body for that POST; 401/403 bodies belong to the OAuth path and are not
+captured). An SSE body is read the way the SDK reads it: lines end at LF, field
+values and event names are trimmed, and a final event that ends at EOF without
+its blank line still counts. Unknown content blocks and fields are kept, numbers keep their exact
+digits (big integers in `structuredContent` or `_meta`), and invalid base64 is
+passed on untouched. `data.result` is that JSON compacted, with `<`, `>` and `&`
+escaped by `encoding/json`. The raw result must be strict JSON (no duplicate keys,
+valid UTF-8, at most 125 levels so its frame stays within the 128-level IPC limit,
+`isError` absent or boolean), else `protocol_error` with `outcome:"unknown"`. A
+JSON-RPC error answer becomes `server_error` (exit 6) with the cleaned message and
+`rpcCode`; the session is kept unless the error came with a non-2xx HTTP status.
 
 `--json` preserves the complete MCP CallToolResult, including structured content,
 all content blocks, metadata and `isError`; do not flatten it to text. Human output
 shows text and labels binary blocks. `--output-dir` explicitly exports image/audio
 blocks with generated filenames, private permissions, no overwrite/path traversal,
-and manifests; without that flag no response payload is saved to disk.
+and the `artifacts` list in `data`; the CLI does this after the daemon answers,
+and the CLI rejects a daemon response that already carries `artifacts`
+(`protocol_error`). Without that flag no response payload is saved to disk.
 
 Protocol support starts with list/call, progress and cancellation. Stage 1 checks
 whether real workflows need resources/prompts, roots, elicitation or sampling.
-Provide resource/prompt operations if observed; do not advertise unsupported client
-capabilities. A required missing capability blocks that connection's parity gate,
-not a quiet downgrade of the promise that all 32 remain usable.
+The audit (feasibility.md) found no resources, prompts, roots or sampling in use,
+so none are built; the client advertises form elicitation only, and a sampling
+request gets the SDK's -32601 (the call then ends however the server answers).
+Do not advertise unsupported client capabilities. A required missing capability
+blocks that connection's parity gate, not a quiet downgrade of the promise that
+all 32 remain usable.
 
 Elicitation (stage 8b): every connection advertises form elicitation, because some
 servers (Codex `cua_repl`) refuse to work without it and answer approved apps
@@ -471,9 +519,11 @@ replaces the 30s for that connection's connect, initialize and tool listing
 startup included, so raise `callTimeout` with it; `tools` keeps its 180s request
 deadline. Time spent on an open approval prompt is excluded from the call
 deadline (startup and credential deadlines are not paused). No automatic retry of tool calls.
-Server tool errors preserve the MCP result and use exit 5. A disconnect after
-request dispatch uses `outcome_unknown`; prior-to-dispatch errors use connection
-or auth codes. CLI Ctrl-C cancels its call, not the daemon or other callers.
+Server tool errors preserve the MCP result and use exit 5; a JSON-RPC error
+answer is `server_error` (exit 6, `rpcCode`, no `outcome`). A disconnect after
+request dispatch uses `outcome_unknown`; an answer over the size limit
+`result_too_large` and a malformed answer `protocol_error`, both with
+`outcome:"unknown"`; prior-to-dispatch errors use connection or auth codes. CLI Ctrl-C cancels its call, not the daemon or other callers.
 
 Metadata may contain private tool names and account references: protected files,
 no raw debug HTTP dumps or unbounded child stderr. Redact resolved credentials from

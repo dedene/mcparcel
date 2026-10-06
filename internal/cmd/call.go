@@ -25,6 +25,7 @@ type CallCmd struct {
 	ArgsFile    string   `name:"args-file" help:"Read a JSON object from a file, or - for stdin."`
 	Timeout     string   `name:"timeout" help:"Positive call duration, including queue and initialization; time spent answering a prompt is not counted."`
 	Meta        string   `name:"meta" help:"JSON object sent as the call's _meta."`
+	OutputDir   string   `name:"output-dir" help:"Save image and audio blocks as new files in this existing directory."`
 }
 
 var connectionID = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
@@ -70,6 +71,9 @@ func validateCallSources(c *CallCmd, flags map[string]int) error {
 	if sources > 1 || flags["--args"] > 0 && c.Args == "" || flags["--args-file"] > 0 && c.ArgsFile == "" || flags["--meta"] > 1 || flags["--meta"] > 0 && c.Meta == "" {
 		return output.NewError("invalid_arguments", nil)
 	}
+	if flags["--output-dir"] > 1 || flags["--output-dir"] > 0 && c.OutputDir == "" {
+		return output.NewError("invalid_arguments", nil)
+	}
 	if flags["--timeout"] > 0 {
 		d, err := time.ParseDuration(c.Timeout)
 		if err != nil || d <= 0 {
@@ -83,6 +87,14 @@ func (c *CallCmd) Run(ctx context.Context, s *Streams, opts *CommandOptions) err
 	connection, tool, err := splitCallTarget(c.Target)
 	if err != nil {
 		return err
+	}
+	var exports *output.ExportDir
+	if c.OutputDir != "" {
+		// Checked before any input is read or the runtime is contacted.
+		if exports, err = output.OpenExportDir(c.OutputDir); err != nil {
+			return err
+		}
+		defer exports.Close()
 	}
 	var timeout time.Duration
 	if c.Timeout != "" {
@@ -134,9 +146,25 @@ func (c *CallCmd) Run(ctx context.Context, s *Streams, opts *CommandOptions) err
 	}
 	client.Prompt, client.OnElicit = promptFor(ctx, s, opts, client.Paths, connection)
 	response, err := client.Call(ctx, runtimeclient.CallRequest{Connection: connection, Tool: tool, Arguments: raw, Timeout: timeout, Meta: meta})
+	var exportErr *output.Error
+	if exports != nil && len(response.Data.Result) > 0 {
+		// Not interruptible: the result is in hand and the work is bounded.
+		artifacts, e := exports.Export(response.Data.Result, output.ExportPrefix(time.Now()))
+		response.Data.Artifacts = artifacts
+		if e != nil {
+			exportErr = safeFailure(e)
+			if err != nil {
+				response.Data.Warnings = append(response.Data.Warnings, *exportErr)
+				exportErr = nil
+			}
+		}
+	}
 	if !opts.JSON {
 		for _, w := range response.Data.Warnings {
-			fmt.Fprintf(s.Err, "%s\n%s\n", w.Message, w.NextAction)
+			fmt.Fprintln(s.Err, w.Message)
+			if w.NextAction != "" {
+				fmt.Fprintln(s.Err, w.NextAction)
+			}
 		}
 	}
 	if err != nil {
@@ -145,6 +173,9 @@ func (c *CallCmd) Run(ctx context.Context, s *Streams, opts *CommandOptions) err
 			return &commandFailure{Data: response.Data, Failure: failure}
 		}
 		return failure
+	}
+	if exportErr != nil {
+		return &commandFailure{Data: response.Data, Failure: exportErr}
 	}
 	return writeSuccess(s, opts, response.Data)
 }

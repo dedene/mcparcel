@@ -80,7 +80,7 @@ func (p *ownedProcess) Close() error {
 	return nil
 }
 
-func startProcess(opts ConnectOptions) (mcp.Transport, func(context.Context), error) {
+func startProcess(opts ConnectOptions, tap *callTap) (mcp.Transport, func(context.Context), error) {
 	c := opts.Connection.Transport.Stdio
 	cwd := opts.Home
 	if c.Cwd != nil {
@@ -130,12 +130,20 @@ func startProcess(opts ConnectOptions) (mcp.Transport, func(context.Context), er
 	}
 	p := &ownedProcess{stdin: stdin, cmd: cmd, done: make(chan struct{}), closed: make(chan struct{}), grace: opts.ShutdownTimeout}
 	go func() { _ = cmd.Wait(); close(p.done) }()
-	return &pipeTransport{IOTransport: &mcp.IOTransport{Reader: stdout, Writer: p, MaxLineLength: 16 * 1024 * 1024}, writer: stdin.(*os.File)}, func(ctx context.Context) { _ = p.CloseContext(ctx); _ = stdout.Close() }, nil
+	limit := opts.MaxMessageBytes
+	if limit <= 0 {
+		limit = defaultMaxMessageBytes
+	}
+	// The SDK's own bound sits one byte above the line reader's, so a single
+	// oversized line is always named by the tap.
+	reader := &lineLimitReader{r: stdout, limit: limit, tap: tap}
+	return &pipeTransport{IOTransport: &mcp.IOTransport{Reader: reader, Writer: p, MaxLineLength: limit + 1}, writer: stdin.(*os.File), tap: tap}, func(ctx context.Context) { _ = p.CloseContext(ctx); _ = stdout.Close() }, nil
 }
 
 type pipeTransport struct {
 	*mcp.IOTransport
 	writer *os.File
+	tap    *callTap
 }
 
 func (t *pipeTransport) Connect(ctx context.Context) (mcp.Connection, error) {
@@ -143,13 +151,23 @@ func (t *pipeTransport) Connect(ctx context.Context) (mcp.Connection, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &pipeConnection{Connection: c, writer: t.writer}, nil
+	return &pipeConnection{Connection: c, writer: t.writer, tap: t.tap}, nil
 }
 
 type pipeConnection struct {
 	mcp.Connection
 	writer *os.File
 	mu     sync.Mutex
+	tap    *callTap
+}
+
+// Read shows each incoming message to the call tap.
+func (c *pipeConnection) Read(ctx context.Context) (jsonrpc.Message, error) {
+	msg, err := c.Connection.Read(ctx)
+	if err == nil {
+		c.tap.received(msg)
+	}
+	return msg, err
 }
 
 func (c *pipeConnection) Write(ctx context.Context, msg jsonrpc.Message) error {
@@ -158,6 +176,8 @@ func (c *pipeConnection) Write(ctx context.Context, msg jsonrpc.Message) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	// Record the call's ID before a fast server can answer it.
+	c.tap.sent(msg)
 	done := make(chan struct{})
 	stop := context.AfterFunc(ctx, func() { _ = c.writer.SetWriteDeadline(time.Now()); close(done) })
 	err := c.Connection.Write(ctx, msg)

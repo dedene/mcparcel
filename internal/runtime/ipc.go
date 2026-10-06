@@ -16,7 +16,12 @@ import (
 	"github.com/dedene/mcparcel/internal/output"
 )
 
-func ReadFrame(r io.Reader) (Frame, error) {
+// ReadFrame reads one frame of at most MaxFrameBytes, as the daemon does.
+func ReadFrame(r io.Reader) (Frame, error) { return readFrame(r, MaxFrameBytes) }
+
+// readFrame reads one strict-JSON frame of at most limit bytes; only the CLI
+// reads response frames up to MaxResponseFrameBytes.
+func readFrame(r io.Reader, limit uint32) (Frame, error) {
 	var f Frame
 	var header [4]byte
 	n, err := io.ReadFull(r, header[:])
@@ -30,14 +35,15 @@ func ReadFrame(r io.Reader) (Frame, error) {
 	if size == 0 {
 		return f, ErrInvalidFrame
 	}
-	if size > MaxFrameBytes {
+	if size > limit {
 		return f, ErrFrameTooLarge
 	}
 	payload := make([]byte, int(size))
 	if _, err := io.ReadFull(r, payload); err != nil {
 		return f, ErrInvalidFrame
 	}
-	if _, err := jsonutil.Decode(payload); err != nil {
+	// One pass checks the whole payload, body included, without building it.
+	if err := jsonutil.Check(payload, 128); err != nil {
 		return f, ErrInvalidFrame
 	}
 	d := json.NewDecoder(bytes.NewReader(payload))
@@ -48,11 +54,7 @@ func ReadFrame(r io.Reader) (Frame, error) {
 	if !validID(f.RequestID) || len(f.Body) == 0 || f.Kind == "" {
 		return Frame{}, ErrInvalidFrame
 	}
-	obj, err := jsonutil.Decode(f.Body)
-	if err != nil {
-		return Frame{}, ErrInvalidFrame
-	}
-	if _, ok := obj.(map[string]any); !ok {
+	if body := bytes.TrimLeft(f.Body, " \t\r\n"); len(body) == 0 || body[0] != '{' {
 		return Frame{}, ErrInvalidFrame
 	}
 	if err := validateBody(f); err != nil {
@@ -62,16 +64,28 @@ func ReadFrame(r io.Reader) (Frame, error) {
 }
 
 func WriteFrame(w io.Writer, frame Frame) error {
+	buf, err := encodeFrame(frame)
+	if err != nil {
+		return err
+	}
+	return writeEncoded(w, buf)
+}
+
+// encodeFrame returns the frame's length-prefixed bytes.
+func encodeFrame(frame Frame) ([]byte, error) {
 	payload, err := json.Marshal(frame)
 	if err != nil {
-		return ErrInvalidFrame
+		return nil, ErrInvalidFrame
 	}
-	if len(payload) == 0 || len(payload) > MaxFrameBytes {
-		return ErrFrameTooLarge
+	if len(payload) == 0 || len(payload) > MaxResponseFrameBytes {
+		return nil, ErrFrameTooLarge
 	}
-	var header [4]byte
-	binary.BigEndian.PutUint32(header[:], uint32(len(payload)))
-	buf := append(header[:], payload...)
+	buf := make([]byte, 4, 4+len(payload))
+	binary.BigEndian.PutUint32(buf, uint32(len(payload)))
+	return append(buf, payload...), nil
+}
+
+func writeEncoded(w io.Writer, buf []byte) error {
 	for len(buf) > 0 {
 		n, err := w.Write(buf)
 		if err != nil {
@@ -108,7 +122,7 @@ func ClientHandshake(conn *net.UnixConn, version, intent, id, root string) (Hell
 	if err := WriteFrame(conn, Frame{ProtocolVersion, "hello", id, body}); err != nil {
 		return ack, err
 	}
-	f, err := ReadFrame(conn)
+	f, err := readFrame(conn, MaxResponseFrameBytes)
 	if err != nil {
 		return ack, err
 	}

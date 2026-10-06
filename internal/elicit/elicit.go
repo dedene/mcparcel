@@ -135,6 +135,40 @@ func skipString(text string, i int) int {
 	return i
 }
 
+// CleanLines makes untrusted multi-line text safe for a terminal: it removes
+// escape sequences (CSI, OSC, DCS and the other string controls), C0 and C1
+// controls other than newline and tab, bidi controls and invalid UTF-8. Unlike
+// Clean it keeps the layout and has no length cap.
+func CleanLines(text string) string {
+	var b strings.Builder
+	b.Grow(len(text))
+	for i := 0; i < len(text); {
+		r, n := utf8.DecodeRuneInString(text[i:])
+		i += n
+		switch {
+		case r == '\n' || r == '\t':
+			b.WriteRune(r)
+		case r == 0x1b && i < len(text):
+			next, m := utf8.DecodeRuneInString(text[i:])
+			i += m
+			switch next {
+			case '[':
+				i = skipCSI(text, i)
+			case ']', 'P', 'X', '^', '_':
+				i = skipString(text, i)
+			}
+		case r == 0x9b:
+			i = skipCSI(text, i)
+		case r == 0x90 || r == 0x98 || r == 0x9d || r == 0x9e || r == 0x9f:
+			i = skipString(text, i)
+		case unicode.IsControl(r) || unicode.Is(unicode.Bidi_Control, r) || r == utf8.RuneError && n == 1:
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
 func clean(s string, limit int) bool { return s == Clean(s, limit) }
 
 // Valid reports whether p is a well-formed, already cleaned prompt that fits

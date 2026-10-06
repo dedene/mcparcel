@@ -181,7 +181,7 @@ func scanIntent(argv []string) parseIntent {
 		}
 		name, value, inline := strings.Cut(token, "=")
 		switch name {
-		case "--args", "--args-file", "--timeout", "--meta", "--file", "--bindings", "--only", "--domain", "--path", "--ref", "--accept":
+		case "--args", "--args-file", "--timeout", "--meta", "--output-dir", "--file", "--bindings", "--only", "--domain", "--path", "--ref", "--accept":
 			i.flags[name]++
 			if name == "--file" || name == "--bindings" || name == "--only" || name == "--domain" || name == "--path" || name == "--ref" || name == "--accept" {
 				if inline && value == "" || !inline && (n+1 == len(argv) || argv[n+1] == "") {

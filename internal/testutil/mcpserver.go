@@ -142,6 +142,7 @@ func NewFixtureServerWithOptions(opts FixtureOptions) *mcp.Server {
 		r.StructuredContent = map[string]any{"meta": req.Params.Meta}
 		return r, nil
 	})
+	addContentTools(server, opts)
 	if opts.Legacy {
 		server.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
 			return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {

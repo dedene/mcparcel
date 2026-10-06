@@ -2,9 +2,11 @@ package mcpclient_test
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -50,9 +52,34 @@ func rmcpLike(mode string) int {
 			_ = out.Encode(map[string]any{"jsonrpc": "2.0", "id": msg.ID, "result": map[string]any{"protocolVersion": msg.Params.ProtocolVersion, "capabilities": map[string]any{"tools": map[string]any{}}, "serverInfo": map[string]any{"name": "rmcp", "version": "0"}}})
 		case "tools/list":
 			_ = out.Encode(map[string]any{"jsonrpc": "2.0", "id": msg.ID, "result": map[string]any{"tools": []any{map[string]any{"name": "js", "inputSchema": map[string]any{"type": "object"}}}}})
+		case "tools/call":
+			rawCall(msg.ID)
 		}
 	}
 	return 0
+}
+
+// rawCall answers a tools/call with hand-written bytes: the exact contents of
+// the file MCP_TEST_CALL_RAW as the result, MCP_TEST_CALL_ERROR as the error,
+// or a text result padding the line to MCP_TEST_CALL_LINE_BYTES bytes.
+func rawCall(id json.RawMessage) {
+	head := `{"jsonrpc":"2.0","id":` + string(id)
+	var line []byte
+	switch {
+	case os.Getenv("MCP_TEST_CALL_RAW") != "":
+		b, err := os.ReadFile(os.Getenv("MCP_TEST_CALL_RAW"))
+		if err != nil {
+			os.Exit(3)
+		}
+		line = append(append([]byte(head+`,"result":`), bytes.TrimRight(b, "\n")...), '}')
+	case os.Getenv("MCP_TEST_CALL_ERROR") != "":
+		line = []byte(head + `,"error":` + os.Getenv("MCP_TEST_CALL_ERROR") + `}`)
+	default:
+		n, _ := strconv.Atoi(os.Getenv("MCP_TEST_CALL_LINE_BYTES"))
+		prefix, suffix := head+`,"result":{"content":[{"type":"text","text":"`, `"}]}}`
+		line = []byte(prefix + strings.Repeat("x", max(0, n-len(prefix)-len(suffix))) + suffix)
+	}
+	_, _ = os.Stdout.Write(append(line, '\n'))
 }
 
 func TestHandshakeFallsBackFromRejectedDiscover(t *testing.T) {

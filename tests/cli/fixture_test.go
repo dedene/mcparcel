@@ -3,6 +3,7 @@ package cli_test
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -86,8 +87,35 @@ func runFixture() int {
 			return next(ctx, method, req)
 		}
 	})
-	if e := server.Run(ctx, &mcp.StdioTransport{}); e != nil {
+	if e := server.Run(ctx, &mcp.IOTransport{Reader: os.Stdin, Writer: rawHTMLWriter{os.Stdout}}); e != nil {
 		return 1
 	}
 	return 0
+}
+
+// rawHTMLWriter writes the fixture's messages with <, > and & unescaped, as
+// servers outside Go do; the SDK writes each message in one Write.
+type rawHTMLWriter struct{ w io.Writer }
+
+func (r rawHTMLWriter) Close() error { return nil }
+
+func (r rawHTMLWriter) Write(p []byte) (int, error) {
+	out := make([]byte, 0, len(p))
+	for i := 0; i < len(p); i++ {
+		if p[i] != '\\' || i+1 >= len(p) {
+			out = append(out, p[i])
+			continue
+		}
+		if seq := string(p[i:min(i+6, len(p))]); seq == `\u003c` || seq == `\u003e` || seq == `\u0026` {
+			out = append(out, map[string]byte{`\u003c`: '<', `\u003e`: '>', `\u0026`: '&'}[seq])
+			i += 5
+			continue
+		}
+		out = append(out, p[i], p[i+1])
+		i++
+	}
+	if _, err := r.w.Write(out); err != nil {
+		return 0, err
+	}
+	return len(p), nil
 }

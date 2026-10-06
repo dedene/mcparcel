@@ -291,7 +291,7 @@ func (p *pool) Handle(ctx context.Context, id string, req Request, before func()
 	if !found {
 		return fail(output.NewError("tool_not_found", nil))
 	}
-	values, e := args.Coerce(req.Arguments, schema)
+	values, checked, e := args.Prepare(req.Arguments, schema)
 	if e != nil {
 		r := fail(e)
 		if errors.Is(e, args.ErrInvalidArgs) {
@@ -346,6 +346,9 @@ func (p *pool) Handle(ctx context.Context, id string, req Request, before func()
 	})
 	resp.Dispatched = result.Dispatched
 	var warnings []output.Error
+	if !checked {
+		warnings = append(warnings, *output.NewError("schema_unchecked", nil))
+	}
 	if result.Declined != "" {
 		if result.DeclineReason == "unavailable" || result.DeclineReason == "unsupported" {
 			p.opts.Log("elicitation_declined")
@@ -353,8 +356,8 @@ func (p *pool) Handle(ctx context.Context, id string, req Request, before func()
 		warnings = append(warnings, *output.ElicitationDeclined(result.DeclineReason, result.Declined))
 	}
 	var adapterError *output.Error
-	certain := errors.As(e, &adapterError) && adapterError != nil && (adapterError.Code == "input_required" || adapterError.Code == "tool_error" || adapterError.Code == "elicitation_declined")
-	if result.Dispatched && !certain && (e != nil || callCtx.Err() != nil) {
+	certain := errors.As(e, &adapterError) && adapterError != nil && (adapterError.Code == "input_required" || adapterError.Code == "tool_error" || adapterError.Code == "elicitation_declined" || adapterError.Code == "server_error")
+	if result.Retire || result.Dispatched && !certain && (e != nil || callCtx.Err() != nil) {
 		p.retire(canonical, entry)
 	}
 	if result.Dispatched && (errors.Is(context.Cause(workCtx), errForced) || errors.Is(context.Cause(callCtx), auth.ErrExpired)) {
@@ -370,9 +373,8 @@ func (p *pool) Handle(ctx context.Context, id string, req Request, before func()
 		resp.Error = poolError(e, context.Cause(callCtx), id, result.Dispatched)
 	}
 	if result.Dispatched && (resp.Error == nil || resp.Error.Code == "tool_error" || resp.Error.Code == "input_required") {
-		resp.Data, e = json.Marshal(output.CallData{Connection: canonical, Tool: req.Tool, Result: result.JSON, Warnings: warnings})
-		if e != nil {
-			resp.Error = poolError(output.NewError("protocol_error", nil), nil, id, true)
+		if resp.Data, e = callData(canonical, req.Tool, result, warnings); e != nil {
+			resp.Data, resp.Error = nil, poolError(e, nil, id, true)
 		}
 	}
 	return resp
@@ -396,77 +398,6 @@ func sameSchemaContext(before, after config.Connection, oldProfile, newProfile c
 		before.CredentialProfile == after.CredentialProfile &&
 		(before.CredentialProfile == "" || reflect.DeepEqual(oldProfile, newProfile)) &&
 		idle(before) == idle(after) && callTimeout(before) == callTimeout(after)
-}
-
-func poolError(err, cause error, id string, dispatched bool) *output.Error {
-	if err == nil {
-		return nil
-	}
-	code := "internal_error"
-	var safe *output.Error
-	if errors.As(err, &safe) && safe != nil {
-		code = safe.Code
-	} else {
-		switch {
-		case errors.Is(err, args.ErrInvalidArgs):
-			code = "invalid_arguments"
-		case errors.Is(err, args.ErrInvalidSchema):
-			code = "invalid_schema"
-		case errors.Is(err, config.ErrAmbiguousID):
-			code = "ambiguous_id"
-		case errors.Is(err, config.ErrDisabled):
-			code = "connection_disabled"
-		case errors.Is(err, config.ErrReviewRequired):
-			code = "review_required"
-		case errors.Is(err, config.ErrToolDenied):
-			code = "tool_denied"
-		case errors.Is(err, config.ErrRuntimeUnsupported):
-			code = "runtime_unsupported"
-		case errors.Is(err, config.ErrConfig):
-			code = "invalid_config"
-		case errors.Is(err, config.ErrConfigRequired):
-			code = "config_required"
-		case errors.Is(err, config.ErrUnsafePath):
-			code = "unsafe_local_path"
-		case errors.Is(err, config.ErrNotFound):
-			code = "connection_unavailable"
-		case errors.Is(err, auth.ErrRequired):
-			code = "auth_required"
-		case errors.Is(err, auth.ErrExpired):
-			code = "auth_expired"
-		case errors.Is(err, auth.ErrAccountConflict):
-			code = "auth_account_conflict"
-		case errors.Is(err, auth.ErrProvider):
-			code = "auth_failed"
-		case errors.Is(err, context.Canceled):
-			code = "canceled"
-		case errors.Is(err, context.DeadlineExceeded):
-			code = "timeout"
-		}
-	}
-	if dispatched && (code == "timeout" || errors.Is(cause, auth.ErrExpired) || errors.Is(cause, errForced)) {
-		code = "outcome_unknown"
-	}
-	var details *output.Details
-	var ambiguous *config.AmbiguousIDError
-	if errors.As(err, &ambiguous) {
-		details = &output.Details{Candidates: append([]string(nil), ambiguous.Candidates...)}
-	}
-	if dispatched {
-		details = &output.Details{RequestID: id, Dispatched: true}
-		if code == "outcome_unknown" || code == "canceled" {
-			details.Outcome = "unknown"
-		}
-	}
-	out := output.NewError(code, details)
-	if safe != nil {
-		out.Message = safe.Message
-		out.NextAction = safe.NextAction
-		if out.Code != safe.Code {
-			out = output.NewError(code, details)
-		}
-	}
-	return out
 }
 
 func (p *pool) Shutdown(ctx context.Context, force bool) error {

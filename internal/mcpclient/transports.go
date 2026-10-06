@@ -1,6 +1,7 @@
 package mcpclient
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"net/http"
@@ -22,6 +23,8 @@ type headerTransport struct {
 	failure error
 	// unauthorized records a 401 seen in OAuth mode until the next 2xx.
 	unauthorized bool
+	tap          *callTap
+	limit        int // bytes per response; 0 means 16 MiB
 }
 
 func (t *headerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -33,8 +36,22 @@ func (t *headerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 	clone := req.Clone(req.Context())
 	clone.Header = req.Header.Clone()
+	limit := t.limit
+	if limit <= 0 {
+		limit = defaultMaxMessageBytes
+	}
+	tapped := false
 	if clone.Method == http.MethodPost && clone.Body != nil && clone.Body != http.NoBody {
 		clone.GetBody = nil
+		if t.tap != nil {
+			body, err := io.ReadAll(io.LimitReader(clone.Body, int64(limit)+1))
+			_ = clone.Body.Close()
+			if err != nil || len(body) > limit {
+				return nil, output.NewError("connection_failed", nil)
+			}
+			clone.Body = io.NopCloser(bytes.NewReader(body))
+			tapped = t.tap.sentBody(body)
+		}
 	}
 	for k, v := range t.headers {
 		if t.oauth && http.CanonicalHeaderKey(k) == "Authorization" {
@@ -68,7 +85,10 @@ func (t *headerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		t.unauthorized = false
 		t.mu.Unlock()
 	}
-	resp.Body = &boundedResponseBody{ReadCloser: resp.Body, remaining: 16 * 1024 * 1024, transport: t}
+	resp.Body = &boundedResponseBody{ReadCloser: resp.Body, remaining: int64(limit), transport: t}
+	if tapped {
+		resp.Body = t.tap.capture(resp.Body, resp.StatusCode, resp.Header.Get("Content-Type"))
+	}
 	return resp, nil
 }
 func (t *headerTransport) sticky() error { t.mu.Lock(); defer t.mu.Unlock(); return t.failure }
@@ -83,9 +103,12 @@ func (t *headerTransport) status() error {
 	return t.failure
 }
 
-func makeTransport(opts ConnectOptions) (mcp.Transport, func(context.Context), func() error, error) {
+func makeTransport(opts ConnectOptions, tap *callTap) (mcp.Transport, func(context.Context), func() error, error) {
+	if opts.MaxMessageBytes <= 0 {
+		opts.MaxMessageBytes = defaultMaxMessageBytes
+	}
 	if opts.Connection.Transport.Stdio != nil {
-		transport, close, err := startProcess(opts)
+		transport, close, err := startProcess(opts, tap)
 		return transport, close, func() error { return nil }, err
 	}
 	if opts.Connection.Transport.HTTP == nil {
@@ -104,9 +127,9 @@ func makeTransport(opts ConnectOptions) (mcp.Transport, func(context.Context), f
 		headers[k] = v
 	}
 	base := &http.Transport{Proxy: nil}
-	rt := &headerTransport{base: base, origin: origin, headers: headers, oauth: opts.OAuth != nil}
+	rt := &headerTransport{base: base, origin: origin, headers: headers, oauth: opts.OAuth != nil, tap: tap, limit: opts.MaxMessageBytes}
 	client := &http.Client{Transport: rt, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	return &mcp.StreamableClientTransport{Endpoint: endpoint, HTTPClient: client, MaxRetries: -1, DisableStandaloneSSE: true, MaxEventSize: 16 * 1024 * 1024, OAuthHandler: opts.OAuth}, func(context.Context) { base.CloseIdleConnections() }, rt.status, nil
+	return &mcp.StreamableClientTransport{Endpoint: endpoint, HTTPClient: client, MaxRetries: -1, DisableStandaloneSSE: true, MaxEventSize: opts.MaxMessageBytes + 1, OAuthHandler: opts.OAuth}, func(context.Context) { base.CloseIdleConnections() }, rt.status, nil
 }
 
 type boundedResponseBody struct {
@@ -121,6 +144,7 @@ func (b *boundedResponseBody) Read(p []byte) (int, error) {
 	}
 	n, err := b.ReadCloser.Read(p)
 	if int64(n) > b.remaining {
+		b.transport.tap.overflow()
 		failure := output.NewError("protocol_error", nil)
 		b.transport.mu.Lock()
 		b.transport.failure = failure

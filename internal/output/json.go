@@ -15,7 +15,9 @@ type CallData struct {
 	Connection string          `json:"connection"`
 	Tool       string          `json:"tool"`
 	Result     json.RawMessage `json:"result"`
-	Warnings   []Error         `json:"warnings,omitempty"`
+	// Artifacts lists the files --output-dir saved; only the CLI sets it.
+	Artifacts []Artifact `json:"artifacts,omitempty"`
+	Warnings  []Error    `json:"warnings,omitempty"`
 }
 type ToolList struct {
 	Connection      string            `json:"connection"`
@@ -26,7 +28,7 @@ type ToolList struct {
 
 func WriteJSON(w io.Writer, data any, failure *Error) error {
 	if failure != nil {
-		if failure.Code == "tool_error" || failure.Code == "input_required" {
+		if failure.Code == "tool_error" || failure.Code == "input_required" || failure.Code == "export_failed" {
 			switch data.(type) {
 			case CallData, *CallData:
 			default:

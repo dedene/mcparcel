@@ -28,6 +28,9 @@ type ConnectOptions struct {
 	ShutdownTimeout time.Duration
 	// OAuth authorizes HTTP requests; leave it a nil interface when unused.
 	OAuth sdkauth.OAuthHandler
+	// MaxMessageBytes bounds one MCP message (a stdio line, or an HTTP
+	// response with its streamed events); 0 means 16 MiB.
+	MaxMessageBytes int
 }
 type (
 	Result struct {
@@ -40,6 +43,8 @@ type (
 		// says why (see output.ElicitationDeclined).
 		Declined      string
 		DeclineReason string
+		// Retire means the session must not be reused.
+		Retire bool
 	}
 	Session interface {
 		Tools(context.Context) ([]json.RawMessage, error)
@@ -59,6 +64,7 @@ type session struct {
 	declined  string
 	reason    string
 	prompter  *Prompter
+	tap       *callTap
 }
 
 func Connect(ctx context.Context, opts ConnectOptions) (Session, error) {
@@ -71,11 +77,15 @@ func Connect(ctx context.Context, opts ConnectOptions) (Session, error) {
 	if ctx.Err() != nil {
 		return nil, contextError(ctx.Err(), false)
 	}
-	transport, cleanup, status, err := makeTransport(opts)
+	if opts.MaxMessageBytes <= 0 {
+		opts.MaxMessageBytes = defaultMaxMessageBytes
+	}
+	tap := &callTap{}
+	transport, cleanup, status, err := makeTransport(opts, tap)
 	if err != nil {
 		return nil, err
 	}
-	s := &session{cleanup: cleanup, status: status, timeout: opts.ConnectTimeout, closeDone: make(chan struct{})}
+	s := &session{cleanup: cleanup, status: status, timeout: opts.ConnectTimeout, closeDone: make(chan struct{}), tap: tap}
 	client := mcp.NewClient(&mcp.Implementation{Name: "MCParcel", Version: opts.Version}, &mcp.ClientOptions{Capabilities: &mcp.ClientCapabilities{Elicitation: &mcp.ElicitationCapabilities{Form: &mcp.FormElicitationCapabilities{}}}, MultiRoundTrip: &mcp.MultiRoundTripOptions{Disabled: true}})
 	client.AddReceivingMiddleware(s.elicitation)
 	client.AddSendingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
@@ -223,7 +233,9 @@ func (s *session) Call(ctx context.Context, tool string, arguments, meta map[str
 	s.mu.Lock()
 	s.declined, s.reason, s.prompter = "", "", PrompterFrom(ctx)
 	s.mu.Unlock()
+	s.tap.arm()
 	r, err := s.sdk.CallTool(auth.WithToolCall(ctx), &mcp.CallToolParams{Meta: meta, Name: tool, Arguments: arguments})
+	t := s.tap.take()
 	s.mu.Lock()
 	out.Declined, out.DeclineReason, s.prompter = s.declined, s.reason, nil
 	s.mu.Unlock()
@@ -234,6 +246,33 @@ func (s *session) Call(ctx context.Context, tool string, arguments, meta map[str
 		if ctx.Err() != nil {
 			return out, contextError(ctx.Err(), true)
 		}
+	}
+	if t.TooLarge {
+		out.Retire = true
+		return out, output.NewError("result_too_large", nil)
+	}
+	if t.RPCError != nil {
+		if out.Declined != "" {
+			return out, output.ElicitationDeclined(out.DeclineReason, out.Declined)
+		}
+		// A non-2xx answer can mean the HTTP session is gone (404).
+		out.Retire = t.Status >= 300
+		return out, output.ServerError(int(t.RPCError.Code), t.RPCError.Message)
+	}
+	if t.Result != nil {
+		// The raw result keeps unknown blocks and fields and exact numbers,
+		// even when the SDK's typed decoding failed.
+		isError, needsInput, e := inspectResult(t.Result)
+		if e != nil {
+			return out, e
+		}
+		out.JSON, out.IsError, out.NeedsInput = t.Result, isError, needsInput
+		if out.NeedsInput {
+			return out, output.NewError("input_required", nil)
+		}
+		return out, nil
+	}
+	if err != nil {
 		var wire *jsonrpc.Error
 		if out.Declined != "" && errors.As(err, &wire) {
 			return out, output.ElicitationDeclined(out.DeclineReason, out.Declined)
@@ -241,6 +280,7 @@ func (s *session) Call(ctx context.Context, tool string, arguments, meta map[str
 		// SDK WireErrors can also originate locally, without a response-origin marker.
 		return out, contextError(err, true)
 	}
+	// Defensive: the SDK answered but the tap saw no response.
 	out.JSON, err = json.Marshal(r)
 	if err != nil {
 		return out, output.NewError("protocol_error", nil)

@@ -6,6 +6,7 @@ import (
 	"errors"
 
 	"github.com/dedene/mcparcel/internal/config"
+	"github.com/dedene/mcparcel/internal/elicit"
 )
 
 type Details struct {
@@ -15,6 +16,8 @@ type Details struct {
 	RequestID    string          `json:"requestId,omitempty"`
 	Dispatched   bool            `json:"dispatched,omitempty"`
 	Outcome      string          `json:"outcome,omitempty"`
+	// RPCCode is a server_error's JSON-RPC error code; 0 is a legal code.
+	RPCCode *int `json:"rpcCode,omitempty"`
 }
 type Error struct {
 	Code       string   `json:"code"`
@@ -76,6 +79,10 @@ var registry = map[string]errorSpec{
 	"tool_not_found":           {2, "The tool is not advertised by this connection.", "Run mcparcel tools for this connection."},
 	"protocol_error":           {6, "The runtime or MCP response is invalid.", "Check the daemon log and server compatibility."},
 	"elicitation_declined":     {3, "The server asked for approval and MCParcel declined it.", "Approve this in the server's own app, then retry."},
+	"server_error":             {6, "The MCP server returned an error for this call.", "Check the arguments with mcparcel tools <mcp>. If the tool may have changed remote state, inspect it before calling again."},
+	"result_too_large":         {6, "The tool's result exceeds MCParcel's size limit and was not received.", "The tool may have run. Inspect remote state, then ask for a smaller result (filters, pagination)."},
+	"schema_unchecked":         {1, "MCParcel could not check the arguments against this tool's schema; the server checks them.", ""},
+	"export_failed":            {1, "The call finished, but MCParcel could not save its image or audio blocks.", "The full result is in data.result; fix the output directory. Do not call the tool again just to export."},
 	"input_required":           {6, "The MCP server requires an unsupported interactive response.", "Use a client that supports this server interaction."},
 	"canceled":                 {130, "The operation was canceled.", ""},
 
@@ -120,6 +127,18 @@ func ElicitationDeclined(reason, text string) *Error {
 	return err
 }
 
+// ServerError reports a JSON-RPC error answer to a call: the server's
+// sanitized message and its code, never the error's data.
+func ServerError(rpcCode int, text string) *Error {
+	err := NewError("server_error", &Details{RPCCode: &rpcCode})
+	text = elicit.Clean(text, 300)
+	if text == "" {
+		text = "(no message)"
+	}
+	err.Message = "The MCP server returned an error: " + text
+	return err
+}
+
 func NewError(code string, details *Details) *Error {
 	spec, ok := registry[code]
 	if !ok {
@@ -132,6 +151,10 @@ func NewError(code string, details *Details) *Error {
 		value.SyncReport = append(json.RawMessage(nil), details.SyncReport...)
 		value.ImportReport = append(json.RawMessage(nil), details.ImportReport...)
 		value.Candidates = append([]string(nil), details.Candidates...)
+		if details.RPCCode != nil {
+			rpcCode := *details.RPCCode
+			value.RPCCode = &rpcCode
+		}
 		clone = &value
 	}
 	return &Error{Code: code, Message: spec.message, NextAction: spec.action, Details: clone}

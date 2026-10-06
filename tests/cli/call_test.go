@@ -36,7 +36,7 @@ func TestToolsJSONBlackBox(t *testing.T) {
 			if e := json.Unmarshal(v.envelope.Data, &d); e != nil {
 				t.Fatal(e)
 			}
-			if d.Connection != "local:fixture" || len(d.Items) != 11 || d.CacheAgeSeconds != nil || len(d.SourceRevisions) == 0 {
+			if d.Connection != "local:fixture" || len(d.Items) != 16 || d.CacheAgeSeconds != nil || len(d.SourceRevisions) == 0 {
 				t.Fatalf("tools: %s", v.stdout)
 			}
 			for i := 1; i < len(d.Items); i++ {

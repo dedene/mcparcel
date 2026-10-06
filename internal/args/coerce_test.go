@@ -78,7 +78,7 @@ func TestCoerceWrongTypes(t *testing.T) {
 }
 
 func TestCoerceUnknownAndUnion(t *testing.T) {
-	for _, p := range []string{`{}`, `{"type":["integer","null"]}`, `{"$ref":"#/x","type":"integer"}`, `{"anyOf":[],"type":"integer"}`, `{"oneOf":[],"type":"integer"}`, `{"allOf":[],"type":"integer"}`, `true`} {
+	for _, p := range []string{`{}`, `{"type":["integer","string"]}`, `{"$ref":"#/x","type":"integer"}`, `{"anyOf":[],"type":"integer"}`, `{"oneOf":[],"type":"integer"}`, `{"allOf":[],"type":"integer"}`, `true`} {
 		got, err := coerceOne(t, "5", p)
 		if err != nil || got != "5" {
 			t.Fatal(got, err)
