@@ -48,7 +48,7 @@ func (p *pool) oauthHandler(ctx context.Context, id, name string, c config.Conne
 	if e != nil {
 		return nil, e
 	}
-	opts := auth.OAuthOptions{Account: id, Name: name, Label: c.Label, URL: u, Auth: c.Auth, Keyring: p.opts.Keyring, Log: p.opts.Log, LogSignInFailure: p.opts.SignInFailure, Login: login}
+	opts := auth.OAuthOptions{Account: id, Name: name, Label: c.Label, URL: u, Auth: c.Auth, Keyring: p.opts.Keyring, Log: p.opts.Log, LogSignInFailure: p.opts.SignInFailure, Login: login, Health: p.opts.Health, Now: p.opts.Now}
 	if c.Auth != nil {
 		if opts.Client.ID, e = oauthClientValue(c.Auth.ClientID, values); e != nil {
 			return nil, e
@@ -58,6 +58,10 @@ func (p *pool) oauthHandler(ctx context.Context, id, name string, c config.Conne
 		}
 	}
 	if login != nil {
+		// A re-login may reuse the stored client registration.
+		if prev, e := auth.LoadOAuth(ctx, p.opts.Keyring, id); e == nil {
+			opts.Previous = &prev
+		}
 		return auth.NewOAuthHandler(opts), nil
 	}
 	state, e := auth.LoadOAuth(ctx, p.opts.Keyring, id)
@@ -86,7 +90,9 @@ func (p *pool) rememberSignIn(ctx context.Context, canonical string, c config.Co
 	}
 	ctx = context.WithoutCancel(ctx)
 	if _, e = auth.LoadOAuth(ctx, p.opts.Keyring, canonical); errors.Is(e, auth.ErrNoSession) {
-		_ = auth.SaveOAuth(ctx, p.opts.Keyring, canonical, auth.OAuthState{Version: 1, URL: u})
+		if auth.SaveOAuth(ctx, p.opts.Keyring, canonical, auth.OAuthState{Version: 1, URL: u}) == nil {
+			_ = p.opts.Health.Record(canonical, auth.HealthEvent{Kind: auth.HealthReauthorizationRequired, Code: "server_requested", Terminal: true})
+		}
 	}
 }
 
@@ -183,6 +189,7 @@ func (p *pool) logout(ctx context.Context, canonical string) Response {
 	}
 	if removed {
 		p.opts.Log("oauth_signed_out")
+		_ = p.opts.Health.Record(canonical, auth.HealthEvent{Kind: auth.HealthLogout})
 	}
 	b, e := json.Marshal(LogoutData{Connection: canonical, Removed: removed})
 	if e != nil {

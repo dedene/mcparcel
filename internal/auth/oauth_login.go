@@ -32,6 +32,9 @@ func (h *OAuthHandler) login(ctx context.Context, req *http.Request, resp *http.
 	if h.ready.Load() {
 		return nil
 	}
+	if h.shut {
+		return NotSignedIn(h.opts.Name)
+	}
 	err := h.loginLocked(ctx, req, resp)
 	if err != nil {
 		h.terminal = err
@@ -42,7 +45,7 @@ func (h *OAuthHandler) login(ctx context.Context, req *http.Request, resp *http.
 	return nil
 }
 
-func (h *OAuthHandler) loginLocked(ctx context.Context, req *http.Request, resp *http.Response) error {
+func (h *OAuthHandler) loginLocked(ctx context.Context, req *http.Request, resp *http.Response) (err error) {
 	issuer, resource, asm, found, err := discoverIssuer(ctx, h.client, h.opts.URL, resp.Header.Values("WWW-Authenticate"))
 	if err != nil {
 		return h.signInFailed("discovery", failureCode(err, "discovery_failed"), h.authFailed(fmt.Sprintf("Could not discover the authorization server for %s.", h.opts.Label)))
@@ -56,14 +59,31 @@ func (h *OAuthHandler) loginLocked(ctx context.Context, req *http.Request, resp 
 	if h.auth.IssuerURL != "" && !issuersEqual(h.auth.IssuerURL, issuer) {
 		return h.signInFailed("discovery", "issuer_mismatch", h.authFailed("The authorization server does not match auth.issuerUrl."))
 	}
-	if h.opts.Client.ID == "" && asm != nil && asm.RegistrationEndpoint == "" {
+	reused, redirect := h.reusableClient(issuer, resource, asm)
+	unsupported := h.opts.Client.ID == "" && asm != nil && asm.RegistrationEndpoint == ""
+	if reused == nil && unsupported {
 		return h.signInFailed("registration", "registration_unsupported", h.authFailed("The authorization server offers no dynamic client registration; add auth.clientId to this connection's definition."))
 	}
-	cb, err := h.listenCallback()
+	cb, err := h.listenCallback(redirect)
+	if err != nil && reused != nil && h.auth.RedirectURL == "" && !unsupported {
+		// The stored loopback port is taken: register a new client instead.
+		reused = nil
+		cb, err = h.listenCallback("")
+	}
 	if err != nil {
 		return h.signInFailed("callback", failureCode(err, "callback_failed"), err)
 	}
 	defer cb.shutdown()
+	if reused != nil {
+		// Forget a reused client the provider no longer honours (it may never
+		// redirect back), so the next sign-in registers a new one.
+		defer func() {
+			if err != nil {
+				_ = h.opts.Health.RememberClient(h.opts.Account, "", "")
+			}
+		}()
+	}
+	var issued *oauth2.Token
 	// Where a failing Authorize stopped: the SDK calls the hooks below on
 	// this goroutine, in order (registration, scopes, callback, token).
 	stage, failCode := "registration", ""
@@ -99,24 +119,29 @@ func (h *OAuthHandler) loginLocked(ctx context.Context, req *http.Request, resp 
 				return nil, h.authFailed("The authorization server metadata changed during sign-in.")
 			}
 			stage = "token_save"
-			s := OAuthState{Version: 1, URL: h.opts.URL, Issuer: issuer, Resource: resource, TokenURL: c.Endpoint.TokenURL, AuthStyle: int(c.Endpoint.AuthStyle), RefreshToken: tok.RefreshToken, AccessExpiry: unixOrZero(tok.Expiry)}
+			h.state = OAuthState{Version: 1, URL: h.opts.URL, Issuer: issuer, Resource: resource, TokenURL: c.Endpoint.TokenURL, AuthStyle: int(c.Endpoint.AuthStyle), RefreshToken: tok.RefreshToken}
 			if h.opts.Client.ID == "" {
-				s.ClientID, s.ClientSecret = c.ClientID, c.ClientSecret
+				h.state.ClientID, h.state.ClientSecret = c.ClientID, c.ClientSecret
 			}
-			if err := SaveOAuth(context.Background(), h.opts.Keyring, h.opts.Account, s); err != nil {
+			h.setToken(tok)
+			if err := SaveOAuth(context.Background(), h.opts.Keyring, h.opts.Account, h.state); err != nil {
+				h.token = nil
 				return nil, err
 			}
-			h.state, h.token = s, tok
+			issued = tok
 			return oauth2.StaticTokenSource(tok), nil
 		},
 	}
-	if h.opts.Client.ID != "" {
+	switch {
+	case reused != nil:
+		cfg.PreregisteredClient = reused
+	case h.opts.Client.ID != "":
 		pre := &oauthex.ClientCredentials{ClientID: h.opts.Client.ID, Issuer: h.auth.IssuerURL}
 		if h.opts.Client.Secret != "" {
 			pre.ClientSecretAuth = &oauthex.ClientSecretAuth{ClientSecret: h.opts.Client.Secret}
 		}
 		cfg.PreregisteredClient = pre
-	} else {
+	default:
 		name := h.auth.ClientName
 		if name == "" {
 			name = "MCParcel"
@@ -135,6 +160,11 @@ func (h *OAuthHandler) loginLocked(ctx context.Context, req *http.Request, resp 
 			failCode = failureCode(err, stage+"_failed")
 		}
 		_ = h.signInFailed(stage, failCode, err)
+	} else if issued != nil {
+		h.record(HealthEvent{Kind: HealthAuthorized, Trigger: TriggerLogin, AccessTTL: int64(h.lifetime / time.Second), RefreshTTL: refreshTTL(issued), RefreshToken: issued.RefreshToken != "", ReusedClient: reused != nil})
+		if h.state.ClientID != "" {
+			_ = h.opts.Health.RememberClient(h.opts.Account, h.state.ClientID, cb.redirect)
+		}
 	}
 	err = h.loginError(err)
 	cb.finish(err)
@@ -243,10 +273,13 @@ type callback struct {
 	used  bool
 }
 
-// listenCallback binds the redirect address: the configured URL verbatim
-// (http on a loopback host), else 127.0.0.1 on a random port.
-func (h *OAuthHandler) listenCallback() (*callback, error) {
-	cb := &callback{h: h, redirect: h.auth.RedirectURL, path: "/callback", result: make(chan callbackResult, 1), outcome: make(chan error, 1)}
+// listenCallback binds the redirect address: redirect, else the configured
+// URL verbatim (http on a loopback host), else 127.0.0.1 on a random port.
+func (h *OAuthHandler) listenCallback(redirect string) (*callback, error) {
+	if redirect == "" {
+		redirect = h.auth.RedirectURL
+	}
+	cb := &callback{h: h, redirect: redirect, path: "/callback", result: make(chan callbackResult, 1), outcome: make(chan error, 1)}
 	addr := "127.0.0.1:0"
 	if cb.redirect != "" {
 		u, err := url.Parse(cb.redirect)

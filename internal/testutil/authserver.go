@@ -21,16 +21,24 @@ import (
 // IssuerPath makes the server its own protected MCP endpoint at that path, with
 // URL+IssuerPath as issuer, endpoints under it, metadata at the path-inserted
 // and root well-known URLs, and no protected-resource metadata.
+// NoRefreshToken issues no refresh token at all; RefreshExpiresIn adds
+// refresh_token_expires_in to every token response. Now is the clock for
+// access-token expiry and refresh-token idle time (nil means time.Now);
+// RefreshIdleTTL rejects a refresh token unused for longer with invalid_grant.
 type AuthServerOptions struct {
-	UnadvertisedIss bool
-	IssuerPath      string
-	Registration    bool
-	ClientID        string
-	ClientSecret    string
-	AccessTTL       time.Duration
-	RotateRefresh   bool
-	DenyWith        string
-	TokenPrefix     string
+	UnadvertisedIss  bool
+	IssuerPath       string
+	Registration     bool
+	ClientID         string
+	ClientSecret     string
+	AccessTTL        time.Duration
+	RotateRefresh    bool
+	DenyWith         string
+	TokenPrefix      string
+	NoRefreshToken   bool
+	RefreshExpiresIn time.Duration
+	Now              func() time.Time
+	RefreshIdleTTL   time.Duration
 }
 
 // AuthServer is a loopback-only fake authorization server with PKCE S256,
@@ -44,13 +52,17 @@ type AuthServer struct {
 	clients       map[string]asClient
 	codes         map[string]asCode
 	access        map[string]time.Time
-	refresh       map[string]string // refresh token -> client ID
+	refresh       map[string]string    // refresh token -> client ID
+	refreshUsed   map[string]time.Time // refresh token -> issued or last used
 	latestRefresh string
 	prmIssuer     string
 	registrations int
 	exchanges     int
 	refreshes     int
 	requests      map[string]int // path -> count
+	scope         string         // last scope sent to /authorize
+	grantTypes    []string       // grant types of the last registration
+	noRegister    bool           // StopRegistration was called
 }
 
 type asClient struct{ secret, redirect string }
@@ -62,7 +74,10 @@ func NewAuthServer(t testing.TB, o AuthServerOptions) *AuthServer {
 	if o.AccessTTL == 0 {
 		o.AccessTTL = time.Hour
 	}
-	a := &AuthServer{o: o, clients: map[string]asClient{}, codes: map[string]asCode{}, access: map[string]time.Time{}, refresh: map[string]string{}, requests: map[string]int{}}
+	if o.Now == nil {
+		o.Now = time.Now
+	}
+	a := &AuthServer{o: o, clients: map[string]asClient{}, codes: map[string]asCode{}, access: map[string]time.Time{}, refresh: map[string]string{}, refreshUsed: map[string]time.Time{}, requests: map[string]int{}}
 	if o.ClientID != "" {
 		a.clients[o.ClientID] = asClient{secret: o.ClientSecret}
 	}
@@ -109,7 +124,7 @@ func (a *AuthServer) Protect(next http.Handler, path string) http.Handler {
 		a.mu.Lock()
 		expiry, ok := a.access[token]
 		a.mu.Unlock()
-		if !ok || time.Now().After(expiry) {
+		if !ok || a.o.Now().After(expiry) {
 			w.Header().Set("WWW-Authenticate", `Bearer resource_metadata="http://`+r.Host+metadata+`"`)
 			w.WriteHeader(http.StatusUnauthorized)
 			return
@@ -124,6 +139,7 @@ func (a *AuthServer) Revoke() {
 	defer a.mu.Unlock()
 	a.access = map[string]time.Time{}
 	a.refresh = map[string]string{}
+	a.refreshUsed = map[string]time.Time{}
 }
 
 // Counts reports registrations, code exchanges and refresh attempts.
@@ -147,6 +163,46 @@ func (a *AuthServer) Requests(path string) int {
 	return n
 }
 
+// Scopes returns the scope parameter of the last /authorize request.
+func (a *AuthServer) Scopes() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.scope
+}
+
+// GrantTypes returns the grant types of the last client registration.
+func (a *AuthServer) GrantTypes() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]string(nil), a.grantTypes...)
+}
+
+// DropClients forgets every dynamically registered client: /authorize then
+// answers 400 without redirecting and /token answers invalid_client.
+func (a *AuthServer) DropClients() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for id := range a.clients {
+		if id != a.o.ClientID {
+			delete(a.clients, id)
+		}
+	}
+}
+
+// StopRegistration removes dynamic client registration from the metadata and
+// refuses new registrations; clients registered earlier keep working.
+func (a *AuthServer) StopRegistration() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.noRegister = true
+}
+
+func (a *AuthServer) registers() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.o.Registration && !a.noRegister
+}
+
 // RefreshToken returns the latest issued refresh token.
 func (a *AuthServer) RefreshToken() string {
 	a.mu.Lock()
@@ -161,6 +217,7 @@ func (a *AuthServer) Grant() string {
 	defer a.mu.Unlock()
 	rt := a.o.TokenPrefix + rand.Text()
 	a.refresh[rt] = a.o.ClientID
+	a.refreshUsed[rt] = a.o.Now()
 	a.latestRefresh = rt
 	return rt
 }
@@ -183,7 +240,7 @@ func (a *AuthServer) metadata(w http.ResponseWriter, _ *http.Request) {
 		"response_types_supported":                       []string{"code"},
 		"authorization_response_iss_parameter_supported": !a.o.UnadvertisedIss,
 	}
-	if a.o.Registration {
+	if a.registers() {
 		m["registration_endpoint"] = a.issuer + "/register"
 	}
 	writeJSON(w, 200, m)
@@ -193,8 +250,9 @@ func (a *AuthServer) register(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		RedirectURIs            []string `json:"redirect_uris"`
 		TokenEndpointAuthMethod string   `json:"token_endpoint_auth_method"`
+		GrantTypes              []string `json:"grant_types"`
 	}
-	if !a.o.Registration || json.NewDecoder(r.Body).Decode(&req) != nil || len(req.RedirectURIs) != 1 || !loopbackRedirect(req.RedirectURIs[0]) {
+	if !a.registers() || json.NewDecoder(r.Body).Decode(&req) != nil || len(req.RedirectURIs) != 1 || !loopbackRedirect(req.RedirectURIs[0]) {
 		writeJSON(w, 400, map[string]string{"error": "invalid_client_metadata"})
 		return
 	}
@@ -210,6 +268,7 @@ func (a *AuthServer) register(w http.ResponseWriter, r *http.Request) {
 	}
 	a.mu.Lock()
 	a.registrations++
+	a.grantTypes = req.GrantTypes
 	a.clients[resp["client_id"].(string)] = c
 	a.mu.Unlock()
 	writeJSON(w, 201, resp)
@@ -219,6 +278,7 @@ func (a *AuthServer) authorize(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	a.mu.Lock()
 	c, ok := a.clients[q.Get("client_id")]
+	a.scope = q.Get("scope")
 	a.mu.Unlock()
 	redirect := q.Get("redirect_uri")
 	if !ok || !loopbackRedirect(redirect) || c.redirect != "" && c.redirect != redirect || q.Get("response_type") != "code" ||
@@ -279,24 +339,31 @@ func (a *AuthServer) token(w http.ResponseWriter, r *http.Request) {
 	case "refresh_token":
 		a.refreshes++
 		rt := r.PostForm.Get("refresh_token")
-		if a.refresh[rt] != id || rt == "" {
+		if a.refresh[rt] != id || rt == "" || a.o.RefreshIdleTTL > 0 && a.o.Now().Sub(a.refreshUsed[rt]) > a.o.RefreshIdleTTL {
 			writeJSON(w, 400, map[string]string{"error": "invalid_grant"})
 			return
 		}
 		rotate = a.o.RotateRefresh
 		if rotate {
 			delete(a.refresh, rt)
+			delete(a.refreshUsed, rt)
+		} else {
+			a.refreshUsed[rt] = a.o.Now()
 		}
 	default:
 		writeJSON(w, 400, map[string]string{"error": "unsupported_grant_type"})
 		return
 	}
 	access := a.o.TokenPrefix + rand.Text()
-	a.access[access] = time.Now().Add(a.o.AccessTTL)
+	a.access[access] = a.o.Now().Add(a.o.AccessTTL)
 	resp := map[string]any{"access_token": access, "token_type": "Bearer", "expires_in": int(a.o.AccessTTL / time.Second)}
-	if rotate {
+	if a.o.RefreshExpiresIn > 0 {
+		resp["refresh_token_expires_in"] = int(a.o.RefreshExpiresIn / time.Second)
+	}
+	if rotate && !a.o.NoRefreshToken {
 		rt := a.o.TokenPrefix + rand.Text()
 		a.refresh[rt] = id
+		a.refreshUsed[rt] = a.o.Now()
 		a.latestRefresh = rt
 		resp["refresh_token"] = rt
 	}

@@ -251,6 +251,11 @@ func validateConnection(c *Connection, path string, profiles map[string]ProfileR
 			return fieldError(path+".lifecycle.idleTimeout", "positive duration or session required")
 		}
 	}
+	if l := c.Lifecycle; l != nil && l.KeepAlive != "" && l.KeepAlive != "off" {
+		if d, err := time.ParseDuration(l.KeepAlive); err != nil || d < time.Hour {
+			return fieldError(path+".lifecycle.keepAlive", "off or a duration of at least 1h required")
+		}
+	}
 	if len(SecretRefs(*c)) > 0 && c.CredentialProfile == "" {
 		return fieldError(path+".credentialProfile", "secret binding requires profile")
 	}

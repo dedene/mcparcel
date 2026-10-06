@@ -105,7 +105,7 @@ unions and unsupported schema versions are errors. No ignored config fields.
 | HTTP `allowInsecureHttp` | `never` default; `loopback`, or `explicit` for a deliberately configured internal endpoint |
 | `auth` | Omitted or `{type: "oauth", ...}`; API-key auth uses env/header bindings |
 | `toolPolicy` | Optional `{allow: [exact names], deny: [exact names]}`; omitted allow means all, empty allow means none; deny wins |
-| `lifecycle` | Optional `{idleTimeout: "session"}` default, or positive duration; session keeps used processes until daemon stop/auth expiry |
+| `lifecycle` | Optional `{idleTimeout: "session"}` default, or positive duration; session keeps used processes until daemon stop/auth expiry. `keepAlive`: how often the daemon refreshes an idle OAuth session, `"off"` or a duration of at least `1h` (default `24h`); not part of the connection hash and never triggers review |
 | `callTimeout` | Positive duration, default `120s`; override via CLI per call |
 | `startupTimeout` | Optional positive duration, default `30s`: limit for connect, initialize and tool listing of this connection; not part of the connection hash |
 

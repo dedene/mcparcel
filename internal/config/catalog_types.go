@@ -22,8 +22,11 @@ type (
 )
 
 type (
+	// Lifecycle.KeepAlive is how often the daemon refreshes an idle OAuth
+	// session: "off" or a duration of at least 1h; empty means 24h.
 	Lifecycle struct {
 		IdleTimeout string `json:"idleTimeout,omitempty"`
+		KeepAlive   string `json:"keepAlive,omitempty"`
 	}
 	OAuth struct {
 		Type                    string   `json:"type"`

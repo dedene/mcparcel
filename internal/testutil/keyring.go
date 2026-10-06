@@ -12,14 +12,23 @@ import (
 type MemKeyring struct {
 	mu        sync.Mutex
 	items     map[string]string
+	gets      int
 	Err       error
 	FailSets  int
 	BeforeSet func()
 }
 
+// Gets counts Get calls.
+func (k *MemKeyring) Gets() int {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	return k.gets
+}
+
 func (k *MemKeyring) Get(service, account string) (string, error) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
+	k.gets++
 	if k.Err != nil {
 		return "", k.Err
 	}

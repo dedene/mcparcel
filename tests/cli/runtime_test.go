@@ -135,7 +135,7 @@ func TestRuntimeStatusBlackBox(t *testing.T) {
 		t.Fatal(s)
 	}
 	v := r.run("runtime", "status")
-	want := []string{"Runtime: running", "PID: ", "Version: stage2-test-a", "Active calls: 0", "PATH: ", "Environment: login shell", "Socket: ", "Log: "}
+	want := []string{"Runtime: running", "PID: ", "Version: stage2-test-a", "Active calls: 0", "PATH: ", "Environment: login shell", "Stay-alive: off", "Socket: ", "Log: "}
 	lines := strings.Split(strings.TrimSuffix(v.stdout, "\n"), "\n")
 	if v.code != 0 || len(lines) != len(want) {
 		t.Fatalf("human status %q %q", v.stdout, v.stderr)

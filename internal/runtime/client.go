@@ -28,6 +28,7 @@ type Status struct {
 	CapturedPath    string     `json:"capturedPath"`
 	EnvFallback     bool       `json:"envFallback"`
 	ActiveCalls     int        `json:"activeCalls"`
+	StayAlive       bool       `json:"stayAlive"`
 	StartedAt       *time.Time `json:"startedAt"`
 }
 type CallRequest struct {

@@ -51,7 +51,8 @@ lifetime: a profile naming another account fails with `auth_account_conflict`
 (exit 3) until the runtime restarts.
 
 Daemon exits after 24 hours with no requests and no active calls, unless
-`runtime.keepAlive` is set (see OAuth session health); active credential
+`runtime.keepAlive` is set and an OAuth session is stored (see OAuth session
+health); active credential
 sessions can expire earlier. It is not registered as a permanent launch agent in v1.
 No network listener or hosted gateway, no telemetry, and no arbitrary shell RPC.
 
@@ -429,20 +430,32 @@ and prints no token. `auth lock` is not built yet.
   terminal failure `{at, code}`. Access tokens stay in daemon memory. Budget about
   2.8 KB of JSON (go-keyring's 4096-byte `security -i` line, checked before Set);
   larger: `keychain_unavailable`, no split. No plaintext fallback. Keychain errors:
-  `keychain_unavailable`. Re-login with DCR registers a new client.
-- Use: access token attached by the SDK; refreshed in `Token()` when it expires
-  within 30 s, and on a 401 for non-tool requests (one resend). A 401 on
+  `keychain_unavailable`. Re-login with DCR reuses the stored client when it is
+  safe (see "Client reuse" below), else registers a new one.
+- Use: access token attached by the SDK; refreshed in `Token()` once a fifth of
+  its lifetime (at least 30 s) remains, and on a 401 for non-tool requests (one
+  resend). The refresh point is checked on the wall clock, because the
+  monotonic clock stops while a Mac sleeps, and on the monotonic clock, which
+  catches a wall clock moved back. A 401 on
   `tools/call` is never resent: `auth_expired`, next action "Run the call again."
   Refreshes are serialized per connection; a rotated refresh token is saved before
   the new access token is used. Refresh omits RFC 8707 `resource`.
 - Failure: `invalid_grant` or another OAuth error code, or an issuer or resource
   that fetched protected-resource metadata names differently, records the failure,
   clears the refresh token and gives `auth_required`; later calls fail before any
-  network request. 5xx, 429 or network errors give `connection_failed` and record
-  nothing. Metadata that cannot be fetched during a 401 is not an issuer change:
-  the refresh goes to the stored token URL. A token the server rejects right
-  after a refresh ends that session with `auth_required`, without another
-  refresh; a 403 gives `auth_failed`.
+  network request. 5xx, 429 or network errors give `connection_failed`; they are
+  recorded in the health file only, never in the Keychain item. Metadata that
+  cannot be fetched during a 401 is not an issuer change: the refresh goes to the
+  stored token URL. A token the server rejects right after the refresh that
+  minted it is a terminal failure too (`token_rejected`, persisted like
+  `invalid_grant`); a late 401 for a token that a later refresh already
+  replaced is retried with the current one. A 403 gives `auth_failed`.
+- Shutdown: closing a handler (logout, a config change, daemon exit) waits for a
+  refresh or sign-in in progress, so a rotated refresh token is saved before the
+  item is deleted or a new session loads it. It also tries once more to save a
+  session whose save failed, so the only in-memory copy of a rotated refresh
+  token is not dropped with it; after that a closed handler never writes the
+  item again.
 - Unmarked HTTP connections without a credential header are OAuth-capable: a 401
   gives `auth_required` pointing at `auth login`, and a stored session is used
   when present (one Keychain read per new session). The first such
@@ -461,8 +474,8 @@ and prints no token. `auth lock` is not built yet.
   `timeout`, `network_error`, `canceled`, `issuer_mismatch`,
   `registration_unsupported` or `<stage>_failed`. Never token, code, state,
   verifier, URL, connection name or provider text.
-- Deferred: implicit login, keep-alive refresh, `auth lock`, failure history,
-  client reuse, `tokenEndpointAuthMethod` enforcement, provider revocation.
+- Deferred: implicit login, `auth lock`,
+  `tokenEndpointAuthMethod` enforcement, provider revocation.
 
 ## OAuth session health
 
@@ -500,7 +513,8 @@ MCParcel's answer:
 - Ask for durable sessions. Request `offline_access` where advertised and reuse
   the stored client registration on re-login.
 - Never surprise. Keep-alive never opens a browser, never refreshes a locked or
-  logged-out connection, and can be turned off per connection.
+  logged-out connection, and can be turned off per connection
+  (`lifecycle.keepAlive: "off"`).
 
 A refresh token that the provider expires on an absolute schedule cannot be kept
 alive; the health log makes that visible instead of looking like a fault. A
@@ -509,6 +523,117 @@ such. For a machine that stays on, `runtime.keepAlive: true` in `config.json`
 (default `false`) disables the 24-hour idle exit while an OAuth session is
 stored, so refreshing continues until the machine restarts; the next `mcparcel`
 use starts the daemon again. No launchd agent is installed.
+
+### Health log and `auth status` as built (stage 7b, task A)
+
+- File: `<StateDir>/oauth-health.json` (`~/.local/state/mcparcel/`), mode 0600
+  in the private state directory. Only the daemon writes it, through one
+  in-memory copy; every change replaces the file atomically (random
+  `.oauth-health-<nonce>.tmp`, `O_EXCL|O_NOFOLLOW`, fsync, rename, directory
+  fsync). Writes are best effort and never fail a refresh or sign-in. The CLI
+  only reads it.
+- Format: `{"v":1,"connections":{"<canonical id>":{"pending":…,"client":…,
+  "redirect":…,"events":[…]}}}`. An event has `at` (Unix seconds), `kind`
+  (`authorized`, `refreshed`, `refresh_failed`, `reauthorization_required`,
+  `logout`), and as applicable `trigger` (`call`, `keep_alive`, `start`,
+  `login`), `code` (sanitized OAuth or MCParcel code), `status` (HTTP),
+  `terminal`, `accessTtl` and `refreshTtl` (seconds; `refreshTtl` is the
+  provider's `refresh_token_expires_in`), `refreshToken` (a sign-in got one),
+  `rotated`, `idle` (seconds since the last success), `interrupted` and
+  `reusedClient`. `client` is the first 12 hex characters of sha256(client ID);
+  `redirect` is the loopback redirect the client was registered with. Never a
+  token, code, secret, client ID or other URL.
+- Bounds: 50 events per connection (newest kept); above 1 MiB the connection
+  whose last event is oldest is dropped until it fits. An unreadable, unsafe,
+  oversized, invalid or non-v1 file reads as empty and is replaced on the next
+  write.
+- Interrupted rotation: `pending` is written before every refresh request and
+  cleared by a recorded success, sign-in, logout or terminal failure, and by a
+  failed refresh that cannot have rotated anything: one that got an HTTP answer
+  (`status` set, e.g. 503 or 429) or never reached the provider (code
+  `unreachable`: the name did not resolve or the connection was refused). A
+  refresh that starts while an earlier marker is still set (crash, network
+  timeout or reset, or a Keychain save that failed) and gets `invalid_grant` is
+  recorded with `interrupted: true`, unless the provider's last recorded
+  refresh did not rotate its refresh token.
+- The Keychain item stays at version 1; `LoadOAuth` rejects unknown fields, so
+  history never goes there.
+- `auth status`: per item `state` (`ok`, `expiring`, `sign-in required`),
+  `lastRefreshAt` (last sign-in or refresh), `refreshTokenExpiresAt` (that time
+  plus its `refreshTtl`, when known), `cause {code, message}` and `nextAction`
+  (`mcparcel auth login <mcp>` when sign-in is required); for a signed-in
+  session whose last sign-in followed a terminal failure, `previousCause
+  {code, message}` says why that sign-in was needed (human output: `Last
+  sign-in needed: …`); `events` only for `auth status <mcp>`. `expiring` means signed in with a known refresh-token
+  expiry under 72 hours, or a last refresh that failed transiently. Never
+  prints `client`, `redirect` or a token; an unreadable health file means no
+  history.
+- Causes, first match wins: `signed_out` (no item, last event a logout),
+  `keychain_missing` (no item, but a sign-in or refresh is recorded after the
+  last logout), `never_signed_in`, `server_requested` (item holds only the
+  URL), `url_changed`, `interrupted_refresh`, `refresh_expired_or_revoked`
+  (`invalid_grant`; the message gives the idle time, "Keep-alive was off",
+  that keep-alive runs only while the daemon runs when none ran during an idle
+  time longer than its interval plus 6 hours, and whether the known
+  refresh-token lifetime had passed), `client_rejected`
+  (`invalid_client`, `unauthorized_client`), `issuer_changed`,
+  `token_rejected`, `refresh_rejected` (any other terminal code, named in the
+  message), `no_refresh_token`, and `refresh_failing` (signed in, last refresh
+  failed transiently). A failure recorded before the health log existed is
+  explained from the Keychain item's last failure.
+- Requesting refresh tokens: the SDK adds `offline_access` when the server
+  advertises it, and dynamic registration asks for the `authorization_code` and
+  `refresh_token` grants.
+- Client reuse: a re-login presents the stored dynamically registered client as
+  pre-registered when the item's URL, issuer and resource still match, its last
+  failure is not `invalid_client` or `unauthorized_client`, its stored auth
+  style equals the one the SDK picks from the metadata (the SDK ignores the
+  registered method for a pre-registered client), and the health file still
+  remembers that client with its redirect (a configured `redirectUrl` must
+  equal it). The sign-in then listens on the stored redirect; if that port is
+  taken, it registers a new client on a random port. Any failed sign-in with a
+  reused client, timeouts and cancels included, forgets it, so a client the
+  provider dropped (its `/authorize` never redirects back) costs one timed-out
+  sign-in, not every one.
+
+### Keep-alive and stay-alive as built (stage 7b, task B)
+
+- Schedule: the daemon sweeps once at start (trigger `start`), then every 5
+  minutes (`keep_alive`), one connection at a time. Targets are the runnable
+  OAuth-capable connections whose `lifecycle.keepAlive` is not `"off"`. A
+  target is due when its last recorded sign-in or refresh (health file, wall
+  clock) is older than its interval (`lifecycle.keepAlive`, at least `1h`,
+  default `24h`), when none is recorded, when its history ends in a logout or
+  terminal failure, or when the clock moved back. A laptop that slept or a
+  daemon that was stopped is caught up at the first sweep.
+- Refresh: the sweep takes the connection's gate without waiting; a busy
+  connection is retried at the next sweep. A live pooled session is refreshed
+  in place, so its in-memory refresh token stays current; otherwise a
+  temporary handler loads the Keychain item, refreshes and closes; if its save
+  of a rotated refresh token fails, it retries after 1, 2 and 4 seconds before
+  closing (and closing tries once more). A sweep that finds the daemon shutting
+  down stops before loading the item. It never
+  signs in, opens a browser or prompts: a client secret that is a 1Password
+  reference is kept alive only through a pooled session (`auth status` shows
+  `keepAlive: "unavailable"`), and `env:` client values come only from the
+  captured login environment, never from the Keychain fallback. A logout or
+  sign-in waits for the gate, and shutdown waits for a refresh in progress.
+- Outcome: success clears any backoff. No session, a recorded terminal
+  failure, a Keychain item for another URL, or an unreadable client value
+  makes the connection dormant: skipped, with no Keychain read, until the
+  daemon records another sign-in or refresh for it (counted, not compared by
+  time, so a wall clock moved back cannot keep a new session dormant). Other failures back off 5 minutes, doubling
+  up to 6 hours; a backoff more than 6 hours away (the clock moved back) is
+  ignored. Every refresh lands in the health log with its trigger.
+- Stay-alive: with `runtime.keepAlive: true`, an idle daemon asks whether any
+  target may still hold a session (before the first sweep: yes; then any that
+  is not dormant and whose history does not end in a logout or terminal
+  failure). If so it restarts its idle clock instead of exiting. It keeps the
+  daemon, not credential sessions: 1Password leases still end on schedule.
+  `runtime status` reports `stayAlive` (`Stay-alive: on|off`).
+- Locked login Keychain: a background Keychain read while the login keychain
+  is locked could make macOS show an unlock dialog. Tests cannot exercise
+  this; it is accepted, and the user confirms the behaviour by observation.
 
 `runtime.approvalDialog: true` in `config.json` (default `false`) lets a call
 without a terminal (or with `--json`, never with `--no-input`) show a server's

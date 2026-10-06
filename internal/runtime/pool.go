@@ -25,6 +25,7 @@ type PoolOptions struct {
 	SignInFailure   func(stage, code string) // logs a failed sign-in; see WriteSignInFailure
 	Keychain        func(ctx context.Context, name string) (string, error)
 	Keyring         auth.Keyring // OAuth sessions; nil fails marked connections with keychain_unavailable
+	Health          *auth.Health // OAuth session history; nil records nothing
 	Load            func(config.Paths) (config.Snapshot, error)
 	Connect         func(context.Context, mcpclient.ConnectOptions) (mcpclient.Session, error)
 	Now             func() time.Time
@@ -44,6 +45,7 @@ type pool struct {
 	stopOnce sync.Once
 	stopDone chan struct{}
 	stopErr  error
+	keep     *auth.KeepAlive
 }
 type poolWork struct{ ctx context.Context }
 
@@ -74,7 +76,9 @@ func NewPool(opts PoolOptions) Handler {
 		login[k] = v
 	}
 	opts.LoginEnv = login
-	return &pool{opts: opts, gates: map[string]chan struct{}{}, entries: map[string]*poolEntry{}, requests: map[*poolWork]context.CancelCauseFunc{}, stopDone: make(chan struct{})}
+	p := &pool{opts: opts, gates: map[string]chan struct{}{}, entries: map[string]*poolEntry{}, requests: map[*poolWork]context.CancelCauseFunc{}, stopDone: make(chan struct{})}
+	p.keep = auth.NewKeepAlive(auth.KeepAliveOptions{Health: opts.Health, Now: opts.Now, Targets: p.keepAliveTargets, Refresh: p.refreshStored})
+	return p
 }
 func (p *pool) Active() int { p.mu.Lock(); defer p.mu.Unlock(); return len(p.requests) }
 func (p *pool) Handle(ctx context.Context, id string, req Request, before func() error) (resp Response) {

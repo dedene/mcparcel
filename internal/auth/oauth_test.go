@@ -242,7 +242,7 @@ func TestRefreshSaveFailureKeepsToken(t *testing.T) {
 	}
 }
 
-func TestRefreshSerialized(t *testing.T) {
+func TestConcurrentCallersRefreshOnce(t *testing.T) {
 	f := newFixture(t, testutil.AuthServerOptions{Registration: true, RotateRefresh: true})
 	signIn(t, f, auth.OAuthClient{})
 	h := f.session(t, auth.OAuthClient{})
@@ -266,6 +266,9 @@ func TestRefreshSerialized(t *testing.T) {
 	}
 	if _, _, n := f.as.Counts(); n != 1 || len(seen) != 1 {
 		t.Fatal("refreshes", n, len(seen))
+	}
+	if f.stored(t).RefreshToken != f.as.RefreshToken() {
+		t.Fatal("rotated refresh token not stored")
 	}
 }
 

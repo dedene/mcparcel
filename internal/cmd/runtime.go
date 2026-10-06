@@ -62,7 +62,11 @@ func statusText(status runtimeclient.Status) string {
 		if status.EnvFallback {
 			environment = "caller fallback"
 		}
-		fmt.Fprintf(&b, "PID: %d\nVersion: %s\nActive calls: %d\nPATH: %s\nEnvironment: %s\n", status.PID, status.BinaryVersion, status.ActiveCalls, status.CapturedPath, environment)
+		stay := "off"
+		if status.StayAlive {
+			stay = "on"
+		}
+		fmt.Fprintf(&b, "PID: %d\nVersion: %s\nActive calls: %d\nPATH: %s\nEnvironment: %s\nStay-alive: %s\n", status.PID, status.BinaryVersion, status.ActiveCalls, status.CapturedPath, environment, stay)
 	}
 	fmt.Fprintf(&b, "Socket: %s\nLog: %s\n", status.Socket, status.Log)
 	return b.String()

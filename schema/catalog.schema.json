@@ -234,6 +234,12 @@
           "pattern": "^[^\\x00]*$",
           "minLength": 1,
           "$comment": "MCParcel also validates semantic URL/path/duration/reference rules."
+        },
+        "keepAlive": {
+          "type": "string",
+          "pattern": "^[^\\x00]*$",
+          "minLength": 1,
+          "$comment": "\"off\" or a duration of at least 1h; MCParcel validates the duration."
         }
       },
       "required": [],

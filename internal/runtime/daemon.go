@@ -189,6 +189,12 @@ func Serve(ctx context.Context, opts DaemonOptions) error {
 	if opts.EnvFallback {
 		_ = WriteLog(opts.Log, "login_env_fallback", nil)
 	}
+	keepDone := make(chan struct{})
+	if k, ok := opts.Handler.(interface{ RunKeepAlive(context.Context) error }); ok {
+		go func() { defer close(keepDone); _ = k.RunKeepAlive(life) }()
+	} else {
+		close(keepDone)
+	}
 	watcherDone := make(chan struct{})
 	go func() {
 		defer close(watcherDone)
@@ -201,7 +207,20 @@ func Serve(ctx context.Context, opts DaemonOptions) error {
 				return
 			case <-ticker.C:
 				s.mu.Lock()
-				idle := len(s.requests) == 0 && opts.Handler.Active() == 0 && !s.restarting && time.Since(s.last) >= opts.IdleTimeout
+				idle := s.idleLocked()
+				s.mu.Unlock()
+				if !idle {
+					continue
+				}
+				// Stay-alive reads the config, so it runs outside s.mu.
+				if s.stayAlive() {
+					s.mu.Lock()
+					s.last = time.Now()
+					s.mu.Unlock()
+					continue
+				}
+				s.mu.Lock()
+				idle = s.idleLocked()
 				if idle {
 					s.admitting = false
 				}
@@ -223,6 +242,8 @@ func Serve(ctx context.Context, opts DaemonOptions) error {
 	s.stop(true)
 	s.sockets.Wait()
 	<-watcherDone
+	// A refresh still running was waited for by the handler's shutdown.
+	<-keepDone
 	current, e := socketStat(dir)
 	if e == nil && sameSocket(owned, current) {
 		if e = unix.Unlinkat(int(dir.Fd()), "daemon.sock", 0); e != nil {
@@ -234,10 +255,23 @@ func Serve(ctx context.Context, opts DaemonOptions) error {
 }
 
 func (s *daemonService) status() Status {
+	stay := s.stayAlive()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	start := s.started
-	return Status{Running: true, PID: os.Getpid(), ProtocolVersion: ProtocolVersion, BinaryVersion: s.opts.Version, Compatible: true, Socket: s.opts.Paths.SocketFile, Log: s.opts.Paths.LogFile, CapturedPath: s.opts.LoginEnv["PATH"], EnvFallback: s.opts.EnvFallback, ActiveCalls: len(s.requests), StartedAt: &start}
+	return Status{Running: true, PID: os.Getpid(), ProtocolVersion: ProtocolVersion, BinaryVersion: s.opts.Version, Compatible: true, Socket: s.opts.Paths.SocketFile, Log: s.opts.Paths.LogFile, CapturedPath: s.opts.LoginEnv["PATH"], EnvFallback: s.opts.EnvFallback, ActiveCalls: len(s.requests), StayAlive: stay, StartedAt: &start}
+}
+
+// idleLocked reports an idle daemon; s.mu is held.
+func (s *daemonService) idleLocked() bool {
+	return len(s.requests) == 0 && s.opts.Handler.Active() == 0 && !s.restarting && time.Since(s.last) >= s.opts.IdleTimeout
+}
+
+// stayAlive asks the handler whether runtime.keepAlive should skip the idle
+// exit; never call it with s.mu held.
+func (s *daemonService) stayAlive() bool {
+	h, ok := s.opts.Handler.(interface{ StayAlive() bool })
+	return ok && h.StayAlive()
 }
 
 func (s *daemonService) stop(force bool) {

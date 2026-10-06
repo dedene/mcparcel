@@ -2,7 +2,9 @@ package cmd
 
 import (
 	"context"
+	"time"
 
+	"github.com/dedene/mcparcel/internal/auth"
 	"github.com/dedene/mcparcel/internal/output"
 	runtimeclient "github.com/dedene/mcparcel/internal/runtime"
 )
@@ -32,6 +34,6 @@ func (c *DaemonCmd) Run(ctx context.Context, _ *Streams) error {
 	login, captureErr := runtimeclient.CaptureLoginEnv(ctx)
 	credentials := newCredentials(paths, version)
 	defer credentials.Close()
-	pool := runtimeclient.NewPool(runtimeclient.PoolOptions{Paths: paths, LoginEnv: login, Version: version, Credentials: credentials, Keychain: newKeychain(paths), Keyring: newKeyring(paths), Log: func(event string) { _ = runtimeclient.WriteLog(log, event, nil) }, SignInFailure: func(stage, code string) { _ = runtimeclient.WriteSignInFailure(log, stage, code) }})
+	pool := runtimeclient.NewPool(runtimeclient.PoolOptions{Paths: paths, LoginEnv: login, Version: version, Credentials: credentials, Keychain: newKeychain(paths), Keyring: newKeyring(paths), Health: auth.NewHealth(paths.StateDir, time.Now), Log: func(event string) { _ = runtimeclient.WriteLog(log, event, nil) }, SignInFailure: func(stage, code string) { _ = runtimeclient.WriteSignInFailure(log, stage, code) }})
 	return runtimeclient.Serve(ctx, runtimeclient.DaemonOptions{Paths: paths, Version: version, Lock: lock, LoginEnv: login, EnvFallback: captureErr != nil, Handler: pool, Log: log})
 }

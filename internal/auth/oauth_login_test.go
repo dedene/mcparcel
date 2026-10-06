@@ -207,3 +207,33 @@ func TestIssuerOverrideMismatch(t *testing.T) {
 		t.Fatal("trailing slash", status, err)
 	}
 }
+
+func TestLoginRequestsOfflineAccess(t *testing.T) {
+	f := newFixture(t, testutil.AuthServerOptions{Registration: true})
+	signIn(t, f, auth.OAuthClient{})
+	if !slices.Contains(strings.Fields(f.as.Scopes()), "offline_access") {
+		t.Fatalf("scope %q", f.as.Scopes())
+	}
+}
+
+func TestRegistrationRequestsRefreshGrant(t *testing.T) {
+	f := newFixture(t, testutil.AuthServerOptions{Registration: true})
+	signIn(t, f, auth.OAuthClient{})
+	if got := f.as.GrantTypes(); !slices.Contains(got, "refresh_token") || !slices.Contains(got, "authorization_code") {
+		t.Fatal(got)
+	}
+}
+
+func TestLoginRecordsNoRefreshToken(t *testing.T) {
+	f := newFixture(t, testutil.AuthServerOptions{Registration: true, NoRefreshToken: true})
+	health := newHealthRig(t, nil)
+	if _, err := f.relogin(t, health.Health, nil, ctx(t)); err != nil {
+		t.Fatal(err)
+	}
+	if e := health.last(t); e.Kind != auth.HealthAuthorized || e.RefreshToken || e.Trigger != auth.TriggerLogin || e.AccessTTL != 3600 {
+		t.Fatalf("%+v", e)
+	}
+	if r := f.explain(t, health); r.State != auth.StateSignInRequired || r.Cause == nil || r.Cause.Code != "no_refresh_token" {
+		t.Fatalf("%+v", r)
+	}
+}

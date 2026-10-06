@@ -361,7 +361,7 @@ func (r *rig) status() runtimeclient.Status {
 	if err := json.Unmarshal(v.envelope.Data, &fields); err != nil {
 		r.t.Fatal(err)
 	}
-	keys := []string{"running", "pid", "protocolVersion", "binaryVersion", "compatible", "socket", "log", "capturedPath", "envFallback", "activeCalls", "startedAt"}
+	keys := []string{"running", "pid", "protocolVersion", "binaryVersion", "compatible", "socket", "log", "capturedPath", "envFallback", "activeCalls", "stayAlive", "startedAt"}
 	if len(fields) != len(keys) {
 		r.t.Fatalf("status fields: %s", v.envelope.Data)
 	}

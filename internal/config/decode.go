@@ -409,6 +409,9 @@ func checkRequired(v any, typ reflect.Type, path string) error {
 			if text, ok := obj["idleTimeout"].(string); ok && text == "" {
 				return fieldError(path+".idleTimeout", "positive duration or session required")
 			}
+			if text, ok := obj["keepAlive"].(string); ok && text == "" {
+				return fieldError(path+".keepAlive", "off or a duration of at least 1h required")
+			}
 		}
 		for _, key := range required {
 			if _, ok := obj[key]; !ok {

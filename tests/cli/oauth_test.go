@@ -56,8 +56,10 @@ func (r *oauthRig) call(target string, args ...string) result {
 
 func (r *oauthRig) checkLeaks() {
 	texts := slices.Clone(r.outputs)
-	if b, e := os.ReadFile(r.paths.LogFile); e == nil {
-		texts = append(texts, string(b))
+	for _, file := range []string{r.paths.LogFile, filepath.Join(r.paths.StateDir, "oauth-health.json")} {
+		if b, e := os.ReadFile(file); e == nil {
+			texts = append(texts, string(b))
+		}
 	}
 	for _, dir := range []string{r.paths.ConfigDir, r.paths.DataDir, r.paths.CacheDir} {
 		_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
@@ -157,7 +159,7 @@ func TestOAuthLoginCallRefreshBlackBox(t *testing.T) {
 		t.Fatalf("%+v", all)
 	}
 	human := r.run("auth", "status", "n")
-	if human.code != 0 || !strings.Contains(human.stdout, "n  signed in  refresh token: yes") {
+	if human.code != 0 || !strings.HasPrefix(human.stdout, "local:n  ok\n") || !strings.Contains(human.stdout, "  Last refresh: ") {
 		t.Fatalf("%q %q", human.stdout, human.stderr)
 	}
 	time.Sleep(6 * time.Second)
@@ -203,7 +205,7 @@ func TestOAuthRefreshFailureBlackBox(t *testing.T) {
 		t.Fatalf("%+v", items)
 	}
 	human := r.run("auth", "status", "n")
-	if human.code != 0 || !strings.Contains(human.stdout, "n  sign-in required (last refresh failed: invalid_grant at ") {
+	if human.code != 0 || !strings.HasPrefix(human.stdout, "local:n  sign-in required  (refresh_expired_or_revoked)\n") || !strings.Contains(human.stdout, "  Next: mcparcel auth login n\n") {
 		t.Fatalf("%q", human.stdout)
 	}
 	_, _, before := r.as.Counts()
@@ -294,7 +296,7 @@ func TestUnmarkedHTTP401BlackBox(t *testing.T) {
 	if all := r.authStatus(); len(all) != 1 || all[0].Connection != "local:n" || all[0].SignedIn || all[0].RefreshToken || all[0].LastRefreshFailure != nil {
 		t.Fatalf("%+v", all)
 	}
-	if human := r.run("auth", "status"); human.code != 0 || human.stdout != "local:n  sign-in required\n" {
+	if human := r.run("auth", "status"); human.code != 0 || human.stdout != "local:n  sign-in required  (server_requested)\n" {
 		t.Fatalf("%q", human.stdout)
 	}
 	r.login(0, "")
