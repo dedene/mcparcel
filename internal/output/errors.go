@@ -18,6 +18,8 @@ type Details struct {
 	Outcome      string          `json:"outcome,omitempty"`
 	// RPCCode is a server_error's JSON-RPC error code; 0 is a legal code.
 	RPCCode *int `json:"rpcCode,omitempty"`
+	// Variables names the environment variables a headless runtime is missing.
+	Variables []string `json:"variables,omitempty"`
 }
 type Error struct {
 	Code       string   `json:"code"`
@@ -117,6 +119,15 @@ func HeadlessOnlyError() *Error {
 	return err
 }
 
+// HeadlessOnePasswordError is config_required for a 1Password reference in
+// headless mode, which never contacts 1Password.
+func HeadlessOnePasswordError() *Error {
+	err := NewError("config_required", nil)
+	err.Message = "1Password references need the desktop app and are not available in headless mode."
+	err.NextAction = "Use an env: reference for this value in headless mode."
+	return err
+}
+
 // ElicitationDeclined reports an elicitation that was not accepted, with the
 // server's sanitized message, worded by reason: unavailable (no prompt was
 // possible), unsupported, declined (by the user) or canceled.
@@ -162,6 +173,10 @@ func NewError(code string, details *Details) *Error {
 		value.SyncReport = append(json.RawMessage(nil), details.SyncReport...)
 		value.ImportReport = append(json.RawMessage(nil), details.ImportReport...)
 		value.Candidates = append([]string(nil), details.Candidates...)
+		value.Variables = append([]string(nil), details.Variables...)
+		if len(value.Variables) == 0 {
+			value.Variables = nil
+		}
 		if details.RPCCode != nil {
 			rpcCode := *details.RPCCode
 			value.RPCCode = &rpcCode

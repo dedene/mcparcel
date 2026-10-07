@@ -38,6 +38,10 @@ func (p *pool) oauthHandler(ctx context.Context, id, name string, c config.Conne
 	if !oauthCapable(c) {
 		return nil, nil
 	}
+	if p.opts.Headless && (login != nil || c.Auth != nil && c.Auth.Grant != config.GrantClientCredentials) {
+		// A sign-in needs a browser and a Keychain; headless has neither.
+		return nil, headlessSignIn(nil)
+	}
 	if p.opts.Keyring == nil {
 		if c.Auth != nil || login != nil {
 			return nil, output.NewError("keychain_unavailable", nil)
@@ -85,7 +89,7 @@ func (p *pool) oauthHandler(ctx context.Context, id, name string, c config.Conne
 // sign-in required and which no session can use. An existing item is kept.
 func (p *pool) rememberSignIn(ctx context.Context, canonical string, c config.Connection) {
 	u, e := config.LiteralText(c.Transport.HTTP.URL)
-	if e != nil || p.opts.Keyring == nil {
+	if e != nil || p.opts.Keyring == nil || p.opts.Headless {
 		return
 	}
 	ctx = context.WithoutCancel(ctx)
@@ -183,7 +187,11 @@ func (p *pool) logout(ctx context.Context, canonical string) Response {
 	if entry != nil {
 		p.retire(canonical, entry)
 	}
-	removed, e := auth.DeleteOAuth(ctx, p.opts.Keyring, canonical)
+	removed, e := false, error(nil)
+	if !p.opts.Headless {
+		// Headless mode stores no sign-in: there is nothing to delete.
+		removed, e = auth.DeleteOAuth(ctx, p.opts.Keyring, canonical)
+	}
 	if e != nil {
 		return Response{Error: poolError(e, nil, "", false)}
 	}

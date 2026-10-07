@@ -39,8 +39,12 @@ func (c *DaemonCmd) Run(ctx context.Context, _ *Streams) error {
 
 // daemonEnvSource returns how the runtime obtains the environment its
 // servers start from. Desktop mode captures the login shell; headless mode
-// is to use the daemon's own environment instead (D11).
-func daemonEnvSource(config.Paths) func(context.Context) (map[string]string, error) {
+// uses the daemon's own environment restricted to the forwarded names (D11)
+// and never runs a shell.
+func daemonEnvSource(paths config.Paths) func(context.Context) (map[string]string, error) {
+	if paths.Headless() {
+		return func(context.Context) (map[string]string, error) { return runtimeclient.HeadlessDaemonEnv(paths), nil }
+	}
 	return runtimeclient.CaptureLoginEnv
 }
 
@@ -51,8 +55,30 @@ func daemonEnvSource(config.Paths) func(context.Context) (map[string]string, err
 // peer and version checks.
 func runDaemon(ctx context.Context, paths config.Paths, lock *os.File, log io.Writer, supervised bool) error {
 	login, captureErr := daemonEnvSource(paths)(ctx)
-	credentials := newCredentials(paths, version)
-	defer credentials.Close()
-	pool := runtimeclient.NewPool(runtimeclient.PoolOptions{Paths: paths, LoginEnv: login, Version: version, Credentials: credentials, Keychain: newKeychain(paths), Keyring: newKeyring(paths), Health: auth.NewHealth(paths.StateDir, time.Now), Log: func(event string) { _ = runtimeclient.WriteLog(log, event, nil) }, SignInFailure: func(stage, code string) { _ = runtimeclient.WriteSignInFailure(log, stage, code) }})
+	opts := daemonPoolOptions(paths, login, log)
+	if opts.Credentials != nil {
+		defer opts.Credentials.Close()
+	}
+	pool := runtimeclient.NewPool(opts)
 	return runtimeclient.Serve(ctx, runtimeclient.DaemonOptions{Paths: paths, Version: version, Lock: lock, LoginEnv: login, EnvFallback: captureErr != nil, Handler: pool, Log: log, IdleTimeout: daemonIdleTimeout(paths), NoIdleExit: supervised, Supervised: supervised})
+}
+
+// The desktop credential sources: 1Password, the Keychain env: fallback and
+// the OAuth keyring. Tests replace them with spies.
+var (
+	credentialsFactory = newCredentials
+	keychainFactory    = newKeychain
+	keyringFactory     = newKeyring
+)
+
+// daemonPoolOptions configures the runtime's pool. Headless mode constructs
+// none of the desktop credential sources (D10, D11).
+func daemonPoolOptions(paths config.Paths, login map[string]string, log io.Writer) runtimeclient.PoolOptions {
+	opts := runtimeclient.PoolOptions{Paths: paths, LoginEnv: login, Version: version, Health: auth.NewHealth(paths.StateDir, time.Now), Log: func(event string) { _ = runtimeclient.WriteLog(log, event, nil) }, SignInFailure: func(stage, code string) { _ = runtimeclient.WriteSignInFailure(log, stage, code) }}
+	if paths.Headless() {
+		opts.Headless = true
+		return opts
+	}
+	opts.Credentials, opts.Keychain, opts.Keyring = credentialsFactory(paths, version), keychainFactory(paths), keyringFactory(paths)
+	return opts
 }

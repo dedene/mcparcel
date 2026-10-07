@@ -3,6 +3,7 @@ package config
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,6 +23,13 @@ const maxSocketPath = 100
 
 // Headless reports whether config.json selects headless mode.
 func (l Local) Headless() bool { return l.Runtime != nil && l.Runtime.Mode == ModeHeadless }
+
+// Headless reports whether these paths come from a headless state root.
+func (p Paths) Headless() bool { return p.StateRoot != "" }
+
+// ErrHeadlessOnePassword is config_required for a connection that needs a
+// 1Password reference in headless mode.
+var ErrHeadlessOnePassword = fmt.Errorf("%w: 1Password references are unavailable in headless mode", ErrConfigRequired)
 
 // DesktopSupported reports whether desktop mode can run on goos.
 func DesktopSupported(goos string) bool { return goos == "darwin" }

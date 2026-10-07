@@ -229,6 +229,9 @@ func safeFailure(err error) *output.Error {
 	if errors.Is(err, config.ErrHeadlessOnly) {
 		return output.HeadlessOnlyError()
 	}
+	if errors.Is(err, config.ErrHeadlessOnePassword) {
+		return output.HeadlessOnePasswordError()
+	}
 	code := "internal_error"
 	switch {
 	case errors.Is(err, catalog.ErrOffline):

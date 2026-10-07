@@ -38,7 +38,7 @@ func (p *pool) session(ctx context.Context, id, hash string, c config.Connection
 	if old != nil {
 		p.retire(id, old)
 	}
-	values, e := envRefValues(ctx, p.opts.LoginEnv, p.opts.Keychain, c, lease.Values)
+	values, e := envRefValues(ctx, p.opts.LoginEnv, p.opts.Keychain, p.opts.Headless, c, lease.Values)
 	if e != nil {
 		return nil, nil, e
 	}

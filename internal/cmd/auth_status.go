@@ -63,7 +63,14 @@ func (c *AuthStatusCmd) Run(ctx context.Context, s *Streams, opts *CommandOption
 		}
 		ids = []string{id}
 	}
-	keyring := newKeyring(paths)
+	if paths.Headless() {
+		// Headless mode stores no sign-in and reads no Keychain (Ruling 3).
+		if opts.JSON {
+			return writeSuccess(s, opts, authStatusData{Items: []authStatusItem{}})
+		}
+		return writeSuccess(s, opts, "No sign-ins in headless mode.\n")
+	}
+	keyring := keyringFactory(paths)
 	// An unreadable health file means no history; status still answers.
 	health, _ := auth.ReadHealth(paths.StateDir)
 	now := time.Now()

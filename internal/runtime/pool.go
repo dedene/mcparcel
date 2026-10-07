@@ -31,6 +31,10 @@ type PoolOptions struct {
 	Now             func() time.Time
 	ConnectTimeout  time.Duration
 	ShutdownTimeout time.Duration
+	// Headless runs without Keychain, keyring or 1Password: NewPool drops
+	// Keychain and Keyring and refuses every 1Password reference. LoginEnv
+	// is then the daemon's own environment (D11).
+	Headless bool
 }
 type pool struct {
 	opts     PoolOptions
@@ -70,6 +74,9 @@ func NewPool(opts PoolOptions) Handler {
 	}
 	if opts.ShutdownTimeout <= 0 {
 		opts.ShutdownTimeout = 5 * time.Second
+	}
+	if opts.Headless {
+		opts.Keychain, opts.Keyring, opts.Credentials = nil, nil, headlessResolver{}
 	}
 	login := make(map[string]string, len(opts.LoginEnv))
 	for k, v := range opts.LoginEnv {
@@ -186,7 +193,21 @@ func (p *pool) Handle(ctx context.Context, id string, req Request, before func()
 	}
 	lease := auth.Lease{Identity: "public"}
 	refs := config.SecretRefs(c)
-	if oauthCapable(c) && len(refs) == 0 {
+	if p.opts.Headless {
+		// No sign-in, Keychain item or login shell exists to point at. An
+		// authorization-code connection needs a sign-in whatever its
+		// variables hold.
+		names := config.EnvRefs(c)
+		if c.Auth != nil && c.Auth.Grant != config.GrantClientCredentials {
+			names = nil
+		}
+		defer func() {
+			if resp.Error != nil && resp.Error.Code == "auth_required" {
+				e := headlessSignIn(names)
+				resp.Error.Message, resp.Error.NextAction = e.Message, e.NextAction
+			}
+		}()
+	} else if oauthCapable(c) && len(refs) == 0 {
 		defer func() {
 			if resp.Error != nil && resp.Error.Code == "auth_required" {
 				resp.Error.NextAction = "mcparcel auth login " + req.Connection

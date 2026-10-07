@@ -87,7 +87,7 @@ func newRuntimeClient(opts *CommandOptions) (*runtimeclient.Client, error) {
 	return &runtimeclient.Client{Paths: paths, Version: version, Executable: exe, NoInput: opts.NoInput}, nil
 }
 
-func statusText(status runtimeclient.Status) string {
+func statusText(status runtimeclient.Status, headless bool) string {
 	var b strings.Builder
 	state := "stopped"
 	if status.Running {
@@ -96,7 +96,9 @@ func statusText(status runtimeclient.Status) string {
 	fmt.Fprintf(&b, "Runtime: %s\n", state)
 	if status.Running {
 		environment := "login shell"
-		if status.EnvFallback {
+		if headless {
+			environment = "daemon environment"
+		} else if status.EnvFallback {
 			environment = "caller fallback"
 		}
 		stay := "off"
@@ -121,7 +123,7 @@ func (c *RuntimeStatusCmd) Run(ctx context.Context, s *Streams, opts *CommandOpt
 	if opts.JSON {
 		return writeSuccess(s, opts, data)
 	}
-	return writeSuccess(s, opts, statusText(data))
+	return writeSuccess(s, opts, statusText(data, client.Paths.Headless()))
 }
 
 func (c *RuntimeRestartCmd) Run(ctx context.Context, s *Streams, opts *CommandOptions) error {
@@ -136,7 +138,7 @@ func (c *RuntimeRestartCmd) Run(ctx context.Context, s *Streams, opts *CommandOp
 	if opts.JSON {
 		return writeSuccess(s, opts, data)
 	}
-	return writeSuccess(s, opts, "Runtime restarted. Server state was reset.\n"+statusText(data.Status))
+	return writeSuccess(s, opts, "Runtime restarted. Server state was reset.\n"+statusText(data.Status, client.Paths.Headless()))
 }
 
 func (c *RuntimeStopCmd) Run(ctx context.Context, s *Streams, opts *CommandOptions) error {

@@ -172,8 +172,10 @@ func forbiddenChildEnv(key string) bool {
 
 // envRefValues adds values for env: references from the captured login
 // environment, falling back to a Keychain generic password named after the
-// variable (temporary bridge). Values never enter errors or logs.
-func envRefValues(ctx context.Context, login map[string]string, keychain func(context.Context, string) (string, error), c config.Connection, resolved map[string]string) (map[string]string, error) {
+// variable (temporary bridge). In headless mode login is the daemon's own
+// environment, the Keychain is never consulted and the error names every
+// missing variable. Values never enter errors or logs.
+func envRefValues(ctx context.Context, login map[string]string, keychain func(context.Context, string) (string, error), headless bool, c config.Connection, resolved map[string]string) (map[string]string, error) {
 	names := config.EnvRefs(c)
 	if len(names) == 0 {
 		return resolved, nil
@@ -182,8 +184,17 @@ func envRefValues(ctx context.Context, login map[string]string, keychain func(co
 	if out == nil {
 		out = map[string]string{}
 	}
+	var missing []string
 	for _, name := range names {
 		value := login[name]
+		if headless {
+			if value == "" {
+				missing = append(missing, name)
+			} else {
+				out["env:"+name] = value
+			}
+			continue
+		}
 		if value == "" && keychain != nil {
 			if v, err := keychain(ctx, name); err == nil {
 				value = v
@@ -196,6 +207,9 @@ func envRefValues(ctx context.Context, login map[string]string, keychain func(co
 			return nil, err
 		}
 		out["env:"+name] = value
+	}
+	if len(missing) > 0 {
+		return nil, headlessMissingEnv(missing)
 	}
 	return out, nil
 }
