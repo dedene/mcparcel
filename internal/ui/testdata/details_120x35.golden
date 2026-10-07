@@ -1,0 +1,35 @@
+MCParcel / Setup / Notes
+ID: github:acmeco/mcp-catalog#notes
+Enabled: [ ]   State: Configuration required
+Source: acmeco/mcp-catalog, commit aaaaaaa, snapshot 2h old
+Domains: Research
+Transport: stdio: notes-fixture (2 arguments)
+Shared definition: read-only.
+
+> Input workspace (string): (not set)
+  Credential profile: (not bound)
+  Tools: all tools
+  Connect and load tools
+
+Schema: none cached
+Config revision 2, no unsaved changes
+Configuration required: input workspace, credential profile.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Up/Down: field   Enter: choose   Space: toggle   t: tools   l: connect   Esc: back

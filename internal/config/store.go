@@ -41,6 +41,9 @@ func marshalDocument(value any) ([]byte, error) {
 	return b, nil
 }
 
+// CloneState returns a deep copy of state through the canonical decoders.
+func CloneState(s State) (State, error) { return cloneState(s) }
+
 func cloneState(state State) (State, error) {
 	var out State
 	b, e := marshalDocument(state.Local)

@@ -8,6 +8,7 @@ import (
 	"io"
 
 	"github.com/dedene/mcparcel/internal/config"
+	"github.com/dedene/mcparcel/internal/edit"
 )
 
 type ConfigCmd struct {
@@ -107,26 +108,6 @@ func metadataStore(ctx context.Context) (*config.Store, config.State, error) {
 	return store, state, err
 }
 
-func metadataDefinition(state config.State, name string) (string, *config.Connection, error) {
-	effective, err := config.Resolve(state)
-	if err != nil {
-		return "", nil, err
-	}
-	ids := make([]string, 0, len(effective.Connections))
-	for id := range effective.Connections {
-		ids = append(ids, id)
-	}
-	id, err := config.ResolveID(name, effective.Aliases, ids)
-	if err != nil {
-		return "", nil, err
-	}
-	row := effective.Connections[id]
-	if !row.Available || row.Definition == nil {
-		return "", nil, config.ErrNotFound
-	}
-	return id, row.Definition, nil
-}
-
 func writeMutation(s *Streams, opts *CommandOptions, state config.State) error {
 	var payload any = ConfigMutationData{state.Selections.Revision}
 	if !opts.JSON {
@@ -140,7 +121,7 @@ func (c *ConfigInputSetCmd) Run(ctx context.Context, s *Streams, opts *CommandOp
 	if err != nil {
 		return err
 	}
-	id, d, err := metadataDefinition(state, c.MCP)
+	id, d, err := edit.Definition(state, c.MCP)
 	if err != nil {
 		return err
 	}
@@ -148,14 +129,7 @@ func (c *ConfigInputSetCmd) Run(ctx context.Context, s *Streams, opts *CommandOp
 		return config.ErrConfig
 	}
 	next, err := store.Update(ctx, state.Selections.Revision, func(draft *config.State) error {
-		sel := draft.Selections.Connections[id]
-		if sel.Inputs == nil {
-			sel.Inputs = map[string]string{}
-		}
-		sel.Inputs[c.Name] = c.Value
-		draft.Selections.Connections[id] = sel
-		_, err := config.Resolve(*draft)
-		return err
+		return edit.StageInput(draft, id, c.Name, c.Value)
 	})
 	if err != nil {
 		return err
@@ -198,7 +172,7 @@ func (c *ConfigProfileBindCmd) Run(ctx context.Context, s *Streams, opts *Comman
 	if err != nil {
 		return err
 	}
-	id, d, err := metadataDefinition(state, c.MCP)
+	id, d, err := edit.Definition(state, c.MCP)
 	if err != nil {
 		return err
 	}
@@ -209,10 +183,7 @@ func (c *ConfigProfileBindCmd) Run(ctx context.Context, s *Streams, opts *Comman
 		return config.ErrConfig
 	}
 	next, err := store.Update(ctx, state.Selections.Revision, func(draft *config.State) error {
-		sel := draft.Selections.Connections[id]
-		sel.CredentialProfile = c.Profile
-		draft.Selections.Connections[id] = sel
-		return nil
+		return edit.StageProfile(draft, id, c.Profile)
 	})
 	if err != nil {
 		return err

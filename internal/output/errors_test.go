@@ -50,6 +50,7 @@ func TestErrorExitRegistry(t *testing.T) {
 		{"protocol_error", 6, "The runtime or MCP response is invalid.", "Check the daemon log and server compatibility."},
 		{"input_required", 6, "The MCP server requires an unsupported interactive response.", "Use a client that supports this server interaction."},
 		{"canceled", 130, "The operation was canceled.", ""},
+		{"terminal_required", 2, "Setup needs an interactive terminal; it does not run with --json, --no-input or without a terminal.", "Use mcparcel catalog, enable, disable, tools enable/disable, config input set, config profile bind and local add/update instead."},
 	}
 	for _, row := range rows {
 		t.Run(row.code, func(t *testing.T) {

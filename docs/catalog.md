@@ -225,8 +225,9 @@ config can define profiles. Validate an `op://` bootstrap reference without reso
 
 Selections bind a catalog's `team` requirement to that local profile ID. Different
 catalogs can use different profiles/accounts without trusting a catalog to choose
-a bootstrap token or broaden vault access. Setup collects missing bindings when
-an entry is enabled; it does not read any secret or open an auth prompt.
+a bootstrap token or broaden vault access. Setup sets missing inputs and binds an
+existing profile when an entry is enabled; profiles are created with `config
+profile set`. Setup does not read any secret or open an auth prompt.
 
 `config.json` also holds `schemaVersion: 1`, `sources` (registration records),
 `aliases` (short-name → canonical-ID) and optional `runtime` defaults. Local domain

@@ -54,6 +54,7 @@ var registry = map[string]errorSpec{
 	"ambiguous_id":        {2, "The connection name is ambiguous.", "Use a canonical connection ID."},
 	"config_conflict":     {7, "The configuration changed since it was loaded.", "Reload the configuration and reapply your changes."},
 	"runtime_unsupported": {2, "This connection requires a runtime feature that is not implemented yet.", "Use a supported connection or wait for its runtime stage."},
+	"terminal_required":   {2, "Setup needs an interactive terminal; it does not run with --json, --no-input or without a terminal.", "Use mcparcel catalog, enable, disable, tools enable/disable, config input set, config profile bind and local add/update instead."},
 
 	"internal_error":           {1, "An internal error occurred.", "Report this error with the mcparcel version."},
 	"invalid_arguments":        {2, "Invalid call arguments.", "Check the tool schema and argument syntax."},

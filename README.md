@@ -23,6 +23,9 @@ waarin je per domein, zoals Design of Servers, MCP's uit catalogi of lokale conf
 activeert. De eerste aanroep die credentials nodig heeft, regelt de authenticatie;
 een expliciet unlockcommando hoort niet bij de normale workflow.
 
+`setup` werkt volledig met het toetsenbord: pijltjes om te navigeren, spatie om een MCP
+aan of uit te zetten, Enter voor details, Ctrl+S om te bewaren en `?` voor alle toetsen.
+
 De voorbeelden gebruiken `npx` en vereisen geen globale installatie. Een blijvende
 native installatie met een rechtstreeks `mcparcel`-commando blijft mogelijk; de
 precieze distributiewijze moet nog worden uitgewerkt.

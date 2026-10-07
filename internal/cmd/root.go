@@ -40,6 +40,7 @@ type CLI struct {
 	Local   LocalCmd   `cmd:"" json:"-" help:"Add, update or remove personal definitions offline."`
 	Enable  EnableCmd  `cmd:"" json:"-" help:"Enable and accept selected connections offline."`
 	Disable DisableCmd `cmd:"" json:"-" help:"Disable selected connections offline."`
+	Setup   SetupCmd   `cmd:"" json:"-" help:"Choose connections and tools in an interactive terminal."`
 	Catalog CatalogCmd `cmd:"" json:"-" help:"Show all connection metadata offline."`
 	List    ListCmd    `cmd:"" json:"-" help:"Show enabled connections offline."`
 	Inspect InspectCmd `cmd:"" json:"-" help:"Inspect a connection offline."`
@@ -201,7 +202,7 @@ func scanIntent(argv []string) parseIntent {
 		}
 		if i.command == "" && !strings.HasPrefix(token, "-") {
 			i.command = token
-			i.product = token == "tools" || token == "call" || token == "auth" || token == "runtime" || token == "daemon" || token == "config" || token == "import" || token == "catalog" || token == "list" || token == "inspect" || token == "enable" || token == "disable" || token == "local" || token == "add" || token == "remove" || token == "sync"
+			i.product = token == "tools" || token == "call" || token == "auth" || token == "runtime" || token == "daemon" || token == "config" || token == "import" || token == "catalog" || token == "list" || token == "inspect" || token == "enable" || token == "disable" || token == "local" || token == "add" || token == "remove" || token == "sync" || token == "setup"
 		}
 	}
 	return i

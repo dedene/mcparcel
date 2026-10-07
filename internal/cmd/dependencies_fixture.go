@@ -245,6 +245,9 @@ func newTerminal(paths config.Paths, _, _ *os.File) func(context.Context) io.Rea
 	return func(context.Context) io.Reader { return typed }
 }
 
+// newSetupTerminal is always false: fixture binaries never start the setup UI.
+func newSetupTerminal(_, _ *os.File) bool { return false }
+
 // newDialog never runs osascript: it keeps argv in StateDir/fixture-dialog-args
 // and returns StateDir/fixture-dialog-answer (absent: no button).
 func newDialog(paths config.Paths) func(context.Context, []string) (string, error) {

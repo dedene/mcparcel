@@ -9,6 +9,7 @@ import (
 	"github.com/dedene/mcparcel/internal/args"
 	"github.com/dedene/mcparcel/internal/catalog"
 	"github.com/dedene/mcparcel/internal/config"
+	"github.com/dedene/mcparcel/internal/edit"
 	"github.com/dedene/mcparcel/internal/output"
 )
 
@@ -30,7 +31,7 @@ func runSync(ctx context.Context, service *catalog.Service, state config.State, 
 	}
 	accepted := map[string][]string{}
 	if len(accept) > 0 {
-		ids, err := resolveSelectionIDs(state, accept)
+		ids, err := edit.ResolveIDs(state, accept)
 		if err != nil {
 			return data, err
 		}

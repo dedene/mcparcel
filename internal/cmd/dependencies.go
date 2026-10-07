@@ -62,6 +62,13 @@ func newTerminal(_ config.Paths, in, errOut *os.File) func(context.Context) io.R
 	return func(ctx context.Context) io.Reader { return promptReader(ctx, fd) }
 }
 
+// newSetupTerminal reports whether setup may take over the terminal, with the
+// same checks as newTerminal: in and errOut are terminals and this process is
+// in the foreground of in's terminal.
+func newSetupTerminal(in, errOut *os.File) bool {
+	return newTerminal(config.Paths{}, in, errOut) != nil
+}
+
 // promptReader first discards input typed before the prompt, so a line typed
 // ahead cannot answer a prompt not yet shown; if that fails it reads as EOF.
 func promptReader(ctx context.Context, fd int) io.Reader {

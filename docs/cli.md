@@ -49,7 +49,7 @@ also work via `npx mcparcel ...`. No global installation or Homebrew is required
 | `tools <mcp> [--cached]` | Live schema discovery; `--cached` has no cache yet and always returns `schema_cache_miss` |
 | `tools enable <mcp> <tool>...` / `tools disable <mcp> <tool>...` | Change personal tool selection; cannot override source policy |
 | `call <mcp>.<tool> [key=value ...] [--args <json>] [--meta <json>]` | Invoke an enabled, allowed tool; a server's approval request during the call is shown as a prompt (see Approval prompts) |
-| `setup` | Interactive domain and connection editor |
+| `setup` | Interactive domain and connection editor (see "Domain matrix and terminal sketch"); renders on stderr, prints `Configuration saved at revision N.` or `No changes saved.` on stdout (plus `The last save could not be confirmed. Run mcparcel list to check the configuration.` after an unconfirmed save); Ctrl+C exits 130 after printing any save that already happened |
 | `sync [<owner/repo>] [--apply [--accept <mcp>...]]` | Fetch and display update; only `--apply` changes active snapshot; `--accept` unblocks named connections whose execution or auth changed |
 | `import mcporter --file <path> [--bindings <file>] [--only <id>...] [--apply]` | Preview or apply supported imports, with explicit unresolved-field report; unbound `${NAME}` in env/header values becomes `env:NAME` with an `environment_reference` warning |
 | `local add --file <definition.json>` | Add a connection object containing `id` plus catalog connection fields |
@@ -71,10 +71,14 @@ also work via `npx mcparcel ...`. No global installation or Homebrew is required
 All commands provide `--json` except interactive `setup`; use selection/config
 commands for equivalent machine actions. `--no-input` never opens UI, browser,
 biometric or approval prompts (terminal or dialog). Missing necessary input yields an error with the next action.
-`setup --no-input`, `setup --json` and setup without a TTY fail without writing.
+`setup --no-input`, `setup --json` and setup without a TTY (stdin and stderr must
+be terminals, in the foreground) fail with `terminal_required` (exit 2) before
+reading any configuration, and write nothing.
 
 `local` file updates can also change personal domain assignments; setup details
-expose the same fields and input/profile bindings. Setup does not author team
+expose the same fields and input/profile bindings. Setup never shows argument,
+env or header values or a URL's path and query; replace them by typing a new
+value in the personal form, or use `local update`. Setup does not author team
 catalogs or edit protected policy.
 
 `enable` validates all specified entries and local prerequisites before saving;
@@ -229,9 +233,11 @@ source revisions and cache age. Secret bindings remain references, never values.
 
 Error codes distinguish `auth_required`, `auth_expired`, `config_required`,
 `config_conflict`, `connection_unavailable`, `review_required`, `tool_denied`,
-`runtime_version_mismatch`, `runtime_config_mismatch`, `auth_account_conflict` and
-`outcome_unknown`. `review_required` uses exit 4; `runtime_config_mismatch` exit 6;
-`auth_account_conflict` exit 3.
+`runtime_version_mismatch`, `runtime_config_mismatch`, `auth_account_conflict`,
+`terminal_required` and `outcome_unknown`. `review_required` uses exit 4;
+`runtime_config_mismatch` exit 6; `auth_account_conflict` exit 3;
+`terminal_required` exit 2 (setup without an interactive terminal, or with
+`--json` or `--no-input`; the next action lists the equivalent commands).
 `server_error` (exit 6) means the server answered the call with a JSON-RPC error
 instead of a result: the message carries the server's text cleaned to one line of
 at most 300 characters (never the error's `data`), and `details` has
@@ -294,29 +300,117 @@ context7 belongs to Development and Research without creating two processes.
 +------------------------------------------------------------------------------+
 ```
 
-Sources and counts are illustrative. Details show local input/profile binding,
-transport, policy, tool selection, config revision and cached schema age. Loading
-live tools is an explicit action labelled `Connect and load tools`; auth may follow.
-A personal editor mirrors `local add/update`. Shared definitions are read-only.
-Changes stay in a draft until Save. Cancel writes nothing. A config revision
-conflict preserves the draft and offers reload; never overwrite newer CLI edits.
+Sources and counts are illustrative; the as-built renders are in
+[acceptance.md](acceptance.md). The wide layout above (columns MCP, Enabled,
+State, Source, Runs on) needs at least 100x30. Anything smaller uses a compact
+list: MCP with a state tag (`(config)`, `(review)`, `(unavailable)`), Enabled,
+Runs on and a truncated Source, one summary line and one help line ending in
+`?: help`; tabs scroll with `<` and `>`. Below 40x10 setup shows `Terminal too
+small (need 40x10). Resize, or press q.` Enabled reads `[x]` on, `[ ]` off and
+`[!]` on with review required. State is `Ready`, `Configuration required`,
+`Review required` or `Unavailable`, separate from Enabled.
 
-Small terminals use a compact list with the same keys; keyboard-only navigation,
-visible focus and plain ASCII fallback are required. No mandatory mouse or color.
+Keys (`?` shows them in setup; letters match either case):
+
+| Where | Keys |
+| --- | --- |
+| List | Left/Right: domain. Up/Down: MCP; PgUp/PgDn, Home/End. Space: toggle. Enter: details. `/`: search. Tab/Shift+Tab: focus `[Save]`/`[Cancel]`, Enter activates. `A`: add a personal connection. Ctrl+S: save. `q` or Esc: cancel (Esc clears an active search first). `?`: help. Ctrl+C: quit now, discard unsaved changes, exit 130. |
+| Search | Typing filters label, ID and description in every tab (the help lines show these keys while searching). Backspace, Ctrl+U. Enter or Down: back to the list, filter kept. Esc: clear. |
+| Details | Up/Down: field. Enter: edit or choose. Space: toggle. `t`: tools. `l`: Connect and load tools. `e`: edit (personal only). Esc: back. |
+| Tools | Up/Down. Space: toggle. `l`: Connect and load tools. Esc: back (cancels a running load). |
+| Form or field | Typing, Backspace, Ctrl+U, paste (control characters stripped). Tab/Shift+Tab: next or previous field. Enter: apply. Esc: discard. |
+| Conflict | `r`: reload and reapply. Esc: back to the draft. |
+| Confirm | `y`/`n` (default N; Enter and Esc mean N). |
+
+Every setup action has a non-interactive command, and both run the same code:
+
+| Setup action | Command |
+| --- | --- |
+| Space: off to on | `enable <mcp>` |
+| Space: on to off | `disable <mcp>` |
+| Space on `[!]` | `enable <mcp>` (accepts, like `sync --apply --accept <mcp>`) |
+| Set an input | `config input set <mcp> <name> <value>` |
+| Choose a credential profile | `config profile bind <mcp> <profile>` |
+| Toggle a tool | `tools enable <mcp> <tool>` / `tools disable <mcp> <tool>` |
+| Connect and load tools | `tools <mcp>` |
+| Add a personal connection | `local add --file <definition.json>` |
+| Edit a personal connection | `local update <id> --file <definition.json>` |
+| Browse, search | `catalog [--domain <id>]`, `list`, `inspect <mcp>` |
+
+Not in setup, shown as hints: `add` (no catalog), `config profile set` (no
+profile yet), `auth login` (sign-in needed), `sync` (review details) and
+`local remove` (personal details).
+
+Details show the source with snapshot commit and age, domains, transport
+(`stdio: <command> (N arguments)` or `HTTP: <host>`), inputs (`url` inputs, and
+any input the HTTP URL comes from, as host only), the bound profile by name only, policy (`all tools` or `N allowed
+by source`, `N denied by source`, `N disabled by you`), schema (`none cached` or
+`loaded this session Xm ago`), the config revision and unsaved changes. Shared
+(GitHub) definitions are read-only. Such an input starts empty and shows its
+current host; an empty Enter keeps the value. The personal form edits label,
+description, domains (comma-separated, pre-filled with the current tab when
+adding), command, and arguments (space-separated) or URL; the transport type is
+chosen when adding only. Editing keeps every other field (listed by name as
+`Kept: ...`); arguments and URL are replace-only, and arguments that are not
+literals are read-only. Input and form errors show the field path and reason,
+never the value.
+
+Changes stay in a draft until Save. Save writes all changes in one revisioned
+update and keeps setup open (`Saved at revision N.`, or `Nothing to save.`
+without a store call). Cancel writes nothing and asks `Discard N unsaved
+changes? y/N` first when there are any; Ctrl+C discards unsaved changes and
+exits 130. A config revision conflict keeps the draft and offers reload. Reload
+reapplies the draft in the order it was made on top of the newer configuration
+and names what it dropped: a change to a field or connection definition that
+changed elsewhere is dropped (`changed elsewhere`), as is a change that no
+longer applies, so setup never overwrites a newer CLI edit or enables a
+definition you have not seen.
+
+Setup never contacts GitHub, starts the runtime or reads credentials while you
+browse, edit or save. Only `Connect and load tools` contacts the runtime, and
+credentials may then be requested. Connect needs the saved configuration: the
+connection must be saved enabled and ready with no unsaved change to it (tool
+toggles excepted). Loaded tools are kept for the session only; the daemon hides
+disabled and source-denied tools, so a disabled tool that is not loaded shows as
+`(disabled)`. New tool names are added with `tools disable`.
+
+Keyboard-only navigation, visible focus (`>` on the focused row and button,
+brackets on the active tab) and plain ASCII are always used; color (when
+`NO_COLOR` is unset and `TERM` is set and not `dumb`) only adds reverse video
+and bold. No mouse.
 
 ## Exceptional states
 
-- No catalog: show `add <owner/repo>` and personal connection entry.
-- No results: empty state with search reset; don't hide Other.
-- Offline: cached metadata and revision age; already configured local MCPs still work.
-- Missing input/profile: `Configuration required`, separate from enabled/reachable.
-- Source removal: `Unavailable`; preserve local selection for a future restoration.
+- No catalog: `No catalogs yet. Add one from a terminal: mcparcel add <owner/repo>.
+  Press A to add a personal connection.`
+- No results: `No MCPs match "x" in Design. Esc clears the search.` Tabs show
+  match counts and Other stays visible.
+- Offline: setup never goes online. The header reads `1 catalog + personal` and
+  details show the snapshot age. A failed connect says `Could not connect.
+  Configured MCPs on this device still work.`
+- Missing input/profile: `Configuration required`, separate from Enabled. Space
+  on such a row opens details on the first missing field: `Paper needs: input
+  workspace, credential profile. Fill them in, then press Space.`
+- Source removal: `Unavailable`; `<source> no longer defines this connection.
+  Your selection is kept for a future restoration.` It can only be turned off
+  (Space turns it off, also when it is marked `[!]`).
+- Review required in setup: `[!]`; details show the transport and profile name
+  plus `Space accepts it (same as mcparcel enable <id>). Run mcparcel sync to see
+  what changed.`
+- Save conflict: `The configuration changed since setup loaded it. Your N
+  changes are kept.` with `r: reload and reapply   Esc: back`. After reload:
+  `Reloaded at revision M. Reapplied K changes. Dropped (changed elsewhere):
+  enable Paper.` A durable save that was not confirmed (`config_write_failed`)
+  shows its message plus `Press r to reload.` Reload lists changes the newer
+  configuration already holds as `Already in the configuration: enable Paper.`;
+  when they came from the unconfirmed save, it counts as saved.
 - New catalog version: review via sync; no silent command/credential changes.
   An enabled connection whose execution or auth fields changed shows `Review
   required` and cannot be called until accepted with `sync --apply --accept <mcp>`
   or `enable <mcp>`. The diff names every changed field.
 - Expired auth: metadata still available; first protected call initiates auth
-  (OAuth: returns `auth_required` pointing at `auth login`).
+  (OAuth: returns `auth_required` pointing at `auth login`). In setup it appears
+  only after an explicit Connect, with `mcparcel auth login <id>`.
 - No-input agents: receive an actionable structured auth error instead of a prompt;
   a server's approval request is declined with the "no prompt was possible" notice.
 
