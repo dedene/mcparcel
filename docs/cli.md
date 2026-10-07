@@ -48,7 +48,7 @@ also work via `npx mcparcel ...`. No global installation or Homebrew is required
 | `enable <mcp>...` / `disable <mcp>...` | Atomically update selection for supplied IDs |
 | `tools <mcp> [--cached]` | Live schema discovery; `--cached` has no cache yet and always returns `schema_cache_miss` |
 | `tools enable <mcp> <tool>...` / `tools disable <mcp> <tool>...` | Change personal tool selection; cannot override source policy |
-| `call <mcp>.<tool> [key=value ...] [--args <json>] [--meta <json>]` | Invoke an enabled, allowed tool; a server's approval request during the call is shown as a prompt (see Approval prompts) |
+| `call <mcp>.<tool> [key=value ...] [--args <json>] [--meta <json>]` | Invoke an enabled, allowed tool; a server's approval request during the call is shown as a prompt (see Approval prompts). The CLI checks the connection and tool policy offline first: a denied tool (`tool_denied`, exit 4; `deny` wins over `allow`) or a disabled, unreviewed, unknown or ambiguous connection fails before the runtime is contacted, so no daemon starts, no connection opens and no token is requested. The runtime checks again at admission and before dispatch |
 | `setup` | Interactive domain and connection editor |
 | `sync [<owner/repo>] [--apply [--accept <mcp>...]]` | Fetch and display update; only `--apply` changes active snapshot; `--accept` unblocks named connections whose execution or auth changed |
 | `import mcporter --file <path> [--bindings <file>] [--only <id>...] [--apply]` | Preview or apply supported imports, with explicit unresolved-field report; unbound `${NAME}` in env/header values becomes `env:NAME` with an `environment_reference` warning |
@@ -71,6 +71,10 @@ also work via `npx mcparcel ...`. No global installation or Homebrew is required
 All commands provide `--json` except interactive `setup`; use selection/config
 commands for equivalent machine actions. `--no-input` never opens UI, browser,
 biometric or approval prompts (terminal or dialog). Missing necessary input yields an error with the next action.
+Headless mode (`runtime.mode: "headless"`) behaves as if every runtime command
+had `--no-input`: no terminal or dialog prompt, no browser, also with a
+terminal attached and `runtime.approvalDialog` set; a server's approval request
+is declined at once with the `elicitation_declined` warning.
 `setup --no-input`, `setup --json` and setup without a TTY fail without writing.
 
 `local` file updates can also change personal domain assignments; setup details

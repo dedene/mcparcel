@@ -1,0 +1,1 @@
+{"schemaVersion":1,"ok":false,"data":null,"error":{"code":"config_required","message":"Environment variable FRONT_CLIENT_SECRET is not set.","nextAction":"Set FRONT_CLIENT_SECRET in the environment that starts mcparcel (headless mode reads no Keychain), then run mcparcel runtime restart.","details":{"variables":["FRONT_CLIENT_SECRET"]}}}

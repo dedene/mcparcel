@@ -1,0 +1,1 @@
+{"schemaVersion":1,"ok":false,"data":null,"error":{"code":"config_read_only","message":"This configuration is read-only (headless mode).","nextAction":"Change the configuration at its source (for example the ConfigMap) and restart the runtime."}}

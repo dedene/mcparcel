@@ -1,0 +1,1 @@
+{"schemaVersion":1,"ok":false,"data":null,"error":{"code":"tool_denied","message":"The tool is denied by connection policy.","nextAction":"Check the source policy and personal tool selection."}}

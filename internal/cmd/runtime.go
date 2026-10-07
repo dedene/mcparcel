@@ -84,7 +84,8 @@ func newRuntimeClient(opts *CommandOptions) (*runtimeclient.Client, error) {
 	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
 		return nil, output.NewError("runtime_start_failed", nil)
 	}
-	return &runtimeclient.Client{Paths: paths, Version: version, Executable: exe, NoInput: opts.NoInput}, nil
+	// Headless implies --no-input: no prompt, browser or dialog (D10).
+	return &runtimeclient.Client{Paths: paths, Version: version, Executable: exe, NoInput: opts.NoInput || paths.Headless()}, nil
 }
 
 func statusText(status runtimeclient.Status, headless bool) string {
