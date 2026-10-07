@@ -28,8 +28,13 @@ type (
 		IdleTimeout string `json:"idleTimeout,omitempty"`
 		KeepAlive   string `json:"keepAlive,omitempty"`
 	}
+	// OAuth.Grant is GrantAuthorizationCode (also when empty) or
+	// GrantClientCredentials; TokenURL is the client_credentials token
+	// endpoint, used without discovery.
 	OAuth struct {
 		Type                    string   `json:"type"`
+		Grant                   string   `json:"grant,omitempty"`
+		TokenURL                string   `json:"tokenUrl,omitempty"`
 		ClientName              string   `json:"clientName,omitempty"`
 		Scopes                  []string `json:"scopes,omitempty"`
 		ClientID                *Value   `json:"clientId,omitempty"`
@@ -38,6 +43,12 @@ type (
 		RedirectURL             string   `json:"redirectUrl,omitempty"`
 		IssuerURL               string   `json:"issuerUrl,omitempty"`
 	}
+)
+
+// OAuth grants. An empty OAuth.Grant means GrantAuthorizationCode.
+const (
+	GrantAuthorizationCode = "authorization_code"
+	GrantClientCredentials = "client_credentials"
 )
 
 type Connection struct {

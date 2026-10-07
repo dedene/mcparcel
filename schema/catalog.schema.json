@@ -251,6 +251,20 @@
         "type": {
           "const": "oauth"
         },
+        "grant": {
+          "enum": [
+            "",
+            "authorization_code",
+            "client_credentials"
+          ],
+          "default": "authorization_code"
+        },
+        "tokenUrl": {
+          "type": "string",
+          "pattern": "^[^\\x00]*$",
+          "minLength": 1,
+          "$comment": "client_credentials only. MCParcel also validates semantic URL/path/duration/reference rules."
+        },
         "clientName": {
           "type": "string",
           "pattern": "^[^\\x00]*$"
@@ -291,6 +305,57 @@
       "required": [
         "type"
       ],
+      "if": {
+        "properties": {
+          "grant": {
+            "const": "client_credentials"
+          }
+        },
+        "required": [
+          "grant"
+        ]
+      },
+      "then": {
+        "required": [
+          "tokenUrl",
+          "clientId",
+          "clientSecret"
+        ],
+        "properties": {
+          "tokenEndpointAuthMethod": {
+            "enum": [
+              "client_secret_basic",
+              "client_secret_post"
+            ]
+          }
+        },
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "redirectUrl"
+              ]
+            },
+            {
+              "required": [
+                "issuerUrl"
+              ]
+            },
+            {
+              "required": [
+                "clientName"
+              ]
+            }
+          ]
+        }
+      },
+      "else": {
+        "not": {
+          "required": [
+            "tokenUrl"
+          ]
+        }
+      },
       "additionalProperties": false
     },
     "CommandValue": {

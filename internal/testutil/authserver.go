@@ -25,7 +25,13 @@ import (
 // refresh_token_expires_in to every token response. Now is the clock for
 // access-token expiry and refresh-token idle time (nil means time.Now);
 // RefreshIdleTTL rejects a refresh token unused for longer with invalid_grant.
+// ClientCredentials enables the client_credentials grant for the
+// preconfigured client (see authserver_cc.go).
 type AuthServerOptions struct {
+	ClientCredentials bool
+	CCExpiresIn       int    // expires_in of client_credentials answers; 0 omits it
+	CCTokenType       string // token_type of client_credentials answers; empty means "bearer"
+
 	UnadvertisedIss  bool
 	IssuerPath       string
 	Registration     bool
@@ -59,6 +65,8 @@ type AuthServer struct {
 	registrations int
 	exchanges     int
 	refreshes     int
+	ccGrants      int            // client_credentials tokens issued
+	unauthorized  int            // 401 answers from Protect
 	requests      map[string]int // path -> count
 	scope         string         // last scope sent to /authorize
 	grantTypes    []string       // grant types of the last registration
@@ -123,8 +131,12 @@ func (a *AuthServer) Protect(next http.Handler, path string) http.Handler {
 		token, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 		a.mu.Lock()
 		expiry, ok := a.access[token]
+		ok = ok && !a.o.Now().After(expiry)
+		if !ok {
+			a.unauthorized++
+		}
 		a.mu.Unlock()
-		if !ok || a.o.Now().After(expiry) {
+		if !ok {
 			w.Header().Set("WWW-Authenticate", `Bearer resource_metadata="http://`+r.Host+metadata+`"`)
 			w.WriteHeader(http.StatusUnauthorized)
 			return
@@ -350,6 +362,13 @@ func (a *AuthServer) token(w http.ResponseWriter, r *http.Request) {
 		} else {
 			a.refreshUsed[rt] = a.o.Now()
 		}
+	case "client_credentials":
+		if a.o.ClientCredentials && id == a.o.ClientID {
+			a.clientCredentialsLocked(w, r)
+			return
+		}
+		writeJSON(w, 400, map[string]string{"error": "unauthorized_client"})
+		return
 	default:
 		writeJSON(w, 400, map[string]string{"error": "unsupported_grant_type"})
 		return

@@ -148,6 +148,13 @@ func checkValidationCase(t *testing.T, c validationCase) {
 	}
 }
 
+// CheckCatalogCase checks raw as a catalog document against both the JSON
+// schema and the Go decoder, for table tests in package config_test.
+func CheckCatalogCase(t *testing.T, raw string, schemaValid, goValid bool, path string) {
+	t.Helper()
+	checkValidationCase(t, validationCase{Document: "catalog", Raw: raw, SyntaxValid: true, SchemaValid: schemaValid, GoValid: goValid, Path: path})
+}
+
 func TestSchemaCorpus(t *testing.T) {
 	for _, document := range []string{"catalog", "config", "selections"} {
 		t.Run("valid-"+document, func(t *testing.T) {
