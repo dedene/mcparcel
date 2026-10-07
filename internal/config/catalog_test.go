@@ -149,3 +149,101 @@ func TestValidateStateRejectsCatalogEnvRef(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// ccDoc is a personal definition with a client_credentials connection; auth
+// and transport replace the defaults when nonempty.
+func ccDoc(auth, transport string) string {
+	if auth == "" {
+		auth = `"grant":"client_credentials","tokenUrl":"https://ws.example.invalid/oauth/token","clientId":{"secret":"env:CC_ID"},"clientSecret":{"secret":"env:CC_SECRET"}`
+	}
+	if transport == "" {
+		transport = `{"type":"http","url":"https://mcp.example.invalid/mcp"}`
+	}
+	return `{"schemaVersion":1,"connections":{"front":{"transport":` + transport + `,"auth":{"type":"oauth",` + auth + `}}}}`
+}
+
+// Each client_credentials rule has an accept and a reject case, checked by
+// both the Go decoder and schema/catalog.schema.json.
+func TestClientCredentialsValidation(t *testing.T) {
+	const (
+		id     = `"clientId":{"secret":"env:CC_ID"}`
+		secret = `"clientSecret":{"secret":"env:CC_SECRET"}`
+		cc     = `"grant":"client_credentials",`
+		tok    = `"tokenUrl":"https://ws.example.invalid/oauth/token",`
+		creds  = id + "," + secret
+	)
+	loopback := `{"type":"http","url":"http://127.0.0.1/mcp","allowInsecureHttp":"loopback"}`
+	for _, tt := range []struct {
+		name, auth, transport string
+		schema, goValid       bool
+		path                  string
+	}{
+		{"accept/minimal", "", "", true, true, ""},
+		{"accept/defaultGrantWithoutTokenURL", creds, "", true, true, ""},
+		{"accept/explicitAuthorizationCode", `"grant":"authorization_code",` + creds, "", true, true, ""},
+		{"reject/unknownGrant", `"grant":"password",` + tok + creds, "", false, false, "connections.front.auth.grant"},
+		{"reject/stdioTransport", "", `{"type":"stdio","command":"fixture"}`, true, false, "connections.front.auth"},
+		{"reject/missingTokenURL", cc + creds, "", false, false, "connections.front.auth.tokenUrl"},
+		{"reject/tokenURLWithoutGrant", tok + creds, "", false, false, "connections.front.auth.tokenUrl"},
+		{"reject/invalidTokenURL", cc + `"tokenUrl":"not a url",` + creds, "", true, false, "connections.front.auth.tokenUrl"},
+		{"reject/httpTokenURL", cc + `"tokenUrl":"http://ws.example.invalid/oauth/token",` + creds, loopback, true, false, "connections.front.auth.tokenUrl"},
+		{"accept/loopbackTokenURL", cc + `"tokenUrl":"http://127.0.0.1:9/oauth/token",` + creds, loopback, true, true, ""},
+		{"reject/loopbackTokenURLWithoutConsent", cc + `"tokenUrl":"http://127.0.0.1:9/oauth/token",` + creds, "", true, false, "connections.front.auth.tokenUrl"},
+		{"accept/literalClientID", cc + tok + `"clientId":"front-client",` + secret, "", true, true, ""},
+		{"reject/missingClientID", cc + tok + secret, "", false, false, "connections.front.auth.clientId"},
+		{"reject/missingClientSecret", cc + tok + id, "", false, false, "connections.front.auth.clientSecret"},
+		{"reject/literalClientSecret", cc + tok + id + `,"clientSecret":"hidden-value"`, "", false, false, "connections.front.auth.clientSecret"},
+		{"reject/redirectURL", cc + tok + creds + `,"redirectUrl":"http://127.0.0.1/callback"`, "", false, false, "connections.front.auth.redirectUrl"},
+		{"reject/issuerURL", cc + tok + creds + `,"issuerUrl":"https://issuer.example.invalid"`, "", false, false, "connections.front.auth.issuerUrl"},
+		{"reject/clientName", cc + tok + creds + `,"clientName":"Front"`, "", false, false, "connections.front.auth.clientName"},
+		{"accept/clientSecretBasic", cc + tok + creds + `,"tokenEndpointAuthMethod":"client_secret_basic"`, "", true, true, ""},
+		{"accept/clientSecretPost", cc + tok + creds + `,"tokenEndpointAuthMethod":"client_secret_post"`, "", true, true, ""},
+		{"reject/authMethodNone", cc + tok + creds + `,"tokenEndpointAuthMethod":"none"`, "", false, false, "connections.front.auth.tokenEndpointAuthMethod"},
+		{"accept/scopes", cc + tok + creds + `,"scopes":["read","write"]`, "", true, true, ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			raw := ccDoc(tt.auth, tt.transport)
+			config.CheckCatalogCase(t, raw, tt.schema, tt.goValid, tt.path)
+			if _, err := config.DecodeCatalog([]byte(raw)); err != nil && strings.Contains(err.Error(), "hidden-value") {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestClientCredentialsFields(t *testing.T) {
+	c, err := config.DecodeCatalog([]byte(ccDoc("", "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := c.Connections["front"].Auth
+	if a.Grant != config.GrantClientCredentials || a.TokenURL != "https://ws.example.invalid/oauth/token" || config.GrantAuthorizationCode != "authorization_code" {
+		t.Fatal(a)
+	}
+	if refs := config.EnvRefs(c.Connections["front"]); !reflect.DeepEqual(refs, []string{"CC_ID", "CC_SECRET"}) {
+		t.Fatal(refs)
+	}
+}
+
+// grant and tokenUrl sit under auth, so changing either is an execution change.
+func TestClientCredentialsExecutionChanged(t *testing.T) {
+	c, err := config.DecodeCatalog([]byte(ccDoc("", "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, edit := range map[string]func(*config.OAuth){
+		"tokenUrl": func(a *config.OAuth) { a.TokenURL = "https://other.example.invalid/oauth/token" },
+		"grant":    func(a *config.OAuth) { a.Grant = config.GrantAuthorizationCode },
+	} {
+		t.Run(name, func(t *testing.T) {
+			a := c.Connections["front"]
+			b := a
+			auth := *a.Auth
+			edit(&auth)
+			b.Auth = &auth
+			if !config.ExecutionChanged(a, b) {
+				t.Fatal("not flagged")
+			}
+		})
+	}
+}
