@@ -188,8 +188,11 @@ func TestE2EThroughClawWrap(t *testing.T) {
 		t.Fatalf("daemon PID %d, then %d: the group kill reached the daemon", pid, again)
 	}
 
-	r, _ := wrappedCall(t, "front.send_message", "to=customer", "body=hi", "--json")
-	check(t, r, 4, "tool_denied")
+	stopRuntime(t) // with the daemon stopped, the denied call must not start one
+	requireNoRuntimeContact(t, func() result {
+		r, _ := wrappedCall(t, "front.send_message", "to=customer", "body=hi", "--json")
+		return r
+	})
 	delta(t, before, 1, 0, map[string]int{"read_conversation": 2, "send_message": 0})
 	if out := logs.String(); strings.Contains(out, "still holds its std") {
 		t.Fatalf("a descendant of the CLI held its stdio:\n%s", out)

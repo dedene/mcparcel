@@ -220,14 +220,48 @@ func runtimeEntries(t *testing.T) []string {
 	return names
 }
 
+// requireStopped fails unless no daemon runs: runtime status reports
+// running:false and the runtime dir holds no daemon.sock. It returns the
+// runtime dir entries, taken after the status call.
+func requireStopped(t *testing.T) []string {
+	t.Helper()
+	r := check(t, cli(t, callerEnv(), "runtime", "status", "--json"), 0, "")
+	var status struct {
+		Running *bool `json:"running"`
+	}
+	if err := json.Unmarshal(r.env.Data, &status); err != nil || status.Running == nil || *status.Running {
+		t.Fatalf("want a stopped runtime (%v): %s", err, r.stdout)
+	}
+	entries := runtimeEntries(t)
+	if slices.Contains(entries, "daemon.sock") {
+		t.Fatalf("daemon.sock left in the runtime dir: %v", entries)
+	}
+	return entries
+}
+
+// requireNoRuntimeContact runs a call the policy denies with the daemon
+// stopped and fails unless the call exits 4 tool_denied while leaving the
+// runtime dir untouched and no daemon running (D9: the CLI checks the policy
+// offline). The caller stops the runtime first.
+func requireNoRuntimeContact(t *testing.T, call func() result) result {
+	t.Helper()
+	entries := requireStopped(t)
+	r := check(t, call(), 4, "tool_denied")
+	if got := runtimeEntries(t); !slices.Equal(got, entries) {
+		t.Fatalf("denied call touched the runtime dir: %v -> %v", entries, got)
+	}
+	requireStopped(t)
+	return r
+}
+
 func TestE2EBlockedToolRefused(t *testing.T) {
-	before, entries := front.counts(), runtimeEntries(t)
-	r := check(t, cli(t, callerEnv(), "call", "front.send_message", "to=customer", "body=hi", "--json"), 4, "tool_denied")
+	stopRuntime(t) // a running daemon would hide a CLI that asks it
+	before := front.counts()
+	r := requireNoRuntimeContact(t, func() result {
+		return cli(t, callerEnv(), "call", "front.send_message", "to=customer", "body=hi", "--json")
+	})
 	if after := front.counts(); after.MCP != before.MCP || after.Grants != before.Grants || after.Tools["send_message"] != 0 {
 		t.Fatalf("denied call reached Front: %+v -> %+v", before, after)
-	}
-	if got := runtimeEntries(t); !slices.Equal(got, entries) {
-		t.Fatalf("runtime dir changed: %v -> %v", entries, got)
 	}
 	if strings.Contains(r.stdout, "customer") {
 		t.Fatal(r.stdout)
