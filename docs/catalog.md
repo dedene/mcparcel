@@ -112,6 +112,9 @@ unions and unsupported schema versions are errors. No ignored config fields.
 Value is exactly one of: a literal string, `{input: "name"}`, or
 `{secret: "op://vault/item/field", prefix?: "Bearer ", suffix?: ""}`.
 Secret bindings are allowed in env, HTTP headers and OAuth client fields only.
+The three parts of an `op://` reference may contain only letters, digits, `_`,
+`.` and `-` (1Password rejects anything else, verified 2026-10-07): a vault or
+item whose name has spaces or colons must be referenced by its ID.
 Personal definitions may also use `{secret: "env:NAME", prefix?, suffix?}`: the
 daemon resolves NAME at connect time from its captured login environment, falling
 back to the Keychain generic password with service NAME and the login user as
