@@ -19,7 +19,7 @@ type boundedLog struct {
 }
 
 func OpenLog(p config.Paths) (io.WriteCloser, error) {
-	dir, e := config.OpenPrivateDir(p.StateDir, true)
+	dir, e := config.OpenPrivateDirUnder(p.StateRoot, p.StateDir, true)
 	if e != nil {
 		return nil, e
 	}

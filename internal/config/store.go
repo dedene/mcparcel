@@ -100,6 +100,9 @@ func (s *Store) update(ctx context.Context, expectedRevision uint64, mutate func
 }
 
 func (s *Store) updateAccepted(ctx context.Context, expectedRevision uint64, accept []string, mutate func(*State) error, hooks storeHooks) (State, error) {
+	if err := refuseHeadlessWrite(ctx, s.paths); err != nil {
+		return State{}, err
+	}
 	accept = slices.Clone(accept)
 	lock, err := acquireConfigLock(ctx, s.paths, true, true)
 	if err != nil {

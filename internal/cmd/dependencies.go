@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"runtime"
 	"strings"
 
 	"golang.org/x/sys/unix"
@@ -15,6 +16,10 @@ import (
 	"github.com/dedene/mcparcel/internal/config"
 	runtimeclient "github.com/dedene/mcparcel/internal/runtime"
 )
+
+// desktopSupported reports whether this platform runs desktop mode; Linux runs
+// headless mode only.
+func desktopSupported() bool { return config.DesktopSupported(runtime.GOOS) }
 
 func newCredentials(_ config.Paths, version string) auth.Resolver {
 	return auth.NewResolver(auth.ResolverOptions{Provider: auth.NewOnePasswordProvider(version)})

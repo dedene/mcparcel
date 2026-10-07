@@ -27,12 +27,48 @@ type (
 	}
 )
 
+// commandPaths resolves the XDG paths, then reads config.json's runtime block;
+// in headless mode its state root replaces the state, data, cache and runtime
+// directories. The daemon resolves its paths the same way from the same
+// config, so CLI and daemon agree.
 func commandPaths() (config.Paths, error) {
-	return config.ResolvePaths(os.Getenv, os.Getenv("HOME"), config.DefaultTempDir(), os.Getuid())
+	paths, _, err := resolveCommandPaths()
+	return paths, err
+}
+
+func resolveCommandPaths() (config.Paths, config.RuntimeDefaults, error) {
+	paths, err := config.ResolvePaths(os.Getenv, os.Getenv("HOME"), config.DefaultTempDir(), os.Getuid())
+	if err != nil {
+		return config.Paths{}, config.RuntimeDefaults{}, err
+	}
+	rt, err := config.ReadRuntime(context.Background(), paths)
+	if err != nil {
+		return config.Paths{}, config.RuntimeDefaults{}, err
+	}
+	if rt.Mode == config.ModeHeadless {
+		if paths, err = config.ApplyStateRoot(paths, rt.StateRoot); err != nil {
+			return config.Paths{}, config.RuntimeDefaults{}, err
+		}
+	}
+	return paths, rt, nil
+}
+
+// runtimePaths is commandPaths for a command that uses the runtime (tools,
+// call, auth, runtime, daemon): where desktop mode is unsupported (Linux), it
+// refuses desktop mode with runtime_unsupported.
+func runtimePaths() (config.Paths, error) {
+	paths, rt, err := resolveCommandPaths()
+	if err != nil {
+		return config.Paths{}, err
+	}
+	if err = config.CheckMode(rt, desktopSupported()); err != nil {
+		return config.Paths{}, err
+	}
+	return paths, nil
 }
 
 func newRuntimeClient(opts *CommandOptions) (*runtimeclient.Client, error) {
-	paths, err := commandPaths()
+	paths, err := runtimePaths()
 	if err != nil {
 		return nil, err
 	}

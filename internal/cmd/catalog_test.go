@@ -326,3 +326,37 @@ func TestSyncCancellationStopsFetch(t *testing.T) {
 		})
 	}
 }
+
+func TestHeadlessCatalogFetchRefused(t *testing.T) {
+	p, _ := headlessEnv(t)
+	if deps, err := catalogDependencies(); deps != nil || !errors.Is(err, config.ErrConfigReadOnly) {
+		t.Fatal(deps, err)
+	}
+	if err := os.Chmod(p.ConfigDir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(p.ConfigDir, 0o700) })
+	before, err := os.ReadDir(p.ConfigDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, argv := range [][]string{{"add", "fixture-owner/fixture.repo"}, {"sync"}, {"sync", "--apply"}, {"sync", "fixture-owner/fixture.repo"}} {
+		code, stdout, stderr := run(t, append(argv, "--json")...)
+		if e := envelopeError(t, stdout); code != 2 || e.Code != "config_read_only" || stderr != "" {
+			t.Fatal(argv, code, stdout, stderr)
+		}
+	}
+	after, err := os.ReadDir(p.ConfigDir)
+	if err != nil || len(after) != len(before) {
+		t.Fatal(before, after, err)
+	}
+	if err = os.Chmod(p.ConfigDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Remove(p.ConfigFile); err != nil {
+		t.Fatal(err)
+	}
+	if deps, err := catalogDependencies(); err != nil || deps == nil || deps.Fetcher == nil {
+		t.Fatal("desktop mode lost its fetcher", deps, err)
+	}
+}

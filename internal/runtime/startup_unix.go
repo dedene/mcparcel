@@ -40,7 +40,7 @@ func StartDaemon(ctx context.Context, paths config.Paths, executable string, env
 }
 
 func startDaemon(ctx context.Context, paths config.Paths, executable string, env []string, open func(*os.File, string, bool) (*os.File, error)) (bool, error) {
-	dir, err := config.OpenPrivateDir(paths.RuntimeDir, true)
+	dir, err := config.OpenPrivateDirUnder(paths.StateRoot, paths.RuntimeDir, true)
 	if err != nil {
 		return false, err
 	}
@@ -117,7 +117,7 @@ func AdoptLock(paths config.Paths, fd uintptr) (*os.File, error) {
 		return nil, config.ErrUnsafePath
 	}
 	fail := func() (*os.File, error) { _ = inherited.Close(); return nil, config.ErrUnsafePath }
-	dir, err := config.OpenPrivateDir(paths.RuntimeDir, false)
+	dir, err := config.OpenPrivateDirUnder(paths.StateRoot, paths.RuntimeDir, false)
 	if err != nil {
 		return fail()
 	}
@@ -148,7 +148,12 @@ func safeSocketStat(st *unix.Stat_t) error {
 }
 
 func DaemonEnvironment(p config.Paths) []string {
-	env := map[string]string{"HOME": p.Home, "XDG_CONFIG_HOME": filepath.Dir(p.ConfigDir), "XDG_DATA_HOME": filepath.Dir(p.DataDir), "XDG_CACHE_HOME": filepath.Dir(p.CacheDir), "XDG_STATE_HOME": filepath.Dir(p.StateDir), "MCPARCEL_RUNTIME_DIR": p.RuntimeDir}
+	env := map[string]string{"HOME": p.Home, "XDG_CONFIG_HOME": filepath.Dir(p.ConfigDir)}
+	// A headless daemon derives its state directories from config.json's
+	// state root, exactly as the CLI did.
+	if p.StateRoot == "" {
+		env["XDG_DATA_HOME"], env["XDG_CACHE_HOME"], env["XDG_STATE_HOME"], env["MCPARCEL_RUNTIME_DIR"] = filepath.Dir(p.DataDir), filepath.Dir(p.CacheDir), filepath.Dir(p.StateDir), p.RuntimeDir
+	}
 	for _, k := range []string{"PATH", "SHELL", "TMPDIR", "USER", "LOGNAME", "LANG", "LC_ALL", "__CF_USER_TEXT_ENCODING"} {
 		if v, ok := os.LookupEnv(k); ok {
 			env[k] = v
@@ -168,7 +173,7 @@ func DaemonEnvironment(p config.Paths) []string {
 }
 
 func dialSocket(ctx context.Context, p config.Paths) (*net.UnixConn, error) {
-	dir, e := config.OpenPrivateDir(p.RuntimeDir, false)
+	dir, e := config.OpenPrivateDirUnder(p.StateRoot, p.RuntimeDir, false)
 	if e != nil {
 		return nil, e
 	}
@@ -193,7 +198,7 @@ func dialSocket(ctx context.Context, p config.Paths) (*net.UnixConn, error) {
 }
 
 func lockHeld(p config.Paths) (bool, error) {
-	dir, e := config.OpenPrivateDir(p.RuntimeDir, false)
+	dir, e := config.OpenPrivateDirUnder(p.StateRoot, p.RuntimeDir, false)
 	if errors.Is(e, os.ErrNotExist) {
 		return false, nil
 	}

@@ -61,4 +61,7 @@ type Paths struct {
 	SocketFile     string `json:"-"`
 	LockFile       string `json:"-"`
 	LogFile        string `json:"-"`
+	// StateRoot is the headless state root the four directories above derive
+	// from; "" outside headless mode.
+	StateRoot string `json:"-"`
 }
