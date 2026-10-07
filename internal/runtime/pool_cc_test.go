@@ -34,12 +34,33 @@ const (
 type ccServer struct {
 	as             *testutil.AuthServer
 	reject, forbid atomic.Bool
-	// tokenDown makes the token endpoint answer 503.
-	tokenDown atomic.Bool
+	// tokenDown makes the token endpoint answer 503; tokenHang makes it hold
+	// its answer until the client gives up or the test ends.
+	tokenDown, tokenHang atomic.Bool
+	release              chan struct{}
 
 	mu            sync.Mutex
 	events        []string
 	rejectedCalls []string // "<HTTP method> <JSON-RPC method>" of each 401
+	script        []int    // HTTP statuses for the next MCP POSTs, in order
+}
+
+// answer makes the next MCP POSTs get these HTTP statuses, one each.
+func (s *ccServer) answer(statuses ...int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.script = append(s.script, statuses...)
+}
+
+func (s *ccServer) scripted(req *http.Request) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if req.Method != http.MethodPost || len(s.script) == 0 {
+		return 0
+	}
+	status := s.script[0]
+	s.script = s.script[1:]
+	return status
 }
 
 func (s *ccServer) rejected() []string {
@@ -72,11 +93,17 @@ func ccRig(t *testing.T, headless bool) (*poolRig, *ccServer) {
 			return "", errKeychain
 		}
 	}
-	s := &ccServer{as: testutil.NewAuthServer(t, testutil.AuthServerOptions{ClientCredentials: true, ClientID: ccClientID, ClientSecret: ccSecret, CCExpiresIn: 900, TokenPrefix: ccPrefix})}
+	s := &ccServer{as: testutil.NewAuthServer(t, testutil.AuthServerOptions{ClientCredentials: true, ClientID: ccClientID, ClientSecret: ccSecret, CCExpiresIn: 900, TokenPrefix: ccPrefix}), release: make(chan struct{})}
 	fixture := testutil.NewFixtureServer()
 	protected := s.as.Protect(mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return fixture }, nil), "/mcp")
 	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		status := s.scripted(req)
 		switch {
+		case status == http.StatusUnauthorized:
+			w.Header().Set("WWW-Authenticate", `Bearer error="invalid_token"`)
+			w.WriteHeader(status)
+		case status != 0:
+			w.WriteHeader(status)
 		case s.forbid.Load():
 			w.WriteHeader(http.StatusForbidden)
 		case s.reject.Load():
@@ -94,13 +121,20 @@ func ccRig(t *testing.T, headless bool) (*poolRig, *ccServer) {
 	target, _ := url.Parse(s.as.URL)
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		if s.tokenDown.Load() {
+		if s.tokenHang.Load() {
+			select {
+			case <-req.Context().Done():
+			case <-s.release:
+			}
+		}
+		if s.tokenDown.Load() || s.tokenHang.Load() {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			return
 		}
 		proxy.ServeHTTP(w, req)
 	}))
 	t.Cleanup(func() {
+		close(s.release)
 		if r.h != nil {
 			_ = r.h.Shutdown(testCtx(t), true)
 		}

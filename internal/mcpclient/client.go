@@ -107,6 +107,9 @@ func Connect(ctx context.Context, opts ConnectOptions) (Session, error) {
 	sdk, err := client.Connect(c, transport, session)
 	if err != nil {
 		defer cleanup(context.Background())
+		if abandonedAuth(c, err, status) {
+			return nil, contextError(c.Err(), false)
+		}
 		if failure := authFailure(err, status); failure != nil {
 			return nil, failure
 		}
@@ -153,6 +156,20 @@ func authFailure(err error, status func() error) error {
 	return nil
 }
 
+// abandonedAuth reports whether ctx ended while the OAuth handler was
+// answering the server's 401, so the request was never resent and did not
+// run (D7). The SDK then returns the bare context error, without the
+// handler's auth.UnsentError, and the transport still reports the 401 as
+// auth_required, which must not become token_rejected. A non-OAuth 401
+// carries its own auth_required in err and is not matched.
+func abandonedAuth(ctx context.Context, err error, status func() error) bool {
+	var e *output.Error
+	if ctx.Err() == nil || errors.As(err, &e) {
+		return false
+	}
+	return errors.As(status(), &e) && e != nil && e.Code == "auth_required"
+}
+
 func contextError(err error, dispatched bool) error {
 	if errors.Is(err, context.Canceled) {
 		return output.NewError("canceled", nil)
@@ -176,6 +193,9 @@ func (s *session) Tools(ctx context.Context) ([]json.RawMessage, error) {
 	for range 1000 {
 		r, err := s.sdk.ListTools(ctx, &mcp.ListToolsParams{Cursor: cursor})
 		if err != nil {
+			if abandonedAuth(ctx, err, s.status) {
+				return nil, contextError(ctx.Err(), false)
+			}
 			if failure := authFailure(err, s.status); failure != nil {
 				return nil, failure
 			}
@@ -255,6 +275,12 @@ func (s *session) Call(ctx context.Context, tool string, arguments, meta map[str
 	out.Declined, out.DeclineReason, s.prompter = s.declined, s.reason, nil
 	s.mu.Unlock()
 	if err != nil {
+		if abandonedAuth(ctx, err, s.status) {
+			// The SDK fails the connection when a wait for authorization
+			// is canceled, so the session cannot be reused.
+			out.Dispatched, out.Retire = false, true
+			return out, contextError(ctx.Err(), false)
+		}
 		var unsent *auth.UnsentError
 		if errors.As(err, &unsent) {
 			// No token was sent, or the server's 401 came before the tool ran.
