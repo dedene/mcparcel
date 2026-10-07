@@ -42,7 +42,7 @@ type authStatusFailure struct {
 // Run reads Keychain items and the health file locally; it never starts the
 // runtime and never prints a token, a redirect or a client identifier.
 func (c *AuthStatusCmd) Run(ctx context.Context, s *Streams, opts *CommandOptions) error {
-	paths, err := commandPaths()
+	paths, err := runtimePaths()
 	if err != nil {
 		return err
 	}

@@ -53,6 +53,7 @@ var registry = map[string]errorSpec{
 	"tool_denied":         {4, "The tool is denied by connection policy.", "Check the source policy and personal tool selection."},
 	"ambiguous_id":        {2, "The connection name is ambiguous.", "Use a canonical connection ID."},
 	"config_conflict":     {7, "The configuration changed since it was loaded.", "Reload the configuration and reapply your changes."},
+	"config_read_only":    {2, "This configuration is read-only (headless mode).", "Change the configuration at its source (for example the ConfigMap) and restart the runtime."},
 	"runtime_unsupported": {2, "This connection requires a runtime feature that is not implemented yet.", "Use a supported connection or wait for its runtime stage."},
 
 	"internal_error":           {1, "An internal error occurred.", "Report this error with the mcparcel version."},
@@ -103,6 +104,15 @@ func SourceNotRegisteredError() *Error {
 	err := NewError("catalog_unavailable", nil)
 	err.Message = "This catalog is not registered."
 	err.NextAction = "Run 'mcparcel add <owner/repo>' to register a catalog."
+	return err
+}
+
+// HeadlessOnlyError is runtime_unsupported for a runtime command in desktop
+// mode where only headless mode is supported (Linux).
+func HeadlessOnlyError() *Error {
+	err := NewError("runtime_unsupported", nil)
+	err.Message = "On Linux, MCParcel runs in headless mode only."
+	err.NextAction = `Set runtime.mode to "headless" and runtime.stateRoot in config.json.`
 	return err
 }
 

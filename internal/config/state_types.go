@@ -19,8 +19,10 @@ type Source struct {
 	Pinned       bool   `json:"pinned"`
 }
 type RuntimeDefaults struct {
-	KeepAlive      bool `json:"keepAlive,omitempty"`
-	ApprovalDialog bool `json:"approvalDialog,omitempty"`
+	KeepAlive      bool   `json:"keepAlive,omitempty"`
+	ApprovalDialog bool   `json:"approvalDialog,omitempty"`
+	Mode           string `json:"mode,omitempty"`      // "" = desktop
+	StateRoot      string `json:"stateRoot,omitempty"` // required iff headless
 }
 type Local struct {
 	SchemaVersion      int                `json:"schemaVersion"`

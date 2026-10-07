@@ -17,7 +17,7 @@ func (c *DaemonCmd) Run(ctx context.Context, _ *Streams) error {
 	if c.LockFD != 3 {
 		return output.NewError("unsafe_local_path", nil)
 	}
-	paths, err := commandPaths()
+	paths, err := runtimePaths()
 	if err != nil {
 		return err
 	}

@@ -101,7 +101,7 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		kong.BindTo(ctx, (*context.Context)(nil)),
 		kong.Bind(&Streams{In: in, Out: out, Err: errOut}),
 		kong.Bind(opts),
-		kong.Bind(&CatalogDependencies{Fetcher: newCatalogFetcher()}),
+		kong.BindToProvider(catalogDependencies),
 	)
 	if err != nil {
 		fmt.Fprintf(errOut, "mcparcel: %v\n", err)
@@ -226,6 +226,9 @@ func safeFailure(err error) *output.Error {
 	if errors.As(err, &safe) && safe != nil {
 		return safe
 	}
+	if errors.Is(err, config.ErrHeadlessOnly) {
+		return output.HeadlessOnlyError()
+	}
 	code := "internal_error"
 	switch {
 	case errors.Is(err, catalog.ErrOffline):
@@ -256,6 +259,8 @@ func safeFailure(err error) *output.Error {
 		code = "unsafe_local_path"
 	case errors.Is(err, config.ErrConfigConflict):
 		code = "config_conflict"
+	case errors.Is(err, config.ErrConfigReadOnly):
+		code = "config_read_only"
 	case errors.Is(err, config.ErrConfig), errors.Is(err, config.ErrRevisionExhausted):
 		code = "invalid_config"
 	case errors.Is(err, config.ErrAliasCollision):

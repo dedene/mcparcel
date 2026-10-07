@@ -119,10 +119,43 @@
         "approvalDialog": {
           "type": "boolean",
           "default": false
+        },
+        "mode": {
+          "enum": [
+            "desktop",
+            "headless"
+          ],
+          "default": "desktop"
+        },
+        "stateRoot": {
+          "type": "string",
+          "pattern": "^/[^\\x00]+$"
         }
       },
       "required": [],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "if": {
+        "properties": {
+          "mode": {
+            "const": "headless"
+          }
+        },
+        "required": [
+          "mode"
+        ]
+      },
+      "then": {
+        "required": [
+          "stateRoot"
+        ]
+      },
+      "else": {
+        "not": {
+          "required": [
+            "stateRoot"
+          ]
+        }
+      }
     },
     "Source": {
       "type": "object",

@@ -144,7 +144,7 @@ func Serve(ctx context.Context, opts DaemonOptions) error {
 		return e
 	}
 	_ = validated.Close()
-	dir, e := config.OpenPrivateDir(opts.Paths.RuntimeDir, false)
+	dir, e := config.OpenPrivateDirUnder(opts.Paths.StateRoot, opts.Paths.RuntimeDir, false)
 	if e != nil {
 		return e
 	}

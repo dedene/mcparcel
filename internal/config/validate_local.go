@@ -31,6 +31,9 @@ func DecodeLocal(data []byte) (Local, error) {
 	if l.Aliases == nil {
 		l.Aliases = make(map[string]string)
 	}
+	if err := validateRuntime(l.Runtime); err != nil {
+		return Local{}, err
+	}
 	for _, id := range sortedKeys(l.CredentialProfiles) {
 		p := l.CredentialProfiles[id]
 		path := "credentialProfiles." + id

@@ -55,7 +55,7 @@ func (c *AuthLoginCmd) Run(ctx context.Context, s *Streams, opts *CommandOptions
 func (c *AuthLogoutCmd) Run(ctx context.Context, s *Streams, opts *CommandOptions) error {
 	canonical := c.MCP
 	if !strings.Contains(c.MCP, ":") || config.ValidateCanonicalID(c.MCP) != nil {
-		paths, err := commandPaths()
+		paths, err := runtimePaths()
 		if err != nil {
 			return err
 		}
