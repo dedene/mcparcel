@@ -81,3 +81,27 @@ npm install -g ./dist/mcparcel-0.1.0-rc.1.tgz
 
 Upgrading, rolling back and returning to mcporter are described in
 [docs/migration.md](docs/migration.md).
+
+## Getting started
+
+1. Run `mcparcel doctor`. It is offline and writes nothing; fix any `fail` row
+   with the next action it shows.
+2. Preview an import of your mcporter servers:
+   `mcparcel import mcporter --file ~/.mcporter/mcporter.json`. The preview shows
+   what would be imported and what still needs a credential binding. When it is
+   right, run it again with `--bindings <file>` (if needed) and `--apply`.
+   mcporter's file is only read.
+3. Choose connections per domain with `mcparcel setup` (keyboard only), or with
+   `mcparcel enable <mcp>` from scripts and agents.
+4. Make a first call:
+
+   ```sh
+   mcparcel tools context7
+   mcparcel call context7.resolve-library-id libraryName=react query="React hooks"
+   ```
+
+   OAuth connections need `mcparcel auth login <mcp>` once.
+5. Team catalogs: `mcparcel add <owner/repo>`. An example catalog is in
+   [docs/catalog.md](docs/catalog.md#shared-catalog-example).
+6. Switching from mcporter connection by connection, and rolling back, are in
+   [docs/migration.md](docs/migration.md).
