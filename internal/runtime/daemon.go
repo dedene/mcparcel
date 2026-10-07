@@ -32,11 +32,14 @@ type DaemonOptions struct {
 	ShutdownTimeout time.Duration
 	// PromptTimeout backs up the CLI's own elicit.PromptTimeout; set only in tests.
 	PromptTimeout time.Duration
+	// NoIdleExit keeps a supervised runtime (runtime serve) running when idle.
+	NoIdleExit bool
 }
 
 var (
 	errForced = errors.New("forced daemon shutdown")
-	listenMu  sync.Mutex // umask is process-wide.
+	listenMu  sync.Mutex  // umask is process-wide.
+	processID = os.Getpid // replaced in tests
 )
 
 type authURLKey struct{}
@@ -189,6 +192,12 @@ func Serve(ctx context.Context, opts DaemonOptions) error {
 	if opts.EnvFallback {
 		_ = WriteLog(opts.Log, "login_env_fallback", nil)
 	}
+	// As PID 1 (a container entrypoint) this process inherits the orphans of
+	// MCP servers and never reaps them: reaping here would race os/exec's Wait.
+	// The container needs an init (--init, tini) or a shared PID namespace.
+	if processID() == 1 {
+		_ = WriteLog(opts.Log, "pid1_no_reaper", nil)
+	}
 	keepDone := make(chan struct{})
 	if k, ok := opts.Handler.(interface{ RunKeepAlive(context.Context) error }); ok {
 		go func() { defer close(keepDone); _ = k.RunKeepAlive(life) }()
@@ -206,6 +215,9 @@ func Serve(ctx context.Context, opts DaemonOptions) error {
 				_ = l.Close()
 				return
 			case <-ticker.C:
+				if opts.NoIdleExit {
+					continue
+				}
 				s.mu.Lock()
 				idle := s.idleLocked()
 				s.mu.Unlock()
