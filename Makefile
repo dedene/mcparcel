@@ -41,7 +41,7 @@ npm-binary:
 	@GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o $(NPM_BIN) $(CMD)
 
 test:
-	@go test -race ./...
+	@go test -race -timeout 20m ./...
 
 # Full go test -race ./... in a Linux container as uid 10001 (needs Docker).
 test-linux:

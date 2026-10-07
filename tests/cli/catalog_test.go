@@ -729,6 +729,7 @@ func TestCatalogFailureRetainsSnapshot(t *testing.T) {
 		}))
 		defer server.Close()
 		r.env = replaceEnv(r.env, "MCPARCEL_TEST_GITHUB_API", server.URL)
+		r.env = append(r.env, "MCPARCEL_TEST_FETCH_TIMEOUT=2s")
 		catalogEnvelope(t, catalogExecute(t, r, "sync", "--json", "--no-input"), 6, "timeout")
 		if !reflect.DeepEqual(before, catalogFiles(t, r)) {
 			t.Fatal("timeout changed snapshot")

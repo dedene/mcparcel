@@ -8,6 +8,11 @@ import (
 	"github.com/dedene/mcparcel/internal/config"
 )
 
+// RaceExitEnv drops the race detector's default 1 s sleep at process exit.
+// Black-box tests run hundreds of -race CLI processes, so the sleep alone
+// added minutes to tests/cli.
+const RaceExitEnv = "GORACE=atexit_sleep_ms=0"
+
 func IsolatedPaths(t testing.TB) (config.Paths, []string) {
 	t.Helper()
 	// TempRoot avoids Darwin's long per-user temporary directory and symlink alias.
@@ -37,10 +42,10 @@ func IsolatedPaths(t testing.TB) (config.Paths, []string) {
 			t.Fatal(err)
 		}
 	}
-	list := make([]string, 0, 11)
+	list := make([]string, 0, 12)
 	for _, name := range []string{"HOME", "TMPDIR", "SHELL", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME", "MCPARCEL_RUNTIME_DIR"} {
 		list = append(list, name+"="+env[name])
 	}
-	list = append(list, "PATH=/usr/bin:/bin:/usr/sbin:/sbin", "LANG=C", "LC_ALL=C")
+	list = append(list, "PATH=/usr/bin:/bin:/usr/sbin:/sbin", "LANG=C", "LC_ALL=C", RaceExitEnv)
 	return p, list
 }

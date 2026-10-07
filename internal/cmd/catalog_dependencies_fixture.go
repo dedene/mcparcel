@@ -29,7 +29,28 @@ func (f catalogFixtureRoundTripper) RoundTrip(r *http.Request) (*http.Response, 
 	return f(r)
 }
 
+// catalogFetcherDeadline lets the black-box timeout test end before the
+// production catalog.FetchTimeout of 30 s.
+type catalogFetcherDeadline struct {
+	catalog.Fetcher
+	timeout time.Duration
+}
+
+func (f catalogFetcherDeadline) Fetch(ctx context.Context, source config.Source) (catalog.Snapshot, error) {
+	ctx, cancel := context.WithTimeout(ctx, f.timeout)
+	defer cancel()
+	return f.Fetcher.Fetch(ctx, source)
+}
+
 func newCatalogFetcher() catalog.Fetcher {
+	fetcher := newFixtureGitHub()
+	if d, err := time.ParseDuration(os.Getenv("MCPARCEL_TEST_FETCH_TIMEOUT")); err == nil && d > 0 {
+		return catalogFetcherDeadline{Fetcher: fetcher, timeout: d}
+	}
+	return fetcher
+}
+
+func newFixtureGitHub() catalog.Fetcher {
 	raw := os.Getenv("MCPARCEL_TEST_GITHUB_API")
 	u, err := url.Parse(raw)
 	if err != nil || u.Scheme != "http" || u.Opaque != "" || u.User != nil ||
