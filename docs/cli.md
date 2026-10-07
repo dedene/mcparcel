@@ -65,7 +65,8 @@ also work via `npx mcparcel ...`. No global installation or Homebrew is required
 | `auth refresh <mcp>` | Invalidate credential lease; next call resolves/reconnects as necessary |
 | `auth logout <mcp>` | Remove the Keychain sign-in through the runtime (starts it if needed); JSON `{connection, removed, providerRevoked}`; `providerRevoked` is always false for now. A `client_credentials` connection is refused offline like `auth login` |
 | `doctor [<mcp>] [--live]` | Local prerequisite checks; only explicit live mode connects to specified MCP |
-| `runtime status` / `runtime restart [--force]` / `runtime stop [--force]` | Inspect, restart or stop the daemon; status includes `stayAlive` (human: `Stay-alive: on` or `off`), true when `runtime.keepAlive` is set and an OAuth session may still need refreshing; restart and stop refuse active calls unless forced; restart recaptures the login environment and drops pooled sessions, so changed `env:` values apply; stop on a stopped runtime succeeds |
+| `runtime status` / `runtime restart [--force]` / `runtime stop [--force]` | Inspect, restart or stop the daemon; status includes `stayAlive` (human: `Stay-alive: on` or `off`), true when `runtime.keepAlive` is set and an OAuth session may still need refreshing; restart and stop refuse active calls unless forced; restart recaptures the login environment and drops pooled sessions, so changed `env:` values apply; stop on a stopped runtime succeeds. Headless mode: status shows `Environment: daemon environment`, and restart starts the new daemon with the forwarded variables of the caller's own environment (no login shell). Against `runtime serve`, restart (also `--force`) is refused with `runtime_supervised` |
+| `runtime serve` | Run the runtime in the foreground under a supervisor: takes the daemon lock itself (`runtime_busy`, exit 6, when another runtime holds it), logs to the daemon log and stderr, never exits when idle; SIGTERM or SIGINT ends dispatched calls as `outcome_unknown`, closes sessions, removes the socket and exits 0 (human `Runtime stopped.`, JSON `{"stopped":true}`). It marks the runtime directory supervised: other CLIs wait up to 15 s for it instead of auto-starting a daemon, then fail `runtime_supervised`. On Linux it requires headless mode |
 | `version` / `--version` / `--help` | Version (`--version` prints the same line as `version`, before any command runs) and English usage |
 
 All commands provide `--json` except interactive `setup`; use selection/config
@@ -75,6 +76,13 @@ Headless mode (`runtime.mode: "headless"`) behaves as if every runtime command
 had `--no-input`: no terminal or dialog prompt, no browser, also with a
 terminal attached and `runtime.approvalDialog` set; a server's approval request
 is declined at once with the `elicitation_declined` warning.
+In headless mode every command that writes configuration (`enable`, `disable`,
+`tools enable|disable`, `local`, `config input|profile`, `import --apply`,
+`add`, `remove`, `sync` with or without `--apply`) fails `config_read_only`
+before it takes a lock or sends a request. On Linux, `tools`, `call`, `auth`
+and `runtime` in desktop mode fail `runtime_unsupported` ("On Linux, MCParcel
+runs in headless mode only."); offline commands work. See
+[headless.md](headless.md).
 `setup --no-input`, `setup --json` and setup without a TTY fail without writing.
 
 `local` file updates can also change personal domain assignments; setup details
@@ -197,6 +205,11 @@ protocol and answer its own prompt. That is why the dialog is opt-in.
 approvals needs OS-level isolation (another user, or a sandbox that denies the
 socket).
 
+Headless mode (`runtime.mode: "headless"`) never prompts: no terminal prompt
+even with stdin and stderr on a terminal, no dialog even with
+`runtime.approvalDialog: true`. The request is declined at once with the "no
+prompt was possible" notice.
+
 ## Output and errors
 
 Human output goes to stdout; progress and prompts to stderr. JSON mode emits one
@@ -236,6 +249,17 @@ Error codes distinguish `auth_required`, `auth_expired`, `config_required`,
 `runtime_version_mismatch`, `runtime_config_mismatch`, `auth_account_conflict` and
 `outcome_unknown`. `review_required` uses exit 4; `runtime_config_mismatch` exit 6;
 `auth_account_conflict` exit 3.
+Headless mode adds `config_read_only` (exit 2, "This configuration is
+read-only (headless mode).", next action to change the configuration at its
+source and restart the runtime) and `runtime_supervised` (exit 6, a
+supervisor runs the runtime: `runtime restart` against `runtime serve`, or a
+CLI that waited 15 s for a supervised runtime that did not answer). A missing
+`env:` variable in headless mode is `config_required` with
+`details.variables` (the missing names, never values). `tool_denied` keeps
+exit 4 and `error.code` is the discriminator; `call` returns it before the
+runtime is contacted. A `client_credentials` token-endpoint refusal is
+`auth_failed` naming the OAuth error code (`invalid_client`); 5xx, 429,
+timeouts and network errors are `connection_failed`.
 `server_error` (exit 6) means the server answered the call with a JSON-RPC error
 instead of a result: the message carries the server's text cleaned to one line of
 at most 300 characters (never the error's `data`), and `details` has
