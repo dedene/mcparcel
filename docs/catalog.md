@@ -103,7 +103,7 @@ unions and unsupported schema versions are errors. No ignored config fields.
 | HTTP `headers` | Map to Value; protected OAuth Authorization header cannot also be configured here |
 | HTTP `mode` | `auto` (default), `streamable` or `sse`; `sse` passes validation but is `runtime_unsupported` at runtime |
 | HTTP `allowInsecureHttp` | `never` default; `loopback`, or `explicit` for a deliberately configured internal endpoint |
-| `auth` | Omitted or `{type: "oauth", ...}`; API-key auth uses env/header bindings |
+| `auth` | Omitted or `{type: "oauth", grant?, ...}`; `grant` is `authorization_code` (default, browser sign-in) or `client_credentials` (token from a client ID and secret, see OAuth fields); API-key auth uses env/header bindings |
 | `toolPolicy` | Optional `{allow: [exact names], deny: [exact names]}`; omitted allow means all, empty allow means none; deny wins |
 | `lifecycle` | Optional `{idleTimeout: "session"}` default, or positive duration; session keeps used processes until daemon stop/auth expiry. `keepAlive`: how often the daemon refreshes an idle OAuth session, `"off"` or a duration of at least `1h` (default `24h`); not part of the connection hash and never triggers review |
 | `callTimeout` | Positive duration, default `120s`; override via CLI per call |
@@ -115,7 +115,9 @@ Secret bindings are allowed in env, HTTP headers and OAuth client fields only.
 Personal definitions may also use `{secret: "env:NAME", prefix?, suffix?}`: the
 daemon resolves NAME at connect time from its captured login environment, falling
 back to the Keychain generic password with service NAME and the login user as
-account. Temporary bridge until 1Password profiles (stage 6). Allowed in stdio env,
+account. In headless mode it resolves NAME from the daemon's own environment
+only, without a Keychain fallback (runtime.md "Headless mode"); `env:` is then
+the only secret source, since `op://` references are refused. Temporary bridge until 1Password profiles (stage 6). Allowed in stdio env,
 HTTP headers and the OAuth `clientId`/`clientSecret` fields; protected variable names are
 rejected. A GitHub catalog containing one fails `add`/`sync` with `invalid_catalog`.
 `config validate` checks format only; it does not apply the personal-only rule.
@@ -134,6 +136,29 @@ callback is `http://127.0.0.1:<random port>/callback`.
 Use discovery otherwise; bind state/tokens to the discovered issuer and resource.
 Missing registered client information is an actionable error if registration is
 unavailable. Do not assume `clientName` is interchangeable with a registered ID.
+
+`grant` (stage 12): `authorization_code` (the default, everything above) or
+`client_credentials`. A `client_credentials` connection needs an HTTP
+transport, `tokenUrl`, `clientId` and `clientSecret`; `scopes` is optional and
+`tokenEndpointAuthMethod` is `client_secret_post` (the default, client ID and
+secret in the form body) or `client_secret_basic`. `tokenUrl` is `https`, or
+`http` on a loopback host when the transport's `allowInsecureHttp` is
+`loopback` or `explicit`. `redirectUrl`, `issuerUrl` and `clientName` are
+rejected, and `tokenUrl` is rejected for `authorization_code`. The token URL is
+used as given: no discovery, no dynamic registration, no Keychain item. Both
+fields sit under `auth`, so changing them puts an enabled catalog connection in
+`review_required` like any other auth change. Example from a personal
+definition (`env:` references are personal-only):
+
+```json
+"auth": {
+  "type": "oauth",
+  "grant": "client_credentials",
+  "tokenUrl": "https://<workspace>.frontapp.com/oauth/token",
+  "clientId": {"secret": "env:FRONT_CLIENT_ID"},
+  "clientSecret": {"secret": "env:FRONT_CLIENT_SECRET"}
+}
+```
 
 ## Source registration and immutable revisions
 
@@ -202,6 +227,16 @@ macOS-first paths (respect explicit `XDG_CONFIG_HOME`, `XDG_DATA_HOME` and
 - State: `~/.local/state/mcparcel/daemon.log` — size-bounded, redacted daemon log
   (respects `XDG_STATE_HOME`).
 
+Headless mode (stage 12, [headless.md](headless.md)): `config.json` →
+`runtime: {mode: "headless", stateRoot: "/var/lib/mcparcel"}`. `mode` is
+`desktop` (default) or `headless`; `stateRoot` is a clean absolute path other
+than `/`, required in headless mode and rejected in desktop mode. Data, cache,
+state and runtime then live under `<stateRoot>/data`, `/cache`, `/state` and
+`/run` (`XDG_DATA_HOME`, `XDG_CACHE_HOME`, `XDG_STATE_HOME` and
+`MCPARCEL_RUNTIME_DIR` no longer apply); the configuration stays at
+`$XDG_CONFIG_HOME/mcparcel` and is read-only (`config_read_only` for every
+write). Linux supports headless mode only.
+
 Local profile example (reference and account name are placeholders):
 
 ```json
@@ -239,12 +274,20 @@ remove a source deny. UI saves and CLI mutations use the same revisioned store.
 
 Write temp + fsync + rename with a config lock. Config files hold references, not
 values, and may be hand-written or symlinked from a dotfiles repository: they must
-be regular files owned by the user and not writable by group or other. Runtime and
+be regular files owned by the user or by root and not writable by group or
+other; the same holds for each directory on the way to them, where a sticky
+bit also counts as safe. A file or directory on a read-only mount counts as
+not writable, so a Kubernetes ConfigMap (root-owned files behind `..data`
+symlinks, a mount root that may be `0777`) is accepted in every mode (stage
+12). Root can already change anything, and a read-only mount cannot be changed
+from the pod. Runtime and
 state files (socket, lock, daemon log) are stricter: no symlink components,
 directories `0700`, files `0600`. Symlinks in the ancestors of the state and
 runtime directories (`XDG_STATE_HOME`, `MCPARCEL_RUNTIME_DIR`, e.g. macOS `/var`)
 are resolved once; the final directory must be a real directory and pass the
-ownership and `0700` checks.
+ownership and `0700` checks. A headless `stateRoot` itself only has to be
+owned by the user or root, whatever its mode (an `emptyDir` is `0777` or
+`2777`); everything below it gets the full checks.
 The config lock is `.mcparcel.lock` (mode `0600`) inside the resolved configuration
 directory, created by the first writer, so every writer of one configuration takes
 the same lock whatever its state directory; add it to `.gitignore` when the
