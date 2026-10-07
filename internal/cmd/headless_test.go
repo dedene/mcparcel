@@ -14,14 +14,18 @@ import (
 
 // headlessEnv writes a headless config.json whose state root is a fresh
 // world-writable directory, as kubelet creates an emptyDir.
-func headlessEnv(t *testing.T) (config.Paths, string) {
+func headlessEnv(t *testing.T) (config.Paths, string) { return headlessEnvMode(t, 0o777) }
+
+// headlessEnvMode is headlessEnv with the root's mode: 0777, or 2777 when the
+// pod sets fsGroup (macOS drops the setgid bit when the group is not ours).
+func headlessEnvMode(t *testing.T, mode os.FileMode) (config.Paths, string) {
 	t.Helper()
 	p := metadataEnv(t)
 	root := filepath.Join(filepath.Dir(p.Home), "state-root")
 	if err := os.Mkdir(root, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(root, 0o777); err != nil {
+	if err := os.Chmod(root, mode); err != nil {
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(map[string]any{"schemaVersion": 1, "runtime": map[string]any{"mode": "headless", "stateRoot": root}})
@@ -95,5 +99,27 @@ func TestHeadlessErrorMapping(t *testing.T) {
 	e := safeFailure(errors.Join(errors.New("wrapped"), config.ErrConfigReadOnly))
 	if e.Code != "config_read_only" || output.ExitCode(e) != 2 {
 		t.Fatal(e)
+	}
+}
+
+// TestHeadlessSetgidStateRoot: an fsGroup emptyDir (2777) works as a state
+// root through the command layer, the fixture's StateDir opens included.
+func TestHeadlessSetgidStateRoot(t *testing.T) {
+	_, root := headlessEnvMode(t, 0o777|os.ModeSetgid)
+	got, err := commandPaths()
+	if err != nil || got.StateRoot != root {
+		t.Fatal(got, err)
+	}
+	for range 2 {
+		for _, dir := range []string{got.StateDir, got.RuntimeDir} {
+			f, err := config.OpenPrivateDirUnder(got.StateRoot, dir, true)
+			if err != nil {
+				t.Fatal(dir, err)
+			}
+			_ = f.Close()
+		}
+	}
+	if code, stdout, stderr := run(t, "runtime", "status", "--json"); code != 0 || stderr != "" {
+		t.Fatal(code, stdout, stderr)
 	}
 }

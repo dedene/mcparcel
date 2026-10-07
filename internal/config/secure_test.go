@@ -110,6 +110,48 @@ func TestStateRootWorldWritableAccepted(t *testing.T) {
 	openUnsafe(t, f, err)
 }
 
+// TestSetgidStateRootAccepted: with pod fsGroup, kubelet makes the emptyDir
+// 2777. Linux gives every directory made inside it S_ISGID whatever mode
+// mkdir gets, so the walk must clear it on create and tolerate it below the
+// root on an existing directory (BSD mkdir never inherits it).
+func TestSetgidStateRootAccepted(t *testing.T) {
+	root := filepath.Join(secureRoot(t), "state-root")
+	mkdirMode(t, root, 0o777|os.ModeSetgid)
+	if info, err := os.Stat(root); err != nil || info.Mode()&os.ModeSetgid == 0 {
+		t.Skip("cannot set the setgid bit here", info, err)
+	}
+	run := filepath.Join(root, "run")
+	for range 2 {
+		f, err := OpenPrivateDirUnder(root, run, true)
+		openOK(t, f, err)
+		info, err := os.Stat(run)
+		if err != nil || info.Mode()&(os.ModePerm|os.ModeSetgid|os.ModeSetuid|os.ModeSticky) != 0o700 {
+			t.Fatal(info.Mode(), err)
+		}
+	}
+	// A directory that already carries S_ISGID (made by an older run) is
+	// accepted below the root, never without one.
+	if err := os.Chmod(run, 0o700|os.ModeSetgid); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(run); err != nil || info.Mode()&os.ModeSetgid == 0 {
+		t.Skip("cannot set the setgid bit on the run directory", info, err)
+	}
+	f, err := OpenPrivateDirUnder(root, run, false)
+	openOK(t, f, err)
+	if err := os.Chmod(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	f, err = OpenPrivateDir(run, false)
+	openUnsafe(t, f, err)
+	// Group or other bits still fail next to S_ISGID.
+	if err := os.Chmod(run, 0o750|os.ModeSetgid); err != nil {
+		t.Fatal(err)
+	}
+	f, err = OpenPrivateDirUnder(root, run, false)
+	openUnsafe(t, f, err)
+}
+
 func TestWorldWritableAncestorStillRejectedBelowRoot(t *testing.T) {
 	base := secureRoot(t)
 	root := filepath.Join(base, "state-root")

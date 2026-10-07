@@ -39,9 +39,11 @@ func openPrivateDir(trustedRoot, path string, create bool) (*os.File, error) {
 	for i, part := range parts {
 		last := i == len(parts)-1
 		next, e := unix.Openat(fd, part, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+		created := false
 		if errors.Is(e, unix.ENOENT) && create {
 			e = unix.Mkdirat(fd, part, 0o700)
 			if e == nil {
+				created = true
 				if syncErr := syncCreatedParents(fd); syncErr != nil {
 					_ = unix.Close(fd)
 					return nil, syncErr
@@ -59,6 +61,12 @@ func openPrivateDir(trustedRoot, path string, create bool) (*os.File, error) {
 			return nil, ErrUnsafePath
 		}
 		fd = next
+		// Linux gives a directory made inside a setgid one (an fsGroup emptyDir
+		// is 2777) S_ISGID whatever mode mkdir got; clear it on what we made.
+		if created && unix.Fchmod(fd, 0o700) != nil {
+			_ = unix.Close(fd)
+			return nil, ErrUnsafePath
+		}
 		var st unix.Stat_t
 		if unix.Fstat(fd, &st) != nil {
 			_ = unix.Close(fd)
@@ -69,7 +77,13 @@ func openPrivateDir(trustedRoot, path string, create bool) (*os.File, error) {
 		if !last && trustedRoot != "" && "/"+strings.Join(parts[:i+1], "/") == trustedRoot {
 			safeAncestor = owner || st.Uid == 0
 		}
-		if !safeAncestor || (last && (!owner || st.Mode&0o7777 != 0o700)) {
+		// Below a state root, S_ISGID on an existing directory is tolerated:
+		// it only sets the group of new entries, and those are checked 0600.
+		mode := uint32(st.Mode) & 0o7777
+		if trustedRoot != "" {
+			mode &^= unix.S_ISGID
+		}
+		if !safeAncestor || (last && (!owner || mode != 0o700)) {
 			_ = unix.Close(fd)
 			return nil, ErrUnsafePath
 		}

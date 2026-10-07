@@ -19,15 +19,19 @@ func envMap(list []string) map[string]string {
 	return out
 }
 
-func headlessPaths(t *testing.T) config.Paths {
+func headlessPaths(t *testing.T) config.Paths { return headlessPathsMode(t, 0o777) }
+
+// headlessPathsMode makes the state root with mode: kubelet creates an
+// emptyDir world-writable without the sticky bit, 0777 or, with pod fsGroup,
+// 2777 (macOS drops the setgid bit when the group is not the user's).
+func headlessPathsMode(t *testing.T, mode os.FileMode) config.Paths {
 	t.Helper()
 	p, _ := testutil.IsolatedPaths(t)
 	root := filepath.Join(filepath.Dir(p.Home), "state-root")
 	if err := os.Mkdir(root, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	// kubelet creates an emptyDir world-writable without the sticky bit.
-	if err := os.Chmod(root, 0o777); err != nil {
+	if err := os.Chmod(root, mode); err != nil {
 		t.Fatal(err)
 	}
 	h, err := config.ApplyStateRoot(p, root)
@@ -58,7 +62,13 @@ func TestDaemonEnvironmentHeadlessOmitsStateDirs(t *testing.T) {
 }
 
 func TestHeadlessStateRootWorldWritable(t *testing.T) {
-	p := headlessPaths(t)
+	for _, mode := range []os.FileMode{0o777, 0o777 | os.ModeSetgid} {
+		t.Run(mode.String(), func(t *testing.T) { testHeadlessStateRoot(t, mode) })
+	}
+}
+
+func testHeadlessStateRoot(t *testing.T, mode os.FileMode) {
+	p := headlessPathsMode(t, mode)
 	if held, err := lockHeld(p); err != nil || held {
 		t.Fatal(held, err)
 	}
@@ -79,10 +89,15 @@ func TestHeadlessStateRootWorldWritable(t *testing.T) {
 	}
 	for _, dir := range []string{p.StateDir, p.RuntimeDir} {
 		info, err := os.Stat(dir)
-		if err != nil || info.Mode().Perm() != 0o700 {
+		if err != nil || info.Mode()&(os.ModePerm|os.ModeSetgid|os.ModeSetuid|os.ModeSticky) != 0o700 {
 			t.Fatal(dir, info, err)
 		}
 	}
+	// A second open finds the directories and still accepts them.
+	if log, err = OpenLog(p); err != nil {
+		t.Fatal(err)
+	}
+	_ = log.Close()
 	// Without the trusted root, the same layout is refused.
 	p.StateRoot = ""
 	if _, err := OpenLog(p); err == nil {
