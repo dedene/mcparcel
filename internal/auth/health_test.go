@@ -11,11 +11,11 @@ import (
 	"github.com/dedene/mcparcel/internal/config"
 )
 
-// healthDir is a private state directory under /private/tmp, whose ancestors
+// healthDir is a private state directory under config.DefaultTempDir(), whose ancestors
 // pass config.OpenPrivateDir (the per-user temp dir sits behind a symlink).
 func healthDir(t *testing.T) string {
 	t.Helper()
-	root, err := os.MkdirTemp("/private/tmp", "mcp-health-")
+	root, err := os.MkdirTemp(config.DefaultTempDir(), "mcp-health-")
 	if err != nil {
 		t.Fatal(err)
 	}

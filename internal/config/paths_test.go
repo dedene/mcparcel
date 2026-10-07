@@ -14,7 +14,7 @@ import (
 )
 
 func TestPathsOverrides(t *testing.T) {
-	root, err := os.MkdirTemp("/private/tmp", "mcp-path-")
+	root, err := os.MkdirTemp(testutil.TempRoot(), "mcp-path-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func TestLongSocketPath(t *testing.T) {
 			return runtime
 		}
 		return ""
-	}, "/fixture", "/private/tmp", 1)
+	}, "/fixture", testutil.TempRoot(), 1)
 	if !errors.Is(err, config.ErrUnsafePath) {
 		t.Fatal(err)
 	}
@@ -222,7 +222,7 @@ func writeFile(t *testing.T, path, data string, mode os.FileMode) {
 
 func symlinkRoot(t *testing.T) string {
 	t.Helper()
-	root, err := os.MkdirTemp("/private/tmp", "mcp-path-")
+	root, err := os.MkdirTemp(testutil.TempRoot(), "mcp-path-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,7 +243,7 @@ func symlinkRoot(t *testing.T) string {
 func TestResolvePathsResolvesSymlinks(t *testing.T) {
 	root := symlinkRoot(t)
 	env := map[string]string{"MCPARCEL_RUNTIME_DIR": root + "/link/run", "XDG_STATE_HOME": root + "/link/state"}
-	p, err := config.ResolvePaths(func(k string) string { return env[k] }, root+"/home", "/private/tmp", os.Getuid())
+	p, err := config.ResolvePaths(func(k string) string { return env[k] }, root+"/home", testutil.TempRoot(), os.Getuid())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,7 +256,7 @@ func TestResolvePathsResolvesSymlinks(t *testing.T) {
 	// $TMPDIR ends in "/", so MCPARCEL_RUNTIME_DIR=$TMPDIR/x is not clean.
 	for _, runtime := range []string{root + "/link//run", root + "/link/run/"} {
 		env["MCPARCEL_RUNTIME_DIR"] = runtime
-		got, err := config.ResolvePaths(func(k string) string { return env[k] }, root+"/home", "/private/tmp", os.Getuid())
+		got, err := config.ResolvePaths(func(k string) string { return env[k] }, root+"/home", testutil.TempRoot(), os.Getuid())
 		if err != nil || got.RuntimeDir != root+"/real/run" {
 			t.Fatal(runtime, got.RuntimeDir, err)
 		}
@@ -285,7 +285,7 @@ func TestResolvePathsSymlinkFailsClosed(t *testing.T) {
 				return runtime
 			}
 			return ""
-		}, root+"/home", "/private/tmp", os.Getuid())
+		}, root+"/home", testutil.TempRoot(), os.Getuid())
 	}
 	if err := os.Symlink(root+"/missing", root+"/dangling"); err != nil {
 		t.Fatal(err)

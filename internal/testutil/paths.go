@@ -10,8 +10,8 @@ import (
 
 func IsolatedPaths(t testing.TB) (config.Paths, []string) {
 	t.Helper()
-	// /private/tmp avoids Darwin's long per-user temporary directory and symlink alias.
-	root, err := os.MkdirTemp("/private/tmp", "mcp-test-")
+	// TempRoot avoids Darwin's long per-user temporary directory and symlink alias.
+	root, err := os.MkdirTemp(TempRoot(), "mcp-test-")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -13,7 +13,7 @@ import (
 
 func storePaths(t *testing.T) Paths {
 	t.Helper()
-	root, err := os.MkdirTemp("/private/tmp", "mcp-store-")
+	root, err := os.MkdirTemp(DefaultTempDir(), "mcp-store-")
 	if err != nil {
 		t.Fatal(err)
 	}

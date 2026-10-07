@@ -15,6 +15,7 @@ import (
 
 	"github.com/dedene/mcparcel/internal/config"
 	runtimeclient "github.com/dedene/mcparcel/internal/runtime"
+	"github.com/dedene/mcparcel/internal/testutil"
 )
 
 func TestTwoProcessesShareDaemon(t *testing.T) {
@@ -369,7 +370,7 @@ func TestRuntimeDirThroughSymlinkBlackBox(t *testing.T) {
 	}
 	r.env = replaceEnv(r.env, "MCPARCEL_RUNTIME_DIR", r.root+"/l/run")
 	var err error
-	if r.paths, err = config.ResolvePaths(func(k string) string { return envValue(r.env, k) }, r.paths.Home, "/private/tmp", os.Getuid()); err != nil {
+	if r.paths, err = config.ResolvePaths(func(k string) string { return envValue(r.env, k) }, r.paths.Home, testutil.TempRoot(), os.Getuid()); err != nil {
 		t.Fatal(err)
 	}
 	r.call("fixture.counter")

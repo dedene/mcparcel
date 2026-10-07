@@ -2,7 +2,7 @@ SHELL := /bin/bash
 
 .DEFAULT_GOAL := build
 
-.PHONY: build build-linux npm-binary test test-packaging lint fmt-check vet-linux ci tools
+.PHONY: build build-linux npm-binary test test-linux test-packaging lint fmt-check vet-linux ci tools
 
 BIN := $(CURDIR)/bin/mcparcel
 NPM_BIN := $(CURDIR)/packaging/npm/dist/mcparcel
@@ -42,6 +42,10 @@ npm-binary:
 
 test:
 	@go test -race ./...
+
+# Full go test -race ./... in a Linux container as uid 10001 (needs Docker).
+test-linux:
+	@tests/linux/run.sh
 
 test-packaging: npm-binary
 	@node --test tests/packaging/*.mjs

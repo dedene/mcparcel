@@ -18,6 +18,7 @@ import (
 
 	"github.com/dedene/mcparcel/internal/config"
 	runtimeclient "github.com/dedene/mcparcel/internal/runtime"
+	"github.com/dedene/mcparcel/internal/testutil"
 )
 
 var binaryA, binaryB, fixtureBinary, buildRoot string
@@ -28,15 +29,13 @@ func TestMain(m *testing.M) {
 	if os.Getenv("MCPARCEL_FIXTURE_STDIO") == "1" {
 		os.Exit(runFixture())
 	}
-	_, source, _, _ := goruntime.Caller(0)
-	repo := filepath.Clean(filepath.Join(filepath.Dir(source), "../.."))
-	// Built binaries live in the gitignored .scratch, not /private/tmp; .scratch itself is shared and kept.
-	scratch := filepath.Join(repo, ".scratch")
-	if err := os.MkdirAll(scratch, 0o700); err != nil {
+	repo := repoRoot()
+	parent := buildParent()
+	if err := os.MkdirAll(parent, 0o700); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	root, err := os.MkdirTemp(scratch, "cli-build-")
+	root, err := os.MkdirTemp(parent, "cli-build-")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -87,6 +86,21 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
+func repoRoot() string {
+	_, source, _, _ := goruntime.Caller(0)
+	return filepath.Clean(filepath.Join(filepath.Dir(source), "../.."))
+}
+
+// buildParent holds the built binaries. On macOS it is the gitignored .scratch,
+// not /private/tmp; .scratch itself is shared and kept. The Linux container
+// mounts the source read-only, so there they go under the temp root.
+func buildParent() string {
+	if goruntime.GOOS == "darwin" {
+		return filepath.Join(repoRoot(), ".scratch")
+	}
+	return testutil.TempRoot()
+}
+
 type rig struct {
 	t        *testing.T
 	root     string
@@ -118,8 +132,8 @@ type process struct {
 
 func newRig(t *testing.T) *rig {
 	t.Helper()
-	// Runtime dirs and sockets stay short under /private/tmp (104-byte socket path limit).
-	root, err := os.MkdirTemp("/private/tmp", "cli-test-")
+	// Runtime dirs and sockets stay short under the temp root (104-byte socket path limit).
+	root, err := os.MkdirTemp(testutil.TempRoot(), "cli-test-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +148,7 @@ func newRig(t *testing.T) *rig {
 	}
 	r := &rig{t: t, root: root, bin: bin, pids: map[int]bool{}, personal: config.Personal{SchemaVersion: 1, Connections: map[string]config.Connection{}, CredentialProfiles: map[string]config.ProfileRequirement{}}}
 	r.env = []string{"HOME=" + root + "/home", "TMPDIR=" + root + "/tmp", "SHELL=" + root + "/shell", "XDG_CONFIG_HOME=" + root + "/config", "XDG_DATA_HOME=" + root + "/data", "XDG_CACHE_HOME=" + root + "/cache", "XDG_STATE_HOME=" + root + "/state", "MCPARCEL_RUNTIME_DIR=" + root + "/run", "PATH=/usr/bin:/bin:/usr/sbin:/sbin", "LANG=C", "LC_ALL=C", "MCPARCEL_SENTINEL_HOME=" + root + "/sentinel"}
-	r.paths, err = config.ResolvePaths(func(k string) string { return envValue(r.env, k) }, root+"/home", "/private/tmp", os.Getuid())
+	r.paths, err = config.ResolvePaths(func(k string) string { return envValue(r.env, k) }, root+"/home", testutil.TempRoot(), os.Getuid())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -471,19 +485,18 @@ func (r *rig) waitActive(count int) {
 }
 
 func TestBlackBoxBinariesInScratch(t *testing.T) {
-	_, source, _, _ := goruntime.Caller(0)
-	scratch := filepath.Clean(filepath.Join(filepath.Dir(source), "../../.scratch"))
+	parent := buildParent()
 	under := func(path string) bool {
-		rel, err := filepath.Rel(scratch, path)
+		rel, err := filepath.Rel(parent, path)
 		return err == nil && rel != ".." && !strings.HasPrefix(rel, "../")
 	}
 	for _, binary := range []string{binaryA, binaryB} {
 		if !under(binary) {
-			t.Fatalf("binary %s outside %s", binary, scratch)
+			t.Fatalf("binary %s outside %s", binary, parent)
 		}
 	}
 	r := newRig(t)
-	if !under(r.bin) || !strings.HasPrefix(r.root, "/private/tmp/cli-test-") {
+	if !under(r.bin) || !strings.HasPrefix(r.root, testutil.TempRoot()+"/cli-test-") {
 		t.Fatalf("rig bin=%s root=%s", r.bin, r.root)
 	}
 	if _, err := os.Lstat(r.root + "/cli-a"); !errors.Is(err, os.ErrNotExist) {
