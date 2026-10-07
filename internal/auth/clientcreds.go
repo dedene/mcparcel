@@ -29,8 +29,12 @@ const (
 // oauth2.AuthStyleInParams (client_secret_post, also for the zero value) or
 // oauth2.AuthStyleInHeader (client_secret_basic). HTTPClient nil means a
 // client without proxy and with a 30 s timeout; redirects are never
-// followed. Now is the clock (nil means time.Now). Log receives event names
-// and, for failures, a sanitized "code" field only.
+// followed. Now is the clock (nil means time.Now). Log receives
+// oauth_token_minted (trigger first|expiry|401, ttl in seconds, 0 when
+// unknown), oauth_token_mint_failed (a sanitized code and the token
+// endpoint's HTTP status, 0 without an answer) and oauth_token_rejected (the
+// MCP server's 401 for a fresh token or 403: code and status). No field
+// ever holds a URL, the client ID, the secret or a token.
 type ClientCredentialsConfig struct {
 	TokenURL   string
 	ClientID   string
@@ -58,6 +62,7 @@ type ClientCredentials struct {
 	issued  time.Time     // when the request that minted token was sent
 	refresh time.Duration // token age from which it is re-minted; 0 means until a 401
 	minting *ccMint       // the mint in flight, nil when none
+	minted  bool          // a mint succeeded once: a later one is not "first"
 	// reminted is the token the last 401-triggered mint produced, at remintedAt.
 	reminted   string
 	remintedAt time.Time
@@ -65,10 +70,11 @@ type ClientCredentials struct {
 
 // ccMint is one token request; done is closed once tok or err is set.
 type ccMint struct {
-	done   chan struct{}
-	for401 bool
-	tok    *oauth2.Token
-	err    error
+	done    chan struct{}
+	for401  bool
+	trigger string // first, expiry or 401: why it was started, for the log
+	tok     *oauth2.Token
+	err     error
 }
 
 var _ sdkauth.OAuthHandler = (*ClientCredentials)(nil)
@@ -138,7 +144,7 @@ func (h *ClientCredentials) Authorize(ctx context.Context, req *http.Request, re
 		_ = resp.Body.Close()
 	}
 	if resp != nil && resp.StatusCode == http.StatusForbidden {
-		h.log("client_credentials_forbidden", map[string]any{"code": "http_403"})
+		h.log("oauth_token_rejected", map[string]any{"code": "http_403", "status": http.StatusForbidden})
 		e := output.NewError("auth_failed", nil)
 		e.Message = "The server refused this client access (HTTP 403)."
 		e.NextAction = "Check the client's scopes and permissions on the server."
@@ -162,7 +168,7 @@ func (h *ClientCredentials) Authorize(ctx context.Context, req *http.Request, re
 		case h.token != nil && rejected == h.reminted && h.cfg.Now().Sub(h.remintedAt) < ccRejectWindow:
 			h.token, h.reminted = nil, ""
 			h.mu.Unlock()
-			h.log("client_credentials_token_rejected", map[string]any{"code": "token_rejected"})
+			h.log("oauth_token_rejected", map[string]any{"code": "token_rejected", "status": http.StatusUnauthorized})
 			e := output.NewError("auth_failed", nil)
 			e.Message = "The server rejected a newly issued access token (token_rejected)."
 			e.NextAction = "Check that auth.tokenUrl issues tokens for this MCP server."
@@ -214,7 +220,16 @@ func (h *ClientCredentials) startMintLocked(for401 bool) *ccMint {
 	if h.minting != nil {
 		return h.minting
 	}
-	m := &ccMint{done: make(chan struct{}), for401: for401}
+	trigger := "first"
+	switch {
+	case for401:
+		trigger = "401"
+	case h.token != nil:
+		trigger = "expiry"
+	case h.minted:
+		trigger = "401" // the token a 401 dropped was not replaced yet
+	}
+	m := &ccMint{done: make(chan struct{}), for401: for401, trigger: trigger}
 	h.minting = m
 	go h.run(m)
 	return m
@@ -223,7 +238,7 @@ func (h *ClientCredentials) startMintLocked(for401 bool) *ccMint {
 func (h *ClientCredentials) run(m *ccMint) {
 	start := h.cfg.Now()
 	ctx, cancel := context.WithTimeout(h.base, ccMintTimeout)
-	tok, lifetime, reason, err := h.mint(ctx)
+	tok, lifetime, status, reason, err := h.mint(ctx)
 	cancel()
 	h.mu.Lock()
 	h.minting = nil
@@ -232,7 +247,7 @@ func (h *ClientCredentials) run(m *ccMint) {
 		tok, err = nil, ccClosed()
 	case err == nil:
 		h.token, h.issued, h.refresh = tok, start, refreshAge(lifetime)
-		h.reminted = ""
+		h.reminted, h.minted = "", true
 		if m.for401 {
 			h.reminted, h.remintedAt = tok.AccessToken, start
 		}
@@ -241,9 +256,9 @@ func (h *ClientCredentials) run(m *ccMint) {
 	h.mu.Unlock()
 	close(m.done)
 	if reason != "" {
-		h.log("client_credentials_token_failed", map[string]any{"code": reason})
+		h.log("oauth_token_mint_failed", map[string]any{"code": reason, "status": status})
 	} else if err == nil {
-		h.log("client_credentials_token_minted", nil)
+		h.log("oauth_token_minted", map[string]any{"trigger": m.trigger, "ttl": int64(lifetime / time.Second)})
 	}
 }
 

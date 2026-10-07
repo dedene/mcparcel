@@ -103,7 +103,7 @@ func TestHeadlessMissingVarNotCached(t *testing.T) {
 	if n := count(t, r.call(testCtx(t), "front", "counter")); n != 1 {
 		t.Fatal(n)
 	}
-	var o = <-r.captured
+	o := <-r.captured
 	if o.Headers["Authorization"] != "Bearer secret-canary" {
 		t.Fatal("header not built from the restarted environment")
 	}

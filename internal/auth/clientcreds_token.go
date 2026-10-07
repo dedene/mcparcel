@@ -31,9 +31,10 @@ const (
 var ccErrorCodes = []string{"invalid_request", "invalid_client", "invalid_grant", "unauthorized_client", "unsupported_grant_type", "invalid_scope"}
 
 // mint posts one client_credentials grant. lifetime is 0 when the answer has
-// no positive expires_in. reason is the sanitized failure code for the log.
+// no positive expires_in. status is the token endpoint's HTTP status, 0
+// without an answer; reason is the sanitized failure code for the log.
 // Response bodies never enter an error.
-func (h *ClientCredentials) mint(ctx context.Context) (tok *oauth2.Token, lifetime time.Duration, reason string, err error) {
+func (h *ClientCredentials) mint(ctx context.Context) (tok *oauth2.Token, lifetime time.Duration, status int, reason string, err error) {
 	form := url.Values{"grant_type": {"client_credentials"}}
 	if len(h.cfg.Scopes) > 0 {
 		form.Set("scope", strings.Join(h.cfg.Scopes, " "))
@@ -45,7 +46,7 @@ func (h *ClientCredentials) mint(ctx context.Context) (tok *oauth2.Token, lifeti
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, h.cfg.TokenURL, strings.NewReader(form.Encode()))
 	if err != nil {
-		return nil, 0, "invalid_token_url", ccConnectionFailed("invalid_token_url")
+		return nil, 0, 0, "invalid_token_url", ccConnectionFailed("invalid_token_url")
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
@@ -60,26 +61,26 @@ func (h *ClientCredentials) mint(ctx context.Context) (tok *oauth2.Token, lifeti
 		if errors.Is(err, context.DeadlineExceeded) || errors.As(err, &ne) && ne.Timeout() {
 			reason = "timeout"
 		}
-		return nil, 0, reason, ccConnectionFailed(reason)
+		return nil, 0, 0, reason, ccConnectionFailed(reason)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, ccBodyLimit+1))
+	status = resp.StatusCode
 	if err != nil {
-		return nil, 0, "network_error", ccConnectionFailed("network_error")
+		return nil, 0, status, "network_error", ccConnectionFailed("network_error")
 	}
-	status := resp.StatusCode
 	switch {
 	case status == http.StatusOK:
 		tok, lifetime, ok := parseCCToken(body)
 		if !ok {
-			return nil, 0, "invalid_token_response", ccAuthFailed("invalid_token_response", "The token endpoint returned no usable bearer token")
+			return nil, 0, status, "invalid_token_response", ccAuthFailed("invalid_token_response", "The token endpoint returned no usable bearer token")
 		}
-		return tok, lifetime, "", nil
+		return tok, lifetime, status, "", nil
 	case status == http.StatusTooManyRequests || status >= 500:
 		reason = statusClass(status)
-		return nil, 0, reason, ccConnectionFailed(reason)
+		return nil, 0, status, reason, ccConnectionFailed(reason)
 	case status >= 300 && status < 400:
-		return nil, 0, "redirect", ccConnectionFailed("redirect")
+		return nil, 0, status, "redirect", ccConnectionFailed("redirect")
 	case status >= 400:
 		reason = statusClass(status)
 		var answer struct {
@@ -88,9 +89,9 @@ func (h *ClientCredentials) mint(ctx context.Context) (tok *oauth2.Token, lifeti
 		if (status == 400 || status == 401) && json.Unmarshal(body, &answer) == nil && slices.Contains(ccErrorCodes, answer.Error) {
 			reason = answer.Error
 		}
-		return nil, 0, reason, ccAuthFailed(reason, "The token endpoint rejected the client credentials")
+		return nil, 0, status, reason, ccAuthFailed(reason, "The token endpoint rejected the client credentials")
 	}
-	return nil, 0, "invalid_token_response", ccAuthFailed("invalid_token_response", "The token endpoint returned no usable bearer token")
+	return nil, 0, status, "invalid_token_response", ccAuthFailed("invalid_token_response", "The token endpoint returned no usable bearer token")
 }
 
 // parseCCToken accepts a JSON answer with a nonempty access_token and a

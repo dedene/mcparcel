@@ -198,6 +198,9 @@ func (k *fixtureKeyring) Delete(service, account string) error {
 	return nil
 }
 
+// browserOpens is true: the fixture browser below follows the URL.
+const browserOpens = true
+
 // newBrowser never opens a browser: it follows the sign-in URL to the
 // daemon's callback and keeps the page in StateDir/fixture-browser-page.
 // StateDir/fixture-browser-off turns it off.

@@ -14,6 +14,10 @@ import (
 // counts as declined.
 var errNotAvailable = errors.New("not available on Linux")
 
+// browserOpens reports whether newBrowser can open a browser at all; auth
+// login words its prompt by it.
+const browserOpens = false
+
 func newBrowser(config.Paths) func(context.Context, string) error {
 	return func(context.Context, string) error { return errNotAvailable }
 }

@@ -38,7 +38,7 @@ func (p *pool) oauthHandler(ctx context.Context, id, name string, c config.Conne
 	if !oauthCapable(c) {
 		return nil, nil
 	}
-	if p.opts.Headless && (login != nil || c.Auth != nil && c.Auth.Grant != config.GrantClientCredentials) {
+	if p.opts.Headless && (login != nil || c.Auth != nil) {
 		// A sign-in needs a browser and a Keychain; headless has neither.
 		return nil, headlessSignIn(nil)
 	}
@@ -124,6 +124,9 @@ func loginOptions(ctx context.Context, req Request, c config.Connection) (*auth.
 		e := output.NewError("invalid_arguments", nil)
 		e.Message = "Only HTTP connections without a configured credential header use sign-in."
 		return nil, e
+	}
+	if clientCredentials(c) {
+		return nil, clientCredentialsSignIn(req.Connection)
 	}
 	send := authURLSender(ctx)
 	if req.NoInput || send == nil {

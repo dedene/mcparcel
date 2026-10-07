@@ -38,7 +38,8 @@ func (p *pool) StayAlive() bool {
 }
 
 // keepAliveTargets lists the runnable OAuth-capable connections whose
-// lifecycle.keepAlive is not "off".
+// lifecycle.keepAlive is not "off". A client_credentials connection has no
+// stored session to keep alive: its token is minted when a call needs it.
 func (p *pool) keepAliveTargets(context.Context) ([]auth.KeepAliveTarget, error) {
 	snapshot, err := p.opts.Load(p.opts.Paths)
 	if err != nil {
@@ -55,7 +56,7 @@ func (p *pool) keepAliveTargets(context.Context) ([]auth.KeepAliveTarget, error)
 	var targets []auth.KeepAliveTarget
 	for _, id := range ids {
 		canonical, c, err := snapshot.RuntimeConnection(id)
-		if err != nil || !oauthCapable(c) {
+		if err != nil || !oauthCapable(c) || clientCredentials(c) {
 			continue
 		}
 		if interval, ok := auth.KeepAliveInterval(keepAliveSetting(c)); ok {

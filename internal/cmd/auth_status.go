@@ -62,6 +62,9 @@ func (c *AuthStatusCmd) Run(ctx context.Context, s *Streams, opts *CommandOption
 			return err
 		}
 		ids = []string{id}
+		if clientCredentialsConn(effective.Connections[id].Connection) {
+			return nothingToSignIn(c.MCP)
+		}
 	}
 	if paths.Headless() {
 		// Headless mode stores no sign-in and reads no Keychain (Ruling 3).
@@ -85,7 +88,8 @@ func (c *AuthStatusCmd) Run(ctx context.Context, s *Streams, opts *CommandOption
 			}
 			continue
 		}
-		if c.MCP == "" && !row.Enabled {
+		if c.MCP == "" && !row.Enabled || clientCredentialsConn(row.Connection) {
+			// A client_credentials token lives in daemon memory only.
 			continue
 		}
 		state, err := auth.LoadOAuth(ctx, keyring, id)

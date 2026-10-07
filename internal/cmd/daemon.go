@@ -74,7 +74,12 @@ var (
 // daemonPoolOptions configures the runtime's pool. Headless mode constructs
 // none of the desktop credential sources (D10, D11).
 func daemonPoolOptions(paths config.Paths, login map[string]string, log io.Writer) runtimeclient.PoolOptions {
-	opts := runtimeclient.PoolOptions{Paths: paths, LoginEnv: login, Version: version, Health: auth.NewHealth(paths.StateDir, time.Now), Log: func(event string) { _ = runtimeclient.WriteLog(log, event, nil) }, SignInFailure: func(stage, code string) { _ = runtimeclient.WriteSignInFailure(log, stage, code) }}
+	opts := runtimeclient.PoolOptions{
+		Paths: paths, LoginEnv: login, Version: version, Health: auth.NewHealth(paths.StateDir, time.Now),
+		Log:           func(event string) { _ = runtimeclient.WriteLog(log, event, nil) },
+		SignInFailure: func(stage, code string) { _ = runtimeclient.WriteSignInFailure(log, stage, code) },
+		TokenLog:      func(event string, fields map[string]any) { _ = runtimeclient.WriteTokenEvent(log, event, fields) },
+	}
 	if paths.Headless() {
 		opts.Headless = true
 		return opts

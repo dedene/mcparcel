@@ -17,12 +17,14 @@ import (
 )
 
 type PoolOptions struct {
-	Paths           config.Paths
-	LoginEnv        map[string]string
-	Version         string
-	Credentials     auth.Resolver
-	Log             func(event string)
-	SignInFailure   func(stage, code string) // logs a failed sign-in; see WriteSignInFailure
+	Paths         config.Paths
+	LoginEnv      map[string]string
+	Version       string
+	Credentials   auth.Resolver
+	Log           func(event string)
+	SignInFailure func(stage, code string) // logs a failed sign-in; see WriteSignInFailure
+	// TokenLog logs client_credentials token events; see WriteTokenEvent.
+	TokenLog        func(event string, fields map[string]any)
 	Keychain        func(ctx context.Context, name string) (string, error)
 	Keyring         auth.Keyring // OAuth sessions; nil fails marked connections with keychain_unavailable
 	Health          *auth.Health // OAuth session history; nil records nothing
@@ -198,7 +200,9 @@ func (p *pool) Handle(ctx context.Context, id string, req Request, before func()
 		// authorization-code connection needs a sign-in whatever its
 		// variables hold.
 		names := config.EnvRefs(c)
-		if c.Auth != nil && c.Auth.Grant != config.GrantClientCredentials {
+		if c.Auth != nil {
+			// An OAuth connection's 401 is about its token, not about the
+			// variables: client_credentials maps it below.
 			names = nil
 		}
 		defer func() {
@@ -207,7 +211,7 @@ func (p *pool) Handle(ctx context.Context, id string, req Request, before func()
 				resp.Error.Message, resp.Error.NextAction = e.Message, e.NextAction
 			}
 		}()
-	} else if oauthCapable(c) && len(refs) == 0 {
+	} else if oauthCapable(c) && !clientCredentials(c) && len(refs) == 0 {
 		defer func() {
 			if resp.Error != nil && resp.Error.Code == "auth_required" {
 				resp.Error.NextAction = "mcparcel auth login " + req.Connection
@@ -223,6 +227,14 @@ func (p *pool) Handle(ctx context.Context, id string, req Request, before func()
 		defer func() {
 			if resp.Error != nil && resp.Error.Code == "auth_required" {
 				resp.Error.NextAction = "Check " + strings.Join(names, ", ") + " (login-shell environment, else the Keychain generic password of the same name), update the value, then run mcparcel runtime restart."
+			}
+		}()
+	}
+	if clientCredentials(c) {
+		// Registered last, so it runs before the hints above.
+		defer func() {
+			if resp.Error != nil && resp.Error.Code == "auth_required" {
+				resp.Error = ccTokenRejected(resp.Error.Details)
 			}
 		}()
 	}

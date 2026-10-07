@@ -14,6 +14,10 @@ import (
 
 // newBrowser opens an https URL, or an http URL on a loopback host, in the
 // default browser. The URL is one argv entry; no shell runs.
+// browserOpens reports whether newBrowser can open a browser at all; auth
+// login words its prompt by it.
+const browserOpens = true
+
 func newBrowser(config.Paths) func(context.Context, string) error {
 	return func(ctx context.Context, raw string) error {
 		u, err := url.Parse(raw)

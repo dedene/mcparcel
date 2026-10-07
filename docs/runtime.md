@@ -476,6 +476,49 @@ and prints no token. `auth lock` is not built yet.
   verifier, URL, connection name or provider text.
 - Deferred: implicit login, `auth lock`,
   `tokenEndpointAuthMethod` enforcement, provider revocation.
+- `client_credentials` (stage 12): `auth.grant: "client_credentials"` with
+  `tokenUrl`, `clientId`, `clientSecret`, `scopes?` and
+  `tokenEndpointAuthMethod?` (`client_secret_post` by default, or
+  `client_secret_basic`). The token URL is used as is: no discovery, no
+  registration, no Keychain item, no health record, no keep-alive. Each pooled
+  session owns one in-memory token; a config change, a retired session or
+  `runtime restart` drops it. Concurrent requests share one token request. A
+  token is minted again when `max(lifetime/5, 10 s)`, capped at `lifetime/2`,
+  remains (Front: 180 s before the 900 s expiry); one without `expires_in` is
+  used until a 401. `auth login` and `auth logout` refuse such a connection
+  offline (`invalid_arguments`, "there is nothing to sign in to") and
+  `auth status` leaves it out. Token-endpoint failures: `invalid_client` and
+  the other RFC 6749 codes give `auth_failed` naming the code; 5xx, 429,
+  timeouts and network errors give `connection_failed`; no failure is cached
+  past the request, and no body, secret or token appears in any output. Log
+  events: `oauth_token_minted` (`trigger` `first`, `expiry` or `401`; `ttl` in
+  seconds, 0 when unknown), `oauth_token_mint_failed` (`code`, `status`: the
+  token endpoint's HTTP status, 0 without an answer) and
+  `oauth_token_rejected` (`code` `token_rejected` or `http_403`, `status`).
+  Never the connection URL, client ID, secret or token.
+- 401 on a `client_credentials` connection (decision D7), `tools/call`
+  included: the handler drops the rejected token, mints a new one once and the
+  SDK resends the request once. If the resend is answered 401 too, the call
+  fails `auth_failed` (`token_rejected`) and the session is retired; a 401
+  for a token that an earlier 401 minted less than 30 s before is
+  `token_rejected` at once, without another token request. A 403 never mints:
+  `auth_failed`. The call's `data.result` comes from the 2xx answer to the
+  resend; the 401 body is never captured.
+  - Reasoning: a 401 is the resource server's authentication answer (RFC 6750
+    §3.1, `invalid_token`). It arrives as the HTTP status of the POST that
+    carries the JSON-RPC message, before any response body or SSE stream, so
+    the server refused the request before a handler ran it: resending it
+    cannot run the tool twice. The client holds no refresh token and needs no
+    user, so a new token costs one request and no prompt.
+  - Scope: only `client_credentials` connections. It is an exception to
+    "never resend `tools/call`"; `authorization_code` connections keep
+    `auth_expired` with "Run the call again.", and no other status or error
+    is resent.
+  - Residual assumption: the server authenticates before it executes. A
+    server that runs the tool and then answers 401 would run it twice. Bearer
+    token checks in HTTP middleware answer before dispatch; MCParcel cannot
+    verify that for a given server, so the deployment guide names this
+    assumption.
 
 ## OAuth session health
 
