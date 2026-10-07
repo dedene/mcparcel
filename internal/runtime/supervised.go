@@ -19,7 +19,7 @@ const supervisedMarker = "supervised"
 // MarkSupervised records the runtime directory as supervisor-owned. The
 // caller holds the daemon lock, which created the directory.
 func MarkSupervised(paths config.Paths) error {
-	dir, err := config.OpenPrivateDir(paths.RuntimeDir, false)
+	dir, err := config.OpenPrivateDirUnder(paths.StateRoot, paths.RuntimeDir, false)
 	if err != nil {
 		return err
 	}
@@ -33,7 +33,7 @@ func MarkSupervised(paths config.Paths) error {
 
 // Supervised reports whether a supervisor owns the runtime directory.
 func Supervised(paths config.Paths) (bool, error) {
-	dir, err := config.OpenPrivateDir(paths.RuntimeDir, false)
+	dir, err := config.OpenPrivateDirUnder(paths.StateRoot, paths.RuntimeDir, false)
 	if errors.Is(err, os.ErrNotExist) {
 		return false, nil
 	}

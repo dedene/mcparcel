@@ -16,7 +16,7 @@ import (
 type RuntimeServeCmd struct{}
 
 func (c *RuntimeServeCmd) Run(ctx context.Context, s *Streams, opts *CommandOptions) error {
-	paths, err := commandPaths()
+	paths, err := runtimePaths()
 	if err != nil {
 		return err
 	}

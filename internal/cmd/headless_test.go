@@ -81,6 +81,11 @@ func TestRuntimeCommandModeByPlatform(t *testing.T) {
 		if code != 2 || e.Code != "runtime_unsupported" || e.Message != "On Linux, MCParcel runs in headless mode only." || stderr != "" {
 			t.Fatal(code, stdout, stderr)
 		}
+		// runtime serve is a runtime command too: no desktop runtime on Linux.
+		code, stdout, stderr = run(t, "runtime", "serve", "--json")
+		if e = envelopeError(t, stdout); code != 2 || e.Code != "runtime_unsupported" || stderr != "" {
+			t.Fatal("desktop runtime serve", code, stdout, stderr)
+		}
 	}
 	// Offline commands work in desktop mode on every platform.
 	if code, stdout, stderr = run(t, "list", "--json"); code != 0 || stderr != "" {

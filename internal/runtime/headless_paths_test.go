@@ -104,3 +104,23 @@ func testHeadlessStateRoot(t *testing.T, mode os.FileMode) {
 		t.Fatal("world-writable state root accepted without trust")
 	}
 }
+
+// runtime serve marks a headless runtime directory supervised; the marker
+// lives under a world-writable state root and must be reachable there.
+func TestHeadlessSupervisedMarker(t *testing.T) {
+	p := headlessPaths(t)
+	if on, err := Supervised(p); err != nil || on {
+		t.Fatal("fresh headless runtime dir supervised", on, err)
+	}
+	dir, err := config.OpenPrivateDirUnder(p.StateRoot, p.RuntimeDir, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = dir.Close()
+	if err = MarkSupervised(p); err != nil {
+		t.Fatal(err)
+	}
+	if on, err := Supervised(p); err != nil || !on {
+		t.Fatal("marker not seen under the state root", on, err)
+	}
+}
