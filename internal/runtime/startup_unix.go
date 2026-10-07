@@ -155,10 +155,10 @@ func DaemonEnvironment(p config.Paths) []string {
 		}
 	}
 	if env["PATH"] == "" {
-		env["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
+		env["PATH"] = defaultPath
 	}
 	if env["SHELL"] == "" {
-		env["SHELL"] = "/bin/zsh"
+		env["SHELL"] = defaultShell
 	}
 	result := make([]string, 0, len(env))
 	for k, v := range env {

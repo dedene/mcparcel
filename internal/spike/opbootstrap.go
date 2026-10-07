@@ -1,3 +1,5 @@
+//go:build darwin
+
 // Package spike holds stage-1 feasibility probes. Nothing here is a product
 // API; the package is deleted when stage 2 starts.
 package spike

@@ -46,7 +46,7 @@ func fallbackEnv() map[string]string {
 		}
 	}
 	if out["PATH"] == "" {
-		out["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
+		out["PATH"] = defaultPath
 	}
 	return out
 }
@@ -56,7 +56,7 @@ func CaptureLoginEnv(ctx context.Context) (map[string]string, error) {
 	fail := func() (map[string]string, error) { return fallback, ErrLoginEnvUnavailable }
 	shell := os.Getenv("SHELL")
 	if shell == "" {
-		shell = "/bin/zsh"
+		shell = defaultShell
 	}
 	if !filepath.IsAbs(shell) {
 		return fail()
@@ -72,7 +72,7 @@ func CaptureLoginEnv(ctx context.Context) (map[string]string, error) {
 	defer cancel()
 	cmd := exec.CommandContext(captureCtx, shell, "-l", "-c", script)
 	cmd.Dir = fallback["HOME"]
-	cmd.Env = []string{"PATH=/usr/bin:/bin:/usr/sbin:/sbin", "SHELL=" + shell}
+	cmd.Env = []string{"PATH=" + defaultPath, "SHELL=" + shell}
 	for _, key := range []string{"HOME", "TMPDIR", "USER", "LOGNAME", "LANG", "LC_ALL"} {
 		if value, ok := fallback[key]; ok {
 			cmd.Env = append(cmd.Env, key+"="+value)

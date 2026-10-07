@@ -2,10 +2,12 @@ SHELL := /bin/bash
 
 .DEFAULT_GOAL := build
 
-.PHONY: build npm-binary test test-packaging lint fmt-check ci tools
+.PHONY: build build-linux npm-binary test test-packaging lint fmt-check vet-linux ci tools
 
 BIN := $(CURDIR)/bin/mcparcel
 NPM_BIN := $(CURDIR)/packaging/npm/dist/mcparcel
+DIST := $(CURDIR)/dist
+LINUX_ARCHES := amd64 arm64
 CMD := ./cmd/mcparcel
 PKG := github.com/dedene/mcparcel/internal/cmd
 
@@ -27,6 +29,13 @@ build:
 	@mkdir -p $(dir $(BIN))
 	@go build -trimpath -ldflags "$(LDFLAGS)" -o $(BIN) $(CMD)
 
+# Linux binaries are static: no 1Password desktop integration or Keychain.
+build-linux:
+	@mkdir -p $(DIST)
+	@for arch in $(LINUX_ARCHES); do \
+		GOOS=linux GOARCH=$$arch CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o $(DIST)/mcparcel-linux-$$arch $(CMD) || exit 1; \
+	done
+
 npm-binary:
 	@mkdir -p $(dir $(NPM_BIN))
 	@GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o $(NPM_BIN) $(CMD)
@@ -47,7 +56,11 @@ fmt-check: tools
 	@test -z "$$($(GOFUMPT) -l .)" || { $(GOFUMPT) -l .; echo "run gofumpt -w ."; exit 1; }
 	@test -z "$$($(GOIMPORTS) -local github.com/dedene/mcparcel -l .)" || { $(GOIMPORTS) -local github.com/dedene/mcparcel -l .; echo "run goimports -w ."; exit 1; }
 
+vet-linux:
+	@GOOS=linux CGO_ENABLED=0 go vet ./...
+	@GOOS=linux CGO_ENABLED=0 go vet -tags mcparceltest ./...
+
 lint: tools
 	@$(GOLANGCI_LINT) run
 
-ci: fmt-check lint test test-packaging
+ci: fmt-check lint vet-linux test test-packaging

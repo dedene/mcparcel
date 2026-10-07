@@ -28,7 +28,7 @@ type (
 )
 
 func commandPaths() (config.Paths, error) {
-	return config.ResolvePaths(os.Getenv, os.Getenv("HOME"), "/private/tmp", os.Getuid())
+	return config.ResolvePaths(os.Getenv, os.Getenv("HOME"), defaultTempDir(), os.Getuid())
 }
 
 func newRuntimeClient(opts *CommandOptions) (*runtimeclient.Client, error) {

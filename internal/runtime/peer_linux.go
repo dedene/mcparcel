@@ -8,6 +8,7 @@ import (
 	"github.com/dedene/mcparcel/internal/config"
 )
 
+// CheckPeer accepts only a peer running as this process's UID (SO_PEERCRED).
 func CheckPeer(conn *net.UnixConn) error {
 	raw, err := conn.SyscallConn()
 	if err != nil {
@@ -15,7 +16,7 @@ func CheckPeer(conn *net.UnixConn) error {
 	}
 	var check error
 	err = raw.Control(func(fd uintptr) {
-		cred, e := unix.GetsockoptXucred(int(fd), unix.SOL_LOCAL, unix.LOCAL_PEERCRED)
+		cred, e := unix.GetsockoptUcred(int(fd), unix.SOL_SOCKET, unix.SO_PEERCRED)
 		if e != nil {
 			check = config.ErrUnsafePath
 		} else {
