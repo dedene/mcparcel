@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "connections": {
+    "front": {
+      "label": "Front",
+      "transport": {"type": "http", "url": "http://127.0.0.1:18081/mcp", "mode": "streamable", "allowInsecureHttp": "loopback"},
+      "auth": {
+        "type": "oauth",
+        "grant": "client_credentials",
+        "tokenUrl": "http://127.0.0.1:18080/oauth/token",
+        "clientId": {"secret": "env:FRONT_CLIENT_ID"},
+        "clientSecret": {"secret": "env:FRONT_CLIENT_SECRET"}
+      },
+      "toolPolicy": {
+        "allow": ["read_conversation", "create_draft", "ask_approval"],
+        "deny": ["send_message"]
+      },
+      "callTimeout": "60s"
+    }
+  }
+}

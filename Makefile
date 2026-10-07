@@ -2,7 +2,7 @@ SHELL := /bin/bash
 
 .DEFAULT_GOAL := build
 
-.PHONY: build build-linux npm-binary test test-linux test-packaging lint fmt-check vet-linux ci tools
+.PHONY: build build-linux npm-binary test test-linux test-headless-e2e test-packaging lint fmt-check vet-linux ci tools
 
 BIN := $(CURDIR)/bin/mcparcel
 NPM_BIN := $(CURDIR)/packaging/npm/dist/mcparcel
@@ -46,6 +46,12 @@ test:
 # Full go test -race ./... in a Linux container as uid 10001 (needs Docker).
 test-linux:
 	@tests/linux/run.sh
+
+# Headless end-to-end proof in a pod-shaped Linux container (needs Docker).
+# CLAW_WRAP_DIR=<claw-wrap checkout> also builds claw-wrap and runs
+# TestE2EThroughClawWrap; without it that test is skipped.
+test-headless-e2e:
+	@CLAW_WRAP_DIR="$(CLAW_WRAP_DIR)" tests/headless/run.sh
 
 test-packaging: npm-binary
 	@node --test tests/packaging/*.mjs

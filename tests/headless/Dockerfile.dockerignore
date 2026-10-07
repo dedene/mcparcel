@@ -1,0 +1,9 @@
+.git
+.claude
+.superpowers
+.scratch
+.tools
+bin
+dist
+packaging/npm/dist
+**/node_modules

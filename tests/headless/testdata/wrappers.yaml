@@ -1,0 +1,26 @@
+# claw-wrap config for the headless e2e image (tests/headless). The tool runs
+# the real mcparcel with the Front client credentials from /run/openclaw/env,
+# which the test writes (mode 0600, owned by the daemon user). The allowlist
+# only narrows the subcommands; mcparcel's toolPolicy is the gate for Front
+# tools, so `call front.send_message` passes here and mcparcel refuses it.
+credentials:
+  front_client_id:
+    source: env:FRONT_CLIENT_ID
+  front_client_secret:
+    source: env:FRONT_CLIENT_SECRET
+
+tools:
+  mcparcel:
+    binary: /opt/mcparcel/mcparcel
+    timeout: 120s
+    # Pipe mode: stdout stays clean JSON.
+    use_pty: false
+    env:
+      XDG_CONFIG_HOME: /etc
+      FRONT_CLIENT_ID: front_client_id
+      FRONT_CLIENT_SECRET: front_client_secret
+    mode: allowlist
+    allowed_args:
+      - pattern: '^(call|tools|list|runtime status)\b'
+        match: command
+        message: "only call, tools, list and runtime status are allowed"
