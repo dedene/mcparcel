@@ -503,7 +503,14 @@ and prints no token. `auth lock` is not built yet.
   for a token that an earlier 401 minted less than 30 s before is
   `token_rejected` at once, without another token request. A 403 never mints:
   `auth_failed`. The call's `data.result` comes from the 2xx answer to the
-  resend; the 401 body is never captured.
+  resend; the 401 body is never captured. When the new token cannot be had
+  (the token endpoint fails after a 401, or while a pooled session refreshes
+  its token before a request), the request is not sent or resent, so the
+  call fails with the token endpoint's own error (`connection_failed` for
+  5xx, 429, timeouts and network errors) and is not dispatched: never
+  `token_rejected` or `outcome_unknown`. `token_rejected` means a resend with
+  a new token was answered 401; `auth_required` from 1Password (an `op://`
+  client ID or secret under `--no-input`) stays `auth_required`.
   - Reasoning: a 401 is the resource server's authentication answer (RFC 6750
     §3.1, `invalid_token`). It arrives as the HTTP status of the POST that
     carries the JSON-RPC message, before any response body or SSE stream, so

@@ -68,6 +68,23 @@ type ClientCredentials struct {
 	remintedAt time.Time
 }
 
+// UnsentError marks a client_credentials failure that kept an MCP request
+// from being sent or resent: no token could be had, or the server answered
+// 401 and no new token followed. A 401 is given before the request is
+// executed (D7), so the request did not run. Err is an *output.Error or a
+// context error; a 403 is never marked, its outcome is the server's.
+type UnsentError struct{ Err error }
+
+func (e *UnsentError) Error() string { return e.Err.Error() }
+func (e *UnsentError) Unwrap() error { return e.Err }
+
+func unsent(err error) error {
+	if err == nil {
+		return nil
+	}
+	return &UnsentError{Err: err}
+}
+
 // ccMint is one token request; done is closed once tok or err is set.
 type ccMint struct {
 	done    chan struct{}
@@ -122,7 +139,7 @@ func (h *ClientCredentials) Token(ctx context.Context) (*oauth2.Token, error) {
 	h.mu.Lock()
 	if h.closed {
 		h.mu.Unlock()
-		return nil, ccClosed()
+		return nil, unsent(ccClosed())
 	}
 	if h.freshLocked(h.cfg.Now()) {
 		tok := h.token
@@ -131,7 +148,8 @@ func (h *ClientCredentials) Token(ctx context.Context) (*oauth2.Token, error) {
 	}
 	m := h.startMintLocked(false)
 	h.mu.Unlock()
-	return ccWait(ctx, m)
+	tok, err := ccWait(ctx, m)
+	return tok, unsent(err)
 }
 
 // Authorize handles the MCP server's 401 and 403 answers. A 401 for the
@@ -157,7 +175,7 @@ func (h *ClientCredentials) Authorize(ctx context.Context, req *http.Request, re
 	h.mu.Lock()
 	if h.closed {
 		h.mu.Unlock()
-		return ccClosed()
+		return unsent(ccClosed())
 	}
 	m := h.minting
 	if m == nil {
@@ -172,14 +190,14 @@ func (h *ClientCredentials) Authorize(ctx context.Context, req *http.Request, re
 			e := output.NewError("auth_failed", nil)
 			e.Message = "The server rejected a newly issued access token (token_rejected)."
 			e.NextAction = "Check that auth.tokenUrl issues tokens for this MCP server."
-			return e
+			return unsent(e)
 		}
 		h.token = nil
 		m = h.startMintLocked(true)
 	}
 	h.mu.Unlock()
 	_, err := ccWait(ctx, m)
-	return err
+	return unsent(err)
 }
 
 // Close drops the token and aborts a mint in flight; later calls fail.

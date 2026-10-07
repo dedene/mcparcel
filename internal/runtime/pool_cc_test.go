@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -32,6 +34,8 @@ const (
 type ccServer struct {
 	as             *testutil.AuthServer
 	reject, forbid atomic.Bool
+	// tokenDown makes the token endpoint answer 503.
+	tokenDown atomic.Bool
 
 	mu            sync.Mutex
 	events        []string
@@ -87,11 +91,21 @@ func ccRig(t *testing.T, headless bool) (*poolRig, *ccServer) {
 			protected.ServeHTTP(w, req)
 		}
 	}))
+	target, _ := url.Parse(s.as.URL)
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if s.tokenDown.Load() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		proxy.ServeHTTP(w, req)
+	}))
 	t.Cleanup(func() {
 		if r.h != nil {
 			_ = r.h.Shutdown(testCtx(t), true)
 		}
 		hs.Close()
+		ts.Close()
 	})
 	r.opts.LoginEnv["CC_ID"] = ccClientID
 	r.opts.LoginEnv["CC_SECRET"] = ccSecret
@@ -104,7 +118,7 @@ func ccRig(t *testing.T, headless bool) (*poolRig, *ccServer) {
 	r.personal.Connections["a"] = config.Connection{
 		Transport: config.Transport{HTTP: &config.HTTP{URL: config.Literal(hs.URL + "/mcp"), AllowInsecureHTTP: "loopback"}},
 		Auth: &config.OAuth{
-			Type: "oauth", Grant: config.GrantClientCredentials, TokenURL: s.as.URL + "/token",
+			Type: "oauth", Grant: config.GrantClientCredentials, TokenURL: ts.URL + "/token",
 			ClientID:     &config.Value{Secret: &config.SecretRef{Secret: "env:CC_ID"}},
 			ClientSecret: &config.Value{Secret: &config.SecretRef{Secret: "env:CC_SECRET"}},
 		},

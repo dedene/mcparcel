@@ -230,14 +230,6 @@ func (p *pool) Handle(ctx context.Context, id string, req Request, before func()
 			}
 		}()
 	}
-	if clientCredentials(c) {
-		// Registered last, so it runs before the hints above.
-		defer func() {
-			if resp.Error != nil && resp.Error.Code == "auth_required" {
-				resp.Error = ccTokenRejected(resp.Error.Details)
-			}
-		}()
-	}
 	if len(refs) > 0 {
 		authCtx, authCancel := context.WithTimeout(workCtx, 120*time.Second)
 		lease, e = p.opts.Credentials.Resolve(authCtx, c.CredentialProfile, snapshot.Local.CredentialProfiles[c.CredentialProfile], refs, req.NoInput)
@@ -249,6 +241,18 @@ func (p *pool) Handle(ctx context.Context, id string, req Request, before func()
 		if !p.opts.Now().Before(lease.SessionExpiresAt) {
 			return fail(auth.ErrExpired)
 		}
+	}
+	if clientCredentials(c) {
+		// Registered after credential resolution, whose auth_required asks
+		// for input, and last, so it runs before the hints above. From here
+		// on auth_required is the transport's unanswered 401 to a resend the
+		// handler authorized with a new token; a failed mint surfaces as its
+		// own error (auth.UnsentError).
+		defer func() {
+			if resp.Error != nil && resp.Error.Code == "auth_required" {
+				resp.Error = ccTokenRejected(resp.Error.Details)
+			}
+		}()
 	}
 	entry, handler, e := p.session(workCtx, canonical, hash, c, lease, gate, req.Connection, login)
 	if login != nil {

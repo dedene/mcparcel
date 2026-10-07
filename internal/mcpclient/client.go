@@ -128,9 +128,19 @@ func Connect(ctx context.Context, opts ConnectOptions) (Session, error) {
 }
 
 // authFailure finds a sign-in error in err's chain, else the transport's
-// auth_required after a 401; nil when neither applies.
+// auth_required after a 401; nil when neither applies. A client_credentials
+// failure that kept the request from being sent comes first, also when it
+// is a token endpoint outage (connection_failed) or a canceled wait: the
+// transport's 401 flag would otherwise turn it into auth_required.
 func authFailure(err error, status func() error) error {
 	var e *output.Error
+	var unsent *auth.UnsentError
+	if errors.As(err, &unsent) {
+		if errors.As(unsent.Err, &e) && e != nil {
+			return e
+		}
+		return contextError(unsent.Err, false)
+	}
 	if errors.As(err, &e) && e != nil {
 		switch e.Code {
 		case "auth_required", "auth_expired", "auth_failed", "keychain_unavailable", "auth_callback_unavailable", "invalid_arguments":
@@ -245,6 +255,11 @@ func (s *session) Call(ctx context.Context, tool string, arguments, meta map[str
 	out.Declined, out.DeclineReason, s.prompter = s.declined, s.reason, nil
 	s.mu.Unlock()
 	if err != nil {
+		var unsent *auth.UnsentError
+		if errors.As(err, &unsent) {
+			// No token was sent, or the server's 401 came before the tool ran.
+			out.Dispatched = false
+		}
 		if failure := authFailure(err, s.status); failure != nil {
 			return out, failure
 		}
