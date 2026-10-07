@@ -45,8 +45,17 @@ build of MCParcel (`make build-linux` writes `dist/mcparcel-linux-amd64` and
 
 ```dockerfile
 FROM ghcr.io/dedene/claw-wrap:0.6.0
-COPY dist/mcparcel-linux-amd64 /usr/local/bin/mcparcel
+ARG TARGETARCH
+COPY dist/mcparcel-linux-${TARGETARCH} /usr/local/bin/mcparcel
 ```
+
+BuildKit (the default builder since Docker 23, and `docker buildx`) sets
+`TARGETARCH` to `amd64` or `arm64` for each platform it builds, so
+`docker buildx build --platform linux/amd64,linux/arm64` copies the matching
+binary into each image. The legacy builder leaves it empty and the `COPY`
+fails; name the file for your nodes instead. An `amd64` binary on `arm64`
+nodes fails every call with an exec format error, which the agent sees as a
+claw-wrap exec failure rather than an MCParcel error.
 
 Agent: the `claw-wrap` binary plus `ln -s claw-wrap /usr/local/bin/mcparcel`.
 The agent image does not contain MCParcel itself.
@@ -136,6 +145,15 @@ reached through the kubelet's `..data` symlinks, and the mount root may be
 user or by root when they are not group- or other-writable, and anything on a
 read-only mount counts as not writable. A writable mount with a world-writable
 config file is still refused (`unsafe_local_path`).
+
+That read-only exemption is safe only for a ConfigMap or Secret volume, or a
+volume that no other container mounts read-write. A read-only mount says
+nothing about who else can change the files: it describes this one mount.
+Never put the configuration on a volume the agent container can write, such
+as an emptyDir or PVC that an initContainer fills and the agent mounts
+read-write. Whoever can write `personal.json` controls the tool policy and
+where the client secret is sent (`auth.tokenUrl`), and the daemon rereads the
+configuration on every request.
 
 MCParcel never writes this directory in headless mode: no lock file, no
 snapshot, no migration. Commands that would write it fail with

@@ -279,8 +279,11 @@ other; the same holds for each directory on the way to them, where a sticky
 bit also counts as safe. A file or directory on a read-only mount counts as
 not writable, so a Kubernetes ConfigMap (root-owned files behind `..data`
 symlinks, a mount root that may be `0777`) is accepted in every mode (stage
-12). Root can already change anything, and a read-only mount cannot be changed
-from the pod. Runtime and
+12). Root can already change anything, and a ConfigMap or Secret volume cannot
+be changed from the pod. The check sees only this mount, though: a volume that
+another container mounts read-write (an emptyDir or PVC shared with an agent)
+still passes and can still be changed, so keep the configuration off such
+volumes ([headless.md](headless.md#configuration-a-configmap-at-etcmcparcel)). Runtime and
 state files (socket, lock, daemon log) are stricter: no symlink components,
 directories `0700`, files `0600`. Symlinks in the ancestors of the state and
 runtime directories (`XDG_STATE_HOME`, `MCPARCEL_RUNTIME_DIR`, e.g. macOS `/var`)
