@@ -212,6 +212,10 @@ func TestRuntimeConfigMismatchBlackBox(t *testing.T) {
 	r := newRig(t)
 	r.call("fixture.counter")
 	pid := r.status().PID
+	// The caller has a valid config of its own, in another directory: the
+	// offline policy check (D9) passes and only the daemon handshake can
+	// notice that the directories differ.
+	copyConfigDir(t, r.paths.ConfigDir, r.root+"/other-config/mcparcel")
 	r.env = replaceEnv(r.env, "XDG_CONFIG_HOME", r.root+"/other-config")
 	r.check(r.run("call", "fixture.counter", "--json"), 6, "runtime_config_mismatch")
 	if syscall.Kill(pid, 0) != nil {
@@ -220,6 +224,35 @@ func TestRuntimeConfigMismatchBlackBox(t *testing.T) {
 	r.env = replaceEnv(r.env, "XDG_CONFIG_HOME", filepath.Dir(r.paths.ConfigDir))
 	if structured(t, r.call("fixture.counter"))["count"] != float64(2) {
 		t.Fatal("mismatch executed tool")
+	}
+}
+
+// copyConfigDir copies the config files (not the lock file) from src to a new
+// private directory dst, keeping each file's mode.
+func copyConfigDir(t *testing.T, src, dst string) {
+	t.Helper()
+	if err := os.MkdirAll(dst, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if !e.Type().IsRegular() || e.Name() == ".mcparcel.lock" {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := os.ReadFile(filepath.Join(src, e.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = os.WriteFile(filepath.Join(dst, e.Name()), body, info.Mode().Perm()); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 
