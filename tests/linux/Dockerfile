@@ -7,14 +7,17 @@ RUN apt-get update \
 	&& apt-get install -y --no-install-recommends procps \
 	&& rm -rf /var/lib/apt/lists/*
 
-# A fresh named volume at /go/pkg/mod copies this directory's owner, so the
-# module cache is writable by the test user.
+# A fresh named volume at /go/pkg/mod (mcparcel-gomod) or /go/cache
+# (mcparcel-gocache, the build cache) copies this directory's owner, so both
+# caches are writable by the test user. A volume created earlier is owned by
+# root and stays that way: remove it with
+# `docker volume rm mcparcel-gomod mcparcel-gocache` and run again.
 RUN groupadd -g 10001 runner \
 	&& useradd -u 10001 -g 10001 -m -d /home/runner -s /bin/sh runner \
-	&& mkdir -p /go/pkg/mod \
-	&& chown 10001:10001 /go/pkg/mod
+	&& mkdir -p /go/pkg/mod /go/cache \
+	&& chown 10001:10001 /go/pkg/mod /go/cache
 
 # The image's Go is the module's pinned toolchain; never download another.
-ENV HOME=/home/runner GOTOOLCHAIN=local
+ENV HOME=/home/runner GOTOOLCHAIN=local GOCACHE=/go/cache
 USER 10001:10001
 WORKDIR /src
