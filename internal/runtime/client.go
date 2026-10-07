@@ -82,6 +82,10 @@ func requestFrame(kind, id string, v any) Frame {
 	return Frame{ProtocolVersion, kind, id, b}
 }
 func emptyArgs() args.Raw { return args.Raw{Values: map[string]args.Value{}} }
+
+// ensureTimeout bounds Ensure, including its wait for a supervised runtime.
+var ensureTimeout = 15 * time.Second
+
 func (c *Client) Ensure(ctx context.Context) (err error) {
 	caller := ctx
 	defer func() {
@@ -92,7 +96,7 @@ func (c *Client) Ensure(ctx context.Context) (err error) {
 	if ctx.Err() != nil {
 		return callerError(ctx)
 	}
-	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, ensureTimeout)
 	defer cancel()
 	exe := c.Executable
 	if exe == "" {
@@ -119,8 +123,23 @@ func (c *Client) Ensure(ctx context.Context) (err error) {
 		if !errors.Is(e, os.ErrNotExist) && !errors.Is(e, syscall.ECONNREFUSED) && !errors.Is(e, syscall.ENOENT) {
 			return output.NewError("runtime_start_failed", nil)
 		}
+		supervised, e := Supervised(c.Paths)
+		if e != nil {
+			return e
+		}
 		if ctx.Err() != nil {
+			if supervised {
+				return output.NewError("runtime_supervised", nil)
+			}
 			return output.NewError("runtime_start_failed", nil)
+		}
+		if supervised {
+			// The supervisor starts the runtime; wait for it to answer.
+			select {
+			case <-ctx.Done():
+			case <-time.After(25 * time.Millisecond):
+			}
+			continue
 		}
 		if _, e = StartDaemon(ctx, c.Paths, exe, DaemonEnvironment(c.Paths)); e != nil {
 			return e

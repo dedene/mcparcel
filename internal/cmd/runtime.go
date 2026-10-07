@@ -16,6 +16,7 @@ type RuntimeCmd struct {
 	Stop    RuntimeStopCmd    `cmd:"" help:"Stop the runtime and owned server sessions."`
 	Status  RuntimeStatusCmd  `cmd:"" help:"Inspect the runtime without starting it."`
 	Restart RuntimeRestartCmd `cmd:"" help:"Restart the runtime and reset owned server state."`
+	Serve   RuntimeServeCmd   `cmd:"" help:"Run the runtime in the foreground under a supervisor."`
 }
 type (
 	RuntimeStatusCmd struct{}

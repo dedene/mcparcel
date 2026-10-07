@@ -39,20 +39,37 @@ func StartDaemon(ctx context.Context, paths config.Paths, executable string, env
 	return startDaemon(ctx, paths, executable, env, config.OpenPrivateFile)
 }
 
-func startDaemon(ctx context.Context, paths config.Paths, executable string, env []string, open func(*os.File, string, bool) (*os.File, error)) (bool, error) {
+// AcquireDaemonLock takes the daemon lock without blocking and removes a
+// stale socket under it. ok is false, with a nil file, when another runtime
+// holds the lock or answers on the socket. The caller owns the open lock.
+func AcquireDaemonLock(ctx context.Context, paths config.Paths) (*os.File, bool, error) {
+	return acquireDaemonLock(ctx, paths, config.OpenPrivateFile)
+}
+
+func acquireDaemonLock(ctx context.Context, paths config.Paths, open func(*os.File, string, bool) (*os.File, error)) (*os.File, bool, error) {
 	dir, err := config.OpenPrivateDirUnder(paths.StateRoot, paths.RuntimeDir, true)
 	if err != nil {
-		return false, err
+		return nil, false, err
 	}
 	defer dir.Close()
 	lock, err := lockfile.Open(ctx, true, func() (*os.File, error) {
 		return open(dir, "daemon.lock", true)
 	})
 	if err != nil {
-		return false, err
+		return nil, false, err
 	}
-	defer lock.Close() // Do NOT LOCK_UN: the child inherits this description.
-	err = unix.Flock(int(lock.Fd()), unix.LOCK_EX|unix.LOCK_NB)
+	ok, err := claimRuntime(ctx, paths, dir, lock)
+	if err != nil || !ok {
+		_ = lock.Close()
+		return nil, false, err
+	}
+	return lock, true, nil
+}
+
+// claimRuntime locks lock and clears a stale socket in dir. It reports false
+// when another runtime holds the lock or answers on the socket.
+func claimRuntime(ctx context.Context, paths config.Paths, dir, lock *os.File) (bool, error) {
+	err := unix.Flock(int(lock.Fd()), unix.LOCK_EX|unix.LOCK_NB)
 	if errors.Is(err, unix.EWOULDBLOCK) || errors.Is(err, unix.EAGAIN) {
 		return false, nil
 	}
@@ -60,33 +77,40 @@ func startDaemon(ctx context.Context, paths config.Paths, executable string, env
 		return false, config.ErrUnsafePath
 	}
 	st, err := socketStat(dir)
+	if err != nil || st == nil {
+		return err == nil, err
+	}
+	dialCtx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
+	conn, err := (&net.Dialer{}).DialContext(dialCtx, "unix", paths.SocketFile)
+	cancel()
+	if err == nil {
+		_ = conn.Close()
+		return false, nil
+	}
+	if !errors.Is(err, syscall.ECONNREFUSED) && !errors.Is(err, syscall.ENOENT) {
+		return false, output.NewError("runtime_start_failed", nil)
+	}
+	current, err := socketStat(dir)
 	if err != nil {
 		return false, err
 	}
-	if st != nil {
-		dialCtx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
-		conn, e := (&net.Dialer{}).DialContext(dialCtx, "unix", paths.SocketFile)
-		cancel()
-		if e == nil {
-			_ = conn.Close()
-			return false, nil
+	if current != nil {
+		if !sameSocket(st, current) {
+			return false, config.ErrUnsafePath
 		}
-		if !errors.Is(e, syscall.ECONNREFUSED) && !errors.Is(e, syscall.ENOENT) {
-			return false, output.NewError("runtime_start_failed", nil)
-		}
-		current, e := socketStat(dir)
-		if e != nil {
-			return false, e
-		}
-		if current != nil {
-			if !sameSocket(st, current) {
-				return false, config.ErrUnsafePath
-			}
-			if e := unix.Unlinkat(int(dir.Fd()), "daemon.sock", 0); e != nil {
-				return false, config.ErrUnsafePath
-			}
+		if err := unix.Unlinkat(int(dir.Fd()), "daemon.sock", 0); err != nil {
+			return false, config.ErrUnsafePath
 		}
 	}
+	return true, nil
+}
+
+func startDaemon(ctx context.Context, paths config.Paths, executable string, env []string, open func(*os.File, string, bool) (*os.File, error)) (bool, error) {
+	lock, ok, err := acquireDaemonLock(ctx, paths, open)
+	if err != nil || !ok {
+		return false, err
+	}
+	defer lock.Close() // Do NOT LOCK_UN: the child inherits this description.
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
