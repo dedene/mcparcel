@@ -16,9 +16,9 @@ var keepAliveSaveRetries = []time.Duration{time.Second, 2 * time.Second, 4 * tim
 // RunKeepAlive refreshes stored OAuth sessions in the background: once at
 // daemon start, then every five minutes for the ones that are due. It never
 // signs in. Without a health log there is no history to schedule from, so it
-// does nothing.
+// does nothing. Headless mode stores no session, so neither does it.
 func (p *pool) RunKeepAlive(ctx context.Context) error {
-	if p.opts.Health == nil {
+	if p.opts.Health == nil || p.opts.Headless {
 		return nil
 	}
 	return p.keep.Run(ctx)
@@ -27,7 +27,7 @@ func (p *pool) RunKeepAlive(ctx context.Context) error {
 // StayAlive reports whether the daemon should skip its idle exit:
 // runtime.keepAlive is set and an OAuth session may still need refreshing.
 func (p *pool) StayAlive() bool {
-	if p.opts.Health == nil {
+	if p.opts.Health == nil || p.opts.Headless {
 		return false
 	}
 	snapshot, err := p.opts.Load(p.opts.Paths)
@@ -38,7 +38,9 @@ func (p *pool) StayAlive() bool {
 }
 
 // keepAliveTargets lists the runnable OAuth-capable connections whose
-// lifecycle.keepAlive is not "off" and that auth lock did not bar.
+// lifecycle.keepAlive is not "off" and that auth lock did not bar. A
+// client_credentials connection has no stored session to keep alive: its
+// token is minted when a call needs it.
 func (p *pool) keepAliveTargets(context.Context) ([]auth.KeepAliveTarget, error) {
 	snapshot, err := p.opts.Load(p.opts.Paths)
 	if err != nil {
@@ -55,7 +57,7 @@ func (p *pool) keepAliveTargets(context.Context) ([]auth.KeepAliveTarget, error)
 	var targets []auth.KeepAliveTarget
 	for _, id := range ids {
 		canonical, c, err := snapshot.RuntimeConnection(id)
-		if err != nil || !oauthCapable(c) || p.oauthLocked(canonical) {
+		if err != nil || !oauthCapable(c) || clientCredentials(c) || p.oauthLocked(canonical) {
 			continue
 		}
 		if interval, ok := auth.KeepAliveInterval(keepAliveSetting(c)); ok {
@@ -118,7 +120,7 @@ func (p *pool) refreshStored(ctx context.Context, canonical, trigger string) err
 		return auth.ErrKeepAliveDormant
 	}
 	// env: values come from the login environment only, never the Keychain.
-	values, err := envRefValues(ctx, p.opts.LoginEnv, nil, c, nil)
+	values, err := envRefValues(ctx, p.opts.LoginEnv, nil, p.opts.Headless, c, nil)
 	if err != nil {
 		return auth.ErrKeepAliveDormant
 	}

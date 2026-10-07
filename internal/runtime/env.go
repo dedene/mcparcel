@@ -46,7 +46,7 @@ func fallbackEnv() map[string]string {
 		}
 	}
 	if out["PATH"] == "" {
-		out["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
+		out["PATH"] = defaultPath
 	}
 	return out
 }
@@ -56,7 +56,7 @@ func CaptureLoginEnv(ctx context.Context) (map[string]string, error) {
 	fail := func() (map[string]string, error) { return fallback, ErrLoginEnvUnavailable }
 	shell := os.Getenv("SHELL")
 	if shell == "" {
-		shell = "/bin/zsh"
+		shell = defaultShell
 	}
 	if !filepath.IsAbs(shell) {
 		return fail()
@@ -72,7 +72,7 @@ func CaptureLoginEnv(ctx context.Context) (map[string]string, error) {
 	defer cancel()
 	cmd := exec.CommandContext(captureCtx, shell, "-l", "-c", script)
 	cmd.Dir = fallback["HOME"]
-	cmd.Env = []string{"PATH=/usr/bin:/bin:/usr/sbin:/sbin", "SHELL=" + shell}
+	cmd.Env = []string{"PATH=" + defaultPath, "SHELL=" + shell}
 	for _, key := range []string{"HOME", "TMPDIR", "USER", "LOGNAME", "LANG", "LC_ALL"} {
 		if value, ok := fallback[key]; ok {
 			cmd.Env = append(cmd.Env, key+"="+value)
@@ -172,8 +172,10 @@ func forbiddenChildEnv(key string) bool {
 
 // envRefValues adds values for env: references from the captured login
 // environment, falling back to a Keychain generic password named after the
-// variable (temporary bridge). Values never enter errors or logs.
-func envRefValues(ctx context.Context, login map[string]string, keychain func(context.Context, string) (string, error), c config.Connection, resolved map[string]string) (map[string]string, error) {
+// variable (temporary bridge). In headless mode login is the daemon's own
+// environment, the Keychain is never consulted and the error names every
+// missing variable. Values never enter errors or logs.
+func envRefValues(ctx context.Context, login map[string]string, keychain func(context.Context, string) (string, error), headless bool, c config.Connection, resolved map[string]string) (map[string]string, error) {
 	names := config.EnvRefs(c)
 	if len(names) == 0 {
 		return resolved, nil
@@ -182,8 +184,17 @@ func envRefValues(ctx context.Context, login map[string]string, keychain func(co
 	if out == nil {
 		out = map[string]string{}
 	}
+	var missing []string
 	for _, name := range names {
 		value := login[name]
+		if headless {
+			if value == "" {
+				missing = append(missing, name)
+			} else {
+				out["env:"+name] = value
+			}
+			continue
+		}
 		if value == "" && keychain != nil {
 			if v, err := keychain(ctx, name); err == nil {
 				value = v
@@ -196,6 +207,9 @@ func envRefValues(ctx context.Context, login map[string]string, keychain func(co
 			return nil, err
 		}
 		out["env:"+name] = value
+	}
+	if len(missing) > 0 {
+		return nil, headlessMissingEnv(missing)
 	}
 	return out, nil
 }

@@ -19,7 +19,7 @@ type boundedLog struct {
 }
 
 func OpenLog(p config.Paths) (io.WriteCloser, error) {
-	dir, e := config.OpenPrivateDir(p.StateDir, true)
+	dir, e := config.OpenPrivateDirUnder(p.StateRoot, p.StateDir, true)
 	if e != nil {
 		return nil, e
 	}
@@ -58,7 +58,7 @@ func (w *boundedLog) Write(b []byte) (int, error) {
 func (w *boundedLog) Close() error { w.mu.Lock(); defer w.mu.Unlock(); return w.file.Close() }
 func WriteLog(w io.Writer, event string, path *string) error {
 	switch event {
-	case "daemon_started", "login_env_fallback", "connection_opened", "connection_closed", "auth_failed", "daemon_stopped",
+	case "daemon_started", "login_env_fallback", "connection_opened", "connection_closed", "auth_failed", "daemon_stopped", "pid1_no_reaper",
 		"oauth_signed_in", "oauth_refreshed", "oauth_refresh_failed", "oauth_signed_out",
 		"elicitation_forwarded", "elicitation_accepted", "elicitation_declined", "elicitation_canceled",
 		"auth_locked", "auth_rate_limited", "credential_invalidated", "credential_rotated":

@@ -49,7 +49,6 @@ type CLI struct {
 	JSON    bool       `help:"Print one JSON envelope."`
 	NoInput bool       `help:"Do not prompt or initiate credential authorization."`
 	Version VersionCmd `cmd:"" help:"Print the mcparcel version."`
-	Spike   SpikeCmd   `cmd:"" hidden:"" help:"Stage-1 feasibility probes. Removed before release."`
 	Tools   ToolsCmd   `cmd:"" help:"List a connection's tools."`
 	Call    CallCmd    `cmd:"" help:"Call an MCP tool."`
 	Auth    AuthCmd    `cmd:"" help:"Sign in to, inspect or sign out of OAuth connections."`
@@ -58,6 +57,9 @@ type CLI struct {
 
 	// VersionFlag is --version; it prints what the version command prints.
 	VersionFlag versionFlag `name:"version" help:"Print the mcparcel version and exit."`
+
+	// PlatformCommands adds the hidden macOS-only spike command.
+	PlatformCommands `embed:""`
 }
 
 type CommandOptions struct {
@@ -100,7 +102,7 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		kong.BindTo(ctx, (*context.Context)(nil)),
 		kong.Bind(&Streams{In: in, Out: out, Err: errOut}),
 		kong.Bind(opts),
-		kong.Bind(&CatalogDependencies{Fetcher: newCatalogFetcher()}),
+		kong.BindToProvider(catalogDependencies),
 	)
 	if err != nil {
 		fmt.Fprintf(errOut, "mcparcel: %v\n", err)
@@ -225,6 +227,12 @@ func safeFailure(err error) *output.Error {
 	if errors.As(err, &safe) && safe != nil {
 		return safe
 	}
+	if errors.Is(err, config.ErrHeadlessOnly) {
+		return output.HeadlessOnlyError()
+	}
+	if errors.Is(err, config.ErrHeadlessOnePassword) {
+		return output.HeadlessOnePasswordError()
+	}
 	code := "internal_error"
 	switch {
 	case errors.Is(err, catalog.ErrOffline):
@@ -255,6 +263,8 @@ func safeFailure(err error) *output.Error {
 		code = "unsafe_local_path"
 	case errors.Is(err, config.ErrConfigConflict):
 		code = "config_conflict"
+	case errors.Is(err, config.ErrConfigReadOnly):
+		code = "config_read_only"
 	case errors.Is(err, config.ErrConfig), errors.Is(err, config.ErrRevisionExhausted):
 		code = "invalid_config"
 	case errors.Is(err, config.ErrAliasCollision):

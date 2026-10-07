@@ -24,7 +24,7 @@ type headerTransport struct {
 	oauth   bool // 401 and 403 reach the SDK's OAuth handler
 	mu      sync.Mutex
 	failure error
-	// unauthorized records a 401 seen in OAuth mode until the next 2xx.
+	// unauthorized is true while the last POST answer in OAuth mode was 401.
 	unauthorized bool
 	tap          *callTap
 	limit        int // bytes per response; 0 means 16 MiB
@@ -73,18 +73,17 @@ func (t *headerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		} else if t.refused == 0 {
 			t.refused = 1
 		}
+		// Only the last answer counts: a resend the SDK authorized with a
+		// new token and that then got 5xx, 403 or no answer is that failure,
+		// not a rejected token.
+		t.unauthorized = t.oauth && err == nil && resp.StatusCode == 401
 		t.mu.Unlock()
 	}
 	if err != nil {
 		return nil, output.NewError("connection_failed", nil)
 	}
-	if t.oauth && (resp.StatusCode == 401 || resp.StatusCode == 403) {
-		if resp.StatusCode == 401 {
-			t.mu.Lock()
-			t.unauthorized = true
-			t.mu.Unlock()
-		}
-	} else if resp.StatusCode >= 300 && resp.StatusCode < 400 || resp.StatusCode == 401 {
+	// In OAuth mode a 401 or 403 goes on to the SDK's OAuth handler.
+	if resp.StatusCode >= 300 && resp.StatusCode < 400 || resp.StatusCode == 401 && !t.oauth {
 		code := "connection_failed"
 		if resp.StatusCode == 401 {
 			code = "auth_required"
@@ -95,10 +94,6 @@ func (t *headerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		t.mu.Unlock()
 		_ = resp.Body.Close()
 		return nil, failure
-	} else if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		t.mu.Lock()
-		t.unauthorized = false
-		t.mu.Unlock()
 	}
 	resp.Body = &boundedResponseBody{ReadCloser: resp.Body, remaining: int64(limit), transport: t}
 	if tapped {

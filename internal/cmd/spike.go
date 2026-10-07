@@ -1,3 +1,5 @@
+//go:build darwin
+
 package cmd
 
 import (
@@ -8,6 +10,11 @@ import (
 
 	"github.com/dedene/mcparcel/internal/spike"
 )
+
+// PlatformCommands holds the commands that exist only on macOS; CLI embeds it.
+type PlatformCommands struct {
+	Spike SpikeCmd `cmd:"" hidden:"" help:"Stage-1 feasibility probes. Removed before release."`
+}
 
 // SpikeCmd groups the stage-1 feasibility probes. It is hidden and is deleted
 // when stage 2 starts.

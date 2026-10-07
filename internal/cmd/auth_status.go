@@ -45,7 +45,7 @@ type authStatusFailure struct {
 // runtime and never prints a token, a redirect, a client identifier, an
 // account or a reference.
 func (c *AuthStatusCmd) Run(ctx context.Context, s *Streams, opts *CommandOptions) error {
-	paths, err := commandPaths()
+	paths, err := runtimePaths()
 	if err != nil {
 		return err
 	}
@@ -66,11 +66,21 @@ func (c *AuthStatusCmd) Run(ctx context.Context, s *Streams, opts *CommandOption
 			return err
 		}
 		ids = []string{id}
+		if clientCredentialsConn(effective.Connections[id].Connection) {
+			return nothingToSignIn(c.MCP)
+		}
 		if row := effective.Connections[id].Connection; row != nil && len(config.SecretRefs(*row)) > 0 {
 			profile = row.CredentialProfile
 		}
 	}
-	keyring := newKeyring(paths)
+	if paths.Headless() {
+		// Headless mode stores no sign-in and reads no Keychain (Ruling 3).
+		if opts.JSON {
+			return writeSuccess(s, opts, authStatusData{Items: []authStatusItem{}})
+		}
+		return writeSuccess(s, opts, "No sign-ins in headless mode.\n")
+	}
+	keyring := keyringFactory(paths)
 	// An unreadable health file means no history; status still answers.
 	health, _ := auth.ReadHealth(paths.StateDir)
 	// An unreadable lock file fails closed, as in the daemon.
@@ -87,7 +97,8 @@ func (c *AuthStatusCmd) Run(ctx context.Context, s *Streams, opts *CommandOption
 			}
 			continue
 		}
-		if c.MCP == "" && !row.Enabled {
+		if c.MCP == "" && !row.Enabled || clientCredentialsConn(row.Connection) {
+			// A client_credentials token lives in daemon memory only.
 			continue
 		}
 		state, err := auth.LoadOAuth(ctx, keyring, id)

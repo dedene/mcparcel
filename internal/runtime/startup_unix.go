@@ -1,3 +1,5 @@
+//go:build darwin || linux
+
 package runtime
 
 import (
@@ -37,20 +39,37 @@ func StartDaemon(ctx context.Context, paths config.Paths, executable string, env
 	return startDaemon(ctx, paths, executable, env, config.OpenPrivateFile)
 }
 
-func startDaemon(ctx context.Context, paths config.Paths, executable string, env []string, open func(*os.File, string, bool) (*os.File, error)) (bool, error) {
-	dir, err := config.OpenPrivateDir(paths.RuntimeDir, true)
+// AcquireDaemonLock takes the daemon lock without blocking and removes a
+// stale socket under it. ok is false, with a nil file, when another runtime
+// holds the lock or answers on the socket. The caller owns the open lock.
+func AcquireDaemonLock(ctx context.Context, paths config.Paths) (*os.File, bool, error) {
+	return acquireDaemonLock(ctx, paths, config.OpenPrivateFile)
+}
+
+func acquireDaemonLock(ctx context.Context, paths config.Paths, open func(*os.File, string, bool) (*os.File, error)) (*os.File, bool, error) {
+	dir, err := config.OpenPrivateDirUnder(paths.StateRoot, paths.RuntimeDir, true)
 	if err != nil {
-		return false, err
+		return nil, false, err
 	}
 	defer dir.Close()
 	lock, err := lockfile.Open(ctx, true, func() (*os.File, error) {
 		return open(dir, "daemon.lock", true)
 	})
 	if err != nil {
-		return false, err
+		return nil, false, err
 	}
-	defer lock.Close() // Do NOT LOCK_UN: the child inherits this description.
-	err = unix.Flock(int(lock.Fd()), unix.LOCK_EX|unix.LOCK_NB)
+	ok, err := claimRuntime(ctx, paths, dir, lock)
+	if err != nil || !ok {
+		_ = lock.Close()
+		return nil, false, err
+	}
+	return lock, true, nil
+}
+
+// claimRuntime locks lock and clears a stale socket in dir. It reports false
+// when another runtime holds the lock or answers on the socket.
+func claimRuntime(ctx context.Context, paths config.Paths, dir, lock *os.File) (bool, error) {
+	err := unix.Flock(int(lock.Fd()), unix.LOCK_EX|unix.LOCK_NB)
 	if errors.Is(err, unix.EWOULDBLOCK) || errors.Is(err, unix.EAGAIN) {
 		return false, nil
 	}
@@ -58,33 +77,40 @@ func startDaemon(ctx context.Context, paths config.Paths, executable string, env
 		return false, config.ErrUnsafePath
 	}
 	st, err := socketStat(dir)
+	if err != nil || st == nil {
+		return err == nil, err
+	}
+	dialCtx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
+	conn, err := (&net.Dialer{}).DialContext(dialCtx, "unix", paths.SocketFile)
+	cancel()
+	if err == nil {
+		_ = conn.Close()
+		return false, nil
+	}
+	if !errors.Is(err, syscall.ECONNREFUSED) && !errors.Is(err, syscall.ENOENT) {
+		return false, output.NewError("runtime_start_failed", nil)
+	}
+	current, err := socketStat(dir)
 	if err != nil {
 		return false, err
 	}
-	if st != nil {
-		dialCtx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
-		conn, e := (&net.Dialer{}).DialContext(dialCtx, "unix", paths.SocketFile)
-		cancel()
-		if e == nil {
-			_ = conn.Close()
-			return false, nil
+	if current != nil {
+		if !sameSocket(st, current) {
+			return false, config.ErrUnsafePath
 		}
-		if !errors.Is(e, syscall.ECONNREFUSED) && !errors.Is(e, syscall.ENOENT) {
-			return false, output.NewError("runtime_start_failed", nil)
-		}
-		current, e := socketStat(dir)
-		if e != nil {
-			return false, e
-		}
-		if current != nil {
-			if !sameSocket(st, current) {
-				return false, config.ErrUnsafePath
-			}
-			if e := unix.Unlinkat(int(dir.Fd()), "daemon.sock", 0); e != nil {
-				return false, config.ErrUnsafePath
-			}
+		if err := unix.Unlinkat(int(dir.Fd()), "daemon.sock", 0); err != nil {
+			return false, config.ErrUnsafePath
 		}
 	}
+	return true, nil
+}
+
+func startDaemon(ctx context.Context, paths config.Paths, executable string, env []string, open func(*os.File, string, bool) (*os.File, error)) (bool, error) {
+	lock, ok, err := acquireDaemonLock(ctx, paths, open)
+	if err != nil || !ok {
+		return false, err
+	}
+	defer lock.Close() // Do NOT LOCK_UN: the child inherits this description.
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
@@ -115,7 +141,7 @@ func AdoptLock(paths config.Paths, fd uintptr) (*os.File, error) {
 		return nil, config.ErrUnsafePath
 	}
 	fail := func() (*os.File, error) { _ = inherited.Close(); return nil, config.ErrUnsafePath }
-	dir, err := config.OpenPrivateDir(paths.RuntimeDir, false)
+	dir, err := config.OpenPrivateDirUnder(paths.StateRoot, paths.RuntimeDir, false)
 	if err != nil {
 		return fail()
 	}
@@ -145,18 +171,26 @@ func safeSocketStat(st *unix.Stat_t) error {
 	return nil
 }
 
+// DaemonEnvironment is the environment the CLI starts a daemon with. A
+// headless daemon gets the D11 names only (base names and what enabled
+// connections reference) and derives its state directories from
+// config.json's state root, exactly as the CLI did.
 func DaemonEnvironment(p config.Paths) []string {
-	env := map[string]string{"HOME": p.Home, "XDG_CONFIG_HOME": filepath.Dir(p.ConfigDir), "XDG_DATA_HOME": filepath.Dir(p.DataDir), "XDG_CACHE_HOME": filepath.Dir(p.CacheDir), "XDG_STATE_HOME": filepath.Dir(p.StateDir), "MCPARCEL_RUNTIME_DIR": p.RuntimeDir}
+	if p.Headless() {
+		return headlessDaemonEnvironment(p, os.Environ(), forwardedNamesFor(p))
+	}
+	env := map[string]string{"HOME": p.Home, "XDG_CONFIG_HOME": filepath.Dir(p.ConfigDir)}
+	env["XDG_DATA_HOME"], env["XDG_CACHE_HOME"], env["XDG_STATE_HOME"], env["MCPARCEL_RUNTIME_DIR"] = filepath.Dir(p.DataDir), filepath.Dir(p.CacheDir), filepath.Dir(p.StateDir), p.RuntimeDir
 	for _, k := range []string{"PATH", "SHELL", "TMPDIR", "USER", "LOGNAME", "LANG", "LC_ALL", "__CF_USER_TEXT_ENCODING"} {
 		if v, ok := os.LookupEnv(k); ok {
 			env[k] = v
 		}
 	}
 	if env["PATH"] == "" {
-		env["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
+		env["PATH"] = defaultPath
 	}
 	if env["SHELL"] == "" {
-		env["SHELL"] = "/bin/zsh"
+		env["SHELL"] = defaultShell
 	}
 	result := make([]string, 0, len(env))
 	for k, v := range env {
@@ -166,7 +200,7 @@ func DaemonEnvironment(p config.Paths) []string {
 }
 
 func dialSocket(ctx context.Context, p config.Paths) (*net.UnixConn, error) {
-	dir, e := config.OpenPrivateDir(p.RuntimeDir, false)
+	dir, e := config.OpenPrivateDirUnder(p.StateRoot, p.RuntimeDir, false)
 	if e != nil {
 		return nil, e
 	}
@@ -191,7 +225,7 @@ func dialSocket(ctx context.Context, p config.Paths) (*net.UnixConn, error) {
 }
 
 func lockHeld(p config.Paths) (bool, error) {
-	dir, e := config.OpenPrivateDir(p.RuntimeDir, false)
+	dir, e := config.OpenPrivateDirUnder(p.StateRoot, p.RuntimeDir, false)
 	if errors.Is(e, os.ErrNotExist) {
 		return false, nil
 	}

@@ -28,7 +28,7 @@ The 1Password desktop build must have CGO enabled where the SDK requires it.
 
 A single native binary has a private daemon entrypoint. Metadata commands do not
 start it. First runtime call starts it under a lock; other callers join the same
-startup. Use a Unix-domain socket on macOS, framed JSON requests with protocol
+startup. Use a Unix-domain socket (macOS and Linux), framed JSON requests with protocol
 version/request ID, and cancellation tied to CLI disconnect. Validate socket
 ownership and peer UID. Same-OS-user software remains inside the trust boundary.
 
@@ -85,7 +85,8 @@ make a completed disable effective for every subsequent dispatch.
 
 Safe child base environment: PATH, HOME, TMPDIR, LANG, LC_ALL and system essentials
 needed on the supported platform. The daemon is started by whichever harness makes
-the first runtime call, so it must not take these from that caller: at start it
+the first runtime call, so it must not take these from that caller. In desktop
+mode (headless mode: see "Headless mode" below), at start it
 runs the user's login shell once (`$SHELL -l -c`, 10s limit, no rc output parsed
 beyond a delimited `env` dump) and keeps that environment as the source for PATH
 and for every `inheritEnv` name. If the capture fails, it falls back to the
@@ -116,7 +117,7 @@ container survives, its definition must name the container (`--name` or
 enumerate/stop unrelated containers.
 
 The daemon writes a size-bounded, redacted log to
-`~/.local/state/mcparcel/daemon.log` (startup, captured PATH, connection opens and
+`~/.local/state/mcparcel/daemon.log` (headless: `<stateRoot>/state/daemon.log`) (startup, captured PATH, connection opens and
 closes, auth session changes, elicitations (`elicitation_forwarded`, then
 `elicitation_accepted`, `elicitation_declined` or `elicitation_canceled`; an
 automatic decline logs `elicitation_declined` alone; event names only), errors;
@@ -542,6 +543,56 @@ and prints no token. `auth lock` as built: see "1Password sessions as built
   verifier, URL, connection name or provider text.
 - Deferred: implicit login, `tokenEndpointAuthMethod` enforcement, provider
   revocation.
+- `client_credentials` (stage 12): `auth.grant: "client_credentials"` with
+  `tokenUrl`, `clientId`, `clientSecret`, `scopes?` and
+  `tokenEndpointAuthMethod?` (`client_secret_post` by default, or
+  `client_secret_basic`). The token URL is used as is: no discovery, no
+  registration, no Keychain item, no health record, no keep-alive. Each pooled
+  session owns one in-memory token; a config change, a retired session or
+  `runtime restart` drops it. Concurrent requests share one token request. A
+  token is minted again when `max(lifetime/5, 10 s)`, capped at `lifetime/2`,
+  remains (Front: 180 s before the 900 s expiry); one without `expires_in` is
+  used until a 401. `auth login` and `auth logout` refuse such a connection
+  offline (`invalid_arguments`, "there is nothing to sign in to") and
+  `auth status` leaves it out. Token-endpoint failures: `invalid_client` and
+  the other RFC 6749 codes give `auth_failed` naming the code; 5xx, 429,
+  timeouts and network errors give `connection_failed`; no failure is cached
+  past the request, and no body, secret or token appears in any output. Log
+  events: `oauth_token_minted` (`trigger` `first`, `expiry` or `401`; `ttl` in
+  seconds, 0 when unknown), `oauth_token_mint_failed` (`code`, `status`: the
+  token endpoint's HTTP status, 0 without an answer) and
+  `oauth_token_rejected` (`code` `token_rejected` or `http_403`, `status`).
+  Never the connection URL, client ID, secret or token.
+- 401 on a `client_credentials` connection (decision D7), `tools/call`
+  included: the handler drops the rejected token, mints a new one once and the
+  SDK resends the request once. If the resend is answered 401 too, the call
+  fails `auth_failed` (`token_rejected`) and the session is retired; a 401
+  for a token that an earlier 401 minted less than 30 s before is
+  `token_rejected` at once, without another token request. A 403 never mints:
+  `auth_failed`. The call's `data.result` comes from the 2xx answer to the
+  resend; the 401 body is never captured. When the new token cannot be had
+  (the token endpoint fails after a 401, or while a pooled session refreshes
+  its token before a request), the request is not sent or resent, so the
+  call fails with the token endpoint's own error (`connection_failed` for
+  5xx, 429, timeouts and network errors) and is not dispatched: never
+  `token_rejected` or `outcome_unknown`. `token_rejected` means a resend with
+  a new token was answered 401; `auth_required` from 1Password (an `op://`
+  client ID or secret under `--no-input`) stays `auth_required`.
+  - Reasoning: a 401 is the resource server's authentication answer (RFC 6750
+    §3.1, `invalid_token`). It arrives as the HTTP status of the POST that
+    carries the JSON-RPC message, before any response body or SSE stream, so
+    the server refused the request before a handler ran it: resending it
+    cannot run the tool twice. The client holds no refresh token and needs no
+    user, so a new token costs one request and no prompt.
+  - Scope: only `client_credentials` connections. It is an exception to
+    "never resend `tools/call`"; `authorization_code` connections keep
+    `auth_expired` with "Run the call again.", and no other status or error
+    is resent.
+  - Residual assumption: the server authenticates before it executes. A
+    server that runs the tool and then answers 401 would run it twice. Bearer
+    token checks in HTTP middleware answer before dispatch; MCParcel cannot
+    verify that for a given server, so the deployment guide names this
+    assumption.
 
 ## OAuth session health
 
@@ -713,6 +764,100 @@ when it cannot prompt on the terminal; an unreadable config means no dialog.
 The loopback callback serves one self-contained page with no external requests:
 signed in, failed, expired, and state mismatch. Provider-supplied text is
 HTML-escaped. The page carries MCParcel's own identity; catalogs cannot restyle it.
+
+## Headless mode (stage 12)
+
+Headless mode runs the runtime without a desktop, for a server or a
+Kubernetes sidecar. The deployment guide is [headless.md](headless.md).
+
+- Switch: `config.json` → `runtime.mode: "headless"` (default `"desktop"`).
+  Never an environment variable or auto-detection. macOS supports both modes;
+  Linux supports headless only: in desktop mode `tools`, `call`, `auth`,
+  `runtime` and the daemon fail `runtime_unsupported` ("On Linux, MCParcel
+  runs in headless mode only."), while offline commands keep working. The CLI
+  and the daemon read the mode from the same `config.json`, so they agree on
+  their paths.
+- State root: `runtime.stateRoot` (a clean absolute path, required in
+  headless mode, rejected otherwise) replaces the state, data and cache
+  directories and the runtime directory with `<root>/state`, `/data`,
+  `/cache` and `/run`; the configuration directory is unchanged. The root
+  itself may be owned by root and world-writable without the sticky bit (a
+  Kubernetes `emptyDir`, `0777` or `2777`); its ancestors and everything below
+  it get the usual checks, and directories MCParcel creates below it are
+  `0700` even inside a setgid root. The socket path must stay under 100 bytes.
+  Accepted risk: another container that mounts the same volume can replace
+  `<root>/run`.
+- Read-only configuration: headless mode never writes the configuration
+  directory. Every store update fails `config_read_only` (exit 2) before it
+  takes the config lock, and `add` and `sync` (also the preview) fail before
+  any request. Reads take no lock when `.mcparcel.lock` is absent, so the
+  daemon's per-request reload works on a read-only ConfigMap; a changed
+  ConfigMap applies on the next request. Config file ownership is in
+  [catalog.md](catalog.md#local-state).
+- Environment source: no login shell runs. The daemon's own environment is
+  the source for `env:` references and `inheritEnv`, restricted to the names
+  enabled connections reference plus `PATH`, `HOME`, `TMPDIR`, `LANG`,
+  `LC_ALL` and `USER` (`XDG_*` and `MCPARCEL_*` names are never forwarded). A
+  CLI that starts a headless daemon passes it exactly those variables from its
+  own environment, with `HOME` and `XDG_CONFIG_HOME` pointing at the
+  configuration. There is no Keychain fallback: a missing variable is
+  `config_required` with `details.variables` (message "Environment variable
+  NAME is not set.", next action to set it and run `mcparcel runtime
+  restart`); the error is not cached. `runtime restart` from a caller with new
+  values rotates a secret. `runtime status` shows `Environment: daemon
+  environment`.
+- No desktop credential source: the daemon constructs no 1Password resolver,
+  no Keychain lookup and no OAuth keyring. An `op://` reference fails
+  `config_required` ("1Password references need the desktop app and are not
+  available in headless mode."). A connection that needs browser sign-in
+  fails `auth_required` ("This server needs sign-in, which headless mode cannot
+  do."), or, when its credentials are `env:` references, names those
+  variables; nothing is written to a Keychain. `auth login` is refused before
+  the runtime starts, `auth status` lists nothing, keep-alive and stay-alive
+  are off. Only `grant: "client_credentials"` gets OAuth tokens (see "OAuth as
+  built", including the 401 resend of decision D7).
+- No prompts: headless behaves as if `--no-input` were given, with a terminal
+  attached and with `runtime.approvalDialog` set: no terminal prompt, no
+  dialog, no browser; a server's approval request is declined at once with
+  the `elicitation_declined` notice.
+- Policy offline: `call` checks the connection and tool policy before it
+  contacts the runtime (in every mode), so a denied tool starts no daemon,
+  opens no connection and requests no token. The daemon still checks at
+  admission and before dispatch.
+- Linux: static builds (`make build-linux`, `CGO_ENABLED=0`, amd64 and
+  arm64). CLI and daemon check the socket peer's UID with `SO_PEERCRED`
+  (macOS: `LOCAL_PEERCRED`).
+
+Lifecycles:
+
+- Auto-start, as on macOS: the first runtime command starts the daemon in a
+  new session (`setsid`), with stdin, stdout and stderr on `/dev/null` and only
+  the daemon lock as an extra descriptor. A wrapper that kills the CLI's
+  process group after the call (claw-wrap) does not reach it, and the CLI's
+  pipes close when the CLI exits. It exits after 24 idle hours. Once the CLI
+  exits it is an orphan, so the container needs a reaping PID 1 (`tini`,
+  `docker run --init` or a shared PID namespace); when the daemon finds itself
+  PID 1 it logs `pid1_no_reaper`, and it never reaps for PID 1 itself, which
+  would race `os/exec`.
+- `mcparcel runtime serve`: the runtime in the foreground under a supervisor.
+  It takes the daemon lock itself (`runtime_busy`, exit 6, when another
+  runtime holds it), logs to the daemon log and stderr, has no idle exit, and
+  applies the same environment, credential, config, peer and version rules as
+  an auto-started daemon. SIGTERM or SIGINT is a forced shutdown: dispatched
+  calls report `outcome_unknown`, sessions close under the usual deadline,
+  the socket is removed and serve exits 0. A SIGTERM to an auto-started
+  daemon does the same. Serve writes `<runtime dir>/supervised`, which stays
+  after it exits: a CLI then waits up to 15 seconds for the supervised runtime
+  instead of starting its own, and fails `runtime_supervised` (exit 6) if it
+  does not answer; `runtime restart` (with or without `--force`) is refused
+  with `runtime_supervised`; `runtime stop` still works. Delete the file to
+  return to auto-start. On Linux, serve also requires headless mode.
+  The file exists only once serve has taken the lock, and a fresh state root
+  (an emptyDir on every pod start) has none, so a CLI that runs first would
+  still auto-start a daemon. `runtime.supervised: true` in `config.json`
+  (headless only) declares the supervised lifecycle in the configuration
+  itself: CLIs behave as if the file were present, and the auto-start daemon
+  entry point refuses to run with `runtime_supervised`.
 
 ## Failure contract
 

@@ -17,12 +17,14 @@ import (
 )
 
 type PoolOptions struct {
-	Paths           config.Paths
-	LoginEnv        map[string]string
-	Version         string
-	Credentials     auth.Resolver
-	Log             func(event string)
-	SignInFailure   func(stage, code string) // logs a failed sign-in; see WriteSignInFailure
+	Paths         config.Paths
+	LoginEnv      map[string]string
+	Version       string
+	Credentials   auth.Resolver
+	Log           func(event string)
+	SignInFailure func(stage, code string) // logs a failed sign-in; see WriteSignInFailure
+	// TokenLog logs client_credentials token events; see WriteTokenEvent.
+	TokenLog        func(event string, fields map[string]any)
 	Keychain        func(ctx context.Context, name string) (string, error)
 	Keyring         auth.Keyring // OAuth sessions; nil fails marked connections with keychain_unavailable
 	Health          *auth.Health // OAuth session history; nil records nothing
@@ -34,6 +36,10 @@ type PoolOptions struct {
 	// ExpiryCheck is how often a protected session's deadline is checked
 	// without a call (default one minute), so a wake from sleep is noticed.
 	ExpiryCheck time.Duration
+	// Headless runs without Keychain, keyring or 1Password: NewPool drops
+	// Keychain and Keyring and refuses every 1Password reference. LoginEnv
+	// is then the daemon's own environment (D11).
+	Headless bool
 }
 type pool struct {
 	opts     PoolOptions
@@ -88,6 +94,9 @@ func NewPool(opts PoolOptions) Handler {
 	}
 	if opts.ExpiryCheck <= 0 {
 		opts.ExpiryCheck = time.Minute
+	}
+	if opts.Headless {
+		opts.Keychain, opts.Keyring, opts.Credentials = nil, nil, headlessResolver{}
 	}
 	login := make(map[string]string, len(opts.LoginEnv))
 	for k, v := range opts.LoginEnv {
@@ -212,13 +221,29 @@ func (p *pool) Handle(ctx context.Context, id string, req Request, before func()
 	refs := config.SecretRefs(c)
 	if len(refs) > 0 || oauthCapable(c) {
 		if e = p.admitProtected(w); e != nil {
-			if len(refs) == 0 {
+			if len(refs) == 0 && !clientCredentials(c) {
 				return fail(auth.NotSignedIn(req.Connection))
 			}
 			return fail(e)
 		}
 	}
-	if oauthCapable(c) && len(refs) == 0 {
+	if p.opts.Headless {
+		// No sign-in, Keychain item or login shell exists to point at. An
+		// authorization-code connection needs a sign-in whatever its
+		// variables hold.
+		names := config.EnvRefs(c)
+		if c.Auth != nil {
+			// An OAuth connection's 401 is about its token, not about the
+			// variables: client_credentials maps it below.
+			names = nil
+		}
+		defer func() {
+			if resp.Error != nil && resp.Error.Code == "auth_required" {
+				e := headlessSignIn(names)
+				resp.Error.Message, resp.Error.NextAction = e.Message, e.NextAction
+			}
+		}()
+	} else if oauthCapable(c) && !clientCredentials(c) && len(refs) == 0 {
 		defer func() {
 			if resp.Error != nil && resp.Error.Code == "auth_required" {
 				resp.Error.NextAction = "mcparcel auth login " + req.Connection
@@ -241,6 +266,18 @@ func (p *pool) Handle(ctx context.Context, id string, req Request, before func()
 		if lease, e = p.resolveLease(workCtx, canonical, c, snapshot.Local.CredentialProfiles[c.CredentialProfile], refs, req.NoInput); e != nil {
 			return fail(e)
 		}
+	}
+	if clientCredentials(c) {
+		// Registered after credential resolution, whose auth_required asks
+		// for input, and last, so it runs before the hints above. From here
+		// on auth_required is the transport's unanswered 401 to a resend the
+		// handler authorized with a new token; a failed mint surfaces as its
+		// own error (auth.UnsentError).
+		defer func() {
+			if resp.Error != nil && resp.Error.Code == "auth_required" {
+				resp.Error = ccTokenRejected(resp.Error.Details)
+			}
+		}()
 	}
 	entry, handler, e := p.session(workCtx, canonical, hash, c, lease, gate, req.Connection, login, w.epoch)
 	if login != nil {

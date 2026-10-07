@@ -119,10 +119,53 @@
         "approvalDialog": {
           "type": "boolean",
           "default": false
+        },
+        "mode": {
+          "enum": [
+            "desktop",
+            "headless"
+          ],
+          "default": "desktop"
+        },
+        "stateRoot": {
+          "type": "string",
+          "pattern": "^/[^\\x00]+$"
+        },
+        "supervised": {
+          "type": "boolean",
+          "default": false,
+          "$comment": "Headless only: mcparcel runtime serve owns the runtime and no CLI auto-starts one."
         }
       },
       "required": [],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "if": {
+        "properties": {
+          "mode": {
+            "const": "headless"
+          }
+        },
+        "required": [
+          "mode"
+        ]
+      },
+      "then": {
+        "required": [
+          "stateRoot"
+        ]
+      },
+      "else": {
+        "not": {
+          "required": [
+            "stateRoot"
+          ]
+        },
+        "properties": {
+          "supervised": {
+            "const": false
+          }
+        }
+      }
     },
     "Source": {
       "type": "object",

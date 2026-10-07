@@ -26,7 +26,7 @@ func TestEnvRefValues(t *testing.T) {
 		t.Error("keychain consulted although the environment has the value")
 		return "", errors.New("unexpected")
 	}
-	got, e := envRefValues(t.Context(), map[string]string{"EXA_API_KEY": "value-canary"}, keychain, c, in)
+	got, e := envRefValues(t.Context(), map[string]string{"EXA_API_KEY": "value-canary"}, keychain, false, c, in)
 	if e != nil || got["env:EXA_API_KEY"] != "value-canary" || got["op://v/i/f"] != "lease" || !maps.Equal(in, before) {
 		t.Fatal(got, e, in)
 	}
@@ -44,7 +44,7 @@ func TestEnvRefValues(t *testing.T) {
 	}
 	for i, lookup := range missing {
 		for _, login := range []map[string]string{{}, {"EXA_API_KEY": ""}} {
-			_, e = envRefValues(t.Context(), login, lookup, c, in)
+			_, e = envRefValues(t.Context(), login, lookup, false, c, in)
 			var out *output.Error
 			if !errors.As(e, &out) || out.Code != "config_required" || !strings.Contains(out.Message, "EXA_API_KEY") || !strings.Contains(out.Message, "Keychain") || !strings.Contains(out.NextAction, `security add-generic-password -a "$USER" -s EXA_API_KEY -w`) || !strings.Contains(out.NextAction, "mcparcel runtime restart") || !strings.Contains(out.NextAction, "Environment: caller fallback") {
 				t.Fatal(i, e)
@@ -66,7 +66,7 @@ func TestEnvRefValuesKeychainFallback(t *testing.T) {
 	}
 	for _, login := range []map[string]string{{}, {"EXA_API_KEY": ""}} {
 		asked = nil
-		got, e := envRefValues(t.Context(), login, keychain, c, nil)
+		got, e := envRefValues(t.Context(), login, keychain, false, c, nil)
 		if e != nil || got["env:EXA_API_KEY"] != "keychain-canary" || len(asked) != 1 || asked[0] != "EXA_API_KEY" {
 			t.Fatal(got, e, asked)
 		}

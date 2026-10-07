@@ -22,12 +22,16 @@ import (
 	"github.com/dedene/mcparcel/internal/testutil"
 )
 
+// desktopSupported is true in fixture builds so the black-box desktop
+// scenarios also run on Linux; production Linux builds run headless only.
+func desktopSupported() bool { return true }
+
 func newCredentials(paths config.Paths, _ string) auth.Resolver {
 	var mu sync.Mutex
 	record := func(event string) error {
 		mu.Lock()
 		defer mu.Unlock()
-		dir, err := config.OpenPrivateDir(paths.StateDir, true)
+		dir, err := config.OpenPrivateDirUnder(paths.StateRoot, paths.StateDir, true)
 		if err != nil {
 			return auth.ErrProvider
 		}
@@ -145,7 +149,7 @@ func (k *fixtureKeyring) open(service, account string, create bool) (*os.File, s
 	if _, err := os.Stat(filepath.Join(k.paths.StateDir, "fixture-keyring-unavailable")); err == nil {
 		return nil, "", errFixtureKeyring
 	}
-	dir, err := config.OpenPrivateDir(k.paths.StateDir, create)
+	dir, err := config.OpenPrivateDirUnder(k.paths.StateRoot, k.paths.StateDir, create)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, "", auth.ErrNoSession
 	}
@@ -219,6 +223,9 @@ func (k *fixtureKeyring) Delete(service, account string) error {
 	return nil
 }
 
+// browserOpens is true: the fixture browser below follows the URL.
+const browserOpens = true
+
 // newBrowser never opens a browser: it follows the sign-in URL to the
 // daemon's callback and keeps the page in StateDir/fixture-browser-page.
 // StateDir/fixture-browser-off turns it off.
@@ -240,7 +247,7 @@ func newBrowser(paths config.Paths) func(context.Context, string) error {
 		if err != nil {
 			return err
 		}
-		dir, err := config.OpenPrivateDir(paths.StateDir, true)
+		dir, err := config.OpenPrivateDirUnder(paths.StateRoot, paths.StateDir, true)
 		if err != nil {
 			return err
 		}

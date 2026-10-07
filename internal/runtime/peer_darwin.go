@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"net"
-	"os"
 
 	"golang.org/x/sys/unix"
 
@@ -27,11 +26,4 @@ func CheckPeer(conn *net.UnixConn) error {
 		return config.ErrUnsafePath
 	}
 	return check
-}
-
-func peerUID(uid uint32) error {
-	if uid != uint32(os.Getuid()) {
-		return config.ErrUnsafePath
-	}
-	return nil
 }

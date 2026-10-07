@@ -6,11 +6,9 @@ import (
 	"context"
 	"errors"
 	"io"
-	"net/url"
 	"os"
-	"os/exec"
+	"runtime"
 	"strings"
-	"time"
 
 	"golang.org/x/sys/unix"
 
@@ -18,6 +16,10 @@ import (
 	"github.com/dedene/mcparcel/internal/config"
 	runtimeclient "github.com/dedene/mcparcel/internal/runtime"
 )
+
+// desktopSupported reports whether this platform runs desktop mode; Linux runs
+// headless mode only.
+func desktopSupported() bool { return config.DesktopSupported(runtime.GOOS) }
 
 func newCredentials(_ config.Paths, version string) auth.Resolver {
 	return auth.NewResolver(auth.ResolverOptions{Provider: auth.NewOnePasswordProvider(version)})
@@ -28,24 +30,6 @@ func newKeychain(config.Paths) func(context.Context, string) (string, error) {
 }
 
 func newKeyring(config.Paths) auth.Keyring { return auth.SystemKeyring{} }
-
-// newBrowser opens an https URL, or an http URL on a loopback host, in the
-// default browser. The URL is one argv entry; no shell runs.
-func newBrowser(config.Paths) func(context.Context, string) error {
-	return func(ctx context.Context, raw string) error {
-		u, err := url.Parse(raw)
-		if err != nil || u.Host == "" || u.Scheme != "https" && (u.Scheme != "http" || !loopbackHost(u.Hostname())) {
-			return errors.New("unsupported sign-in URL")
-		}
-		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		defer cancel()
-		return exec.CommandContext(ctx, "/usr/bin/open", raw).Run()
-	}
-}
-
-func loopbackHost(host string) bool {
-	return host == "127.0.0.1" || host == "::1" || host == "localhost"
-}
 
 // newTerminal returns the reader for one prompt's answer, or nil unless in and
 // errOut are terminals and this process is in the foreground of in's terminal
@@ -72,7 +56,7 @@ func newSetupTerminal(in, errOut *os.File) bool {
 // promptReader first discards input typed before the prompt, so a line typed
 // ahead cannot answer a prompt not yet shown; if that fails it reads as EOF.
 func promptReader(ctx context.Context, fd int) io.Reader {
-	if unix.IoctlSetPointerInt(fd, unix.TIOCFLUSH, unix.TCIFLUSH) != nil {
+	if flushInput(fd) != nil {
 		return strings.NewReader("")
 	}
 	return &pollReader{ctx: ctx, fd: fd}
@@ -95,7 +79,7 @@ func fileFD(f *os.File) (int, bool) {
 }
 
 func isTerminal(fd int) bool {
-	_, err := unix.IoctlGetTermios(fd, unix.TIOCGETA)
+	_, err := unix.IoctlGetTermios(fd, getTermios)
 	return err == nil
 }
 
@@ -129,29 +113,4 @@ func (r *pollReader) Read(p []byte) (int, error) {
 		}
 		return n, nil
 	}
-}
-
-// dialogScript shows argv as title, text, timeout in seconds and buttons;
-// server text only ever arrives as argv, never as script source.
-var dialogScript = []string{
-	"on run argv",
-	"set r to display dialog (item 2 of argv) with title (item 1 of argv) buttons (items 4 thru -1 of argv) default button 1 giving up after ((item 3 of argv) as integer) with icon caution",
-	"if gave up of r then return \"\"",
-	"return button returned of r",
-	"end run",
-}
-
-func newDialog(config.Paths) func(context.Context, []string) (string, error) {
-	return func(ctx context.Context, argv []string) (string, error) {
-		out, err := dialogCommand(ctx, argv).Output()
-		return string(out), err
-	}
-}
-
-func dialogCommand(ctx context.Context, argv []string) *exec.Cmd {
-	args := make([]string, 0, 2*len(dialogScript)+len(argv))
-	for _, line := range dialogScript {
-		args = append(args, "-e", line)
-	}
-	return exec.CommandContext(ctx, "/usr/bin/osascript", append(args, argv...)...)
 }

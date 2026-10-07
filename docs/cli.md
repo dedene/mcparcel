@@ -48,7 +48,7 @@ also work via `npx mcparcel ...`. No global installation or Homebrew is required
 | `enable <mcp>...` / `disable <mcp>...` | Atomically update selection for supplied IDs |
 | `tools <mcp> [--cached]` | Live schema discovery; `--cached` has no cache yet and always returns `schema_cache_miss` |
 | `tools enable <mcp> <tool>...` / `tools disable <mcp> <tool>...` | Change personal tool selection; cannot override source policy |
-| `call <mcp>.<tool> [key=value ...] [--args <json>] [--meta <json>]` | Invoke an enabled, allowed tool; a server's approval request during the call is shown as a prompt (see Approval prompts) |
+| `call <mcp>.<tool> [key=value ...] [--args <json>] [--meta <json>]` | Invoke an enabled, allowed tool; a server's approval request during the call is shown as a prompt (see Approval prompts). The CLI checks the connection and tool policy offline first: a denied tool (`tool_denied`, exit 4; `deny` wins over `allow`) or a disabled, unreviewed, unknown or ambiguous connection fails before the runtime is contacted, so no daemon starts, no connection opens and no token is requested. The runtime checks again at admission and before dispatch |
 | `setup` | Interactive domain and connection editor (see "Domain matrix and terminal sketch"); renders on stderr, prints `Configuration saved at revision N.` or `No changes saved.` on stdout (plus `The last save could not be confirmed. Run mcparcel list to check the configuration.` after an unconfirmed save); Ctrl+C exits 130 after printing any save that already happened |
 | `sync [<owner/repo>] [--apply [--accept <mcp>...]]` | Fetch and display update; only `--apply` changes active snapshot; `--accept` unblocks named connections whose execution or auth changed |
 | `import mcporter --file <path> [--bindings <file>] [--only <id>...] [--apply]` | Preview or apply supported imports, with explicit unresolved-field report; unbound `${NAME}` in env/header values becomes `env:NAME` with an `environment_reference` warning |
@@ -59,18 +59,30 @@ also work via `npx mcparcel ...`. No global installation or Homebrew is required
 | `config input set <mcp> <name> <value>` | Set a declared non-secret local input |
 | `config profile set <name> --file <profile.json>` | Save a validated credential profile containing references only |
 | `config profile bind <mcp> <profile>` | Bind the connection's declared credential requirement |
-| `auth login <mcp>` | Browser sign-in for an HTTP connection; prints the URL on stderr and opens the browser; `--no-input` returns `auth_required` once the connection is known to use sign-in; JSON `{connection, signedIn}` (`signedIn: false` when the server never asked for sign-in) |
-| `auth status [<mcp>]` | Offline, never starts the runtime (it asks a running daemon for its 1Password sessions): per HTTP connection `{connection, state, signedIn, refreshToken, lastRefreshAt?, accessTokenExpiresAt?, refreshTokenExpiresAt?, lastRefreshFailure?: {at, code}, keepAlive, cause?: {code, message}, previousCause?: {code, message}, nextAction?}` in `items`, plus `events` (the health log) for `auth status <mcp>`; `state` is `ok`, `expiring` or `sign-in required`; causes are listed in runtime.md "Health log and `auth status` as built". `previousCause` is set for a signed-in session whose last sign-in followed a terminal failure and says why that sign-in was needed. `keepAlive` is `off` when the connection turned it off, else `unavailable` when its client secret is a 1Password reference, else its keep-alive interval (`24h` by default). Human output: `<connection>  <state>  (<cause>)`, and for one connection the cause message, `Last sign-in needed: <message>`, last refresh, expiries, keep-alive and next action. No token, client identifier or redirect. Without `<mcp>`: enabled HTTP connections marked OAuth, holding a sign-in, or whose server asked for sign-in (an unmarked connection whose call or login got `auth_required`; shown as `sign-in required`). `profiles` lists the local credential profiles an enabled connection uses (for `auth status <mcp>`: that connection's profile when it has `op://` references) as `{profile, mode, session, sessionExpiresAt?, connections}`; `session` is `active`, `expired`, `none` (no session, or the runtime is not running) or `unknown` (the daemon could not be asked or runs another version); human output `profile <id>  <mode>  <session>[  until <RFC3339>]`. Never the account or a reference. A connection with neither sign-in nor `op://` references gives `invalid_arguments` |
+| `auth login <mcp>` | Browser sign-in for an HTTP connection; prints the URL on stderr and opens the browser (where no browser can open, it prints only the URL to open); `--no-input` returns `auth_required` once the connection is known to use sign-in; JSON `{connection, signedIn}` (`signedIn: false` when the server never asked for sign-in). Refused offline, without starting the runtime: a `client_credentials` connection (`invalid_arguments`, "<mcp> uses client credentials; there is nothing to sign in to.") and, in headless mode, every connection (`auth_required`, "This server needs sign-in, which headless mode cannot do.") |
+| `auth status [<mcp>]` | Offline, never starts the runtime (it asks a running daemon for its 1Password sessions): per HTTP connection `{connection, state, signedIn, refreshToken, lastRefreshAt?, accessTokenExpiresAt?, refreshTokenExpiresAt?, lastRefreshFailure?: {at, code}, keepAlive, cause?: {code, message}, previousCause?: {code, message}, nextAction?}` in `items`, plus `events` (the health log) for `auth status <mcp>`; `state` is `ok`, `expiring` or `sign-in required`; causes are listed in runtime.md "Health log and `auth status` as built". `previousCause` is set for a signed-in session whose last sign-in followed a terminal failure and says why that sign-in was needed. `keepAlive` is `off` when the connection turned it off, else `unavailable` when its client secret is a 1Password reference, else its keep-alive interval (`24h` by default). Human output: `<connection>  <state>  (<cause>)`, and for one connection the cause message, `Last sign-in needed: <message>`, last refresh, expiries, keep-alive and next action. No token, client identifier or redirect. Without `<mcp>`: enabled HTTP connections marked OAuth, holding a sign-in, or whose server asked for sign-in (an unmarked connection whose call or login got `auth_required`; shown as `sign-in required`). `profiles` lists the local credential profiles an enabled connection uses (for `auth status <mcp>`: that connection's profile when it has `op://` references) as `{profile, mode, session, sessionExpiresAt?, connections}`; `session` is `active`, `expired`, `none` (no session, or the runtime is not running) or `unknown` (the daemon could not be asked or runs another version); human output `profile <id>  <mode>  <session>[  until <RFC3339>]`. Never the account or a reference. A connection with neither sign-in nor `op://` references gives `invalid_arguments` `client_credentials` connections are left out in every mode (their token lives in daemon memory only); naming one is `invalid_arguments`. Headless mode reads no Keychain: `items` is empty (human: "No sign-ins in headless mode.") |
 | `auth lock` | Through the runtime (starts it if needed): end every 1Password session, cancel protected work (dispatched calls report `outcome_unknown`, queued ones `auth_required`), stop protected processes and bar every OAuth connection from reusing its stored session until its next `auth login` (cause `locked` in `auth status`). Secret-free connections keep running. JSON `{locked}` |
 | `auth refresh <mcp>` | Drop the connection's cached 1Password values; its next call reads them again through the existing session (no prompt) and reconnects only when a value changed. Never starts the runtime; when it is not running nothing is cached and JSON is `{connection, invalidated: false}`, else `{connection, invalidated: true}`. A connection without `op://` references gives `invalid_arguments` (next action `mcparcel runtime restart` when it uses `env:` references) |
-| `auth logout <mcp>` | Remove the Keychain sign-in through the runtime (starts it if needed); JSON `{connection, removed, providerRevoked}`; `providerRevoked` is always false for now |
+| `auth logout <mcp>` | Remove the Keychain sign-in through the runtime (starts it if needed); JSON `{connection, removed, providerRevoked}`; `providerRevoked` is always false for now. A `client_credentials` connection is refused offline like `auth login` |
 | `doctor [<mcp>] [--live]` | Local prerequisite checks; only explicit live mode connects to specified MCP |
-| `runtime status` / `runtime restart [--force]` / `runtime stop [--force]` | Inspect, restart or stop the daemon; status includes `stayAlive` (human: `Stay-alive: on` or `off`), true when `runtime.keepAlive` is set and an OAuth session may still need refreshing, and `credentialSessions` (`[{profile, mode, state, expiresAt}]`, omitted when there are none; no account or reference); restart and stop refuse active calls unless forced; restart recaptures the login environment and drops pooled sessions, so changed `env:` values apply; stop on a stopped runtime succeeds |
+| `runtime status` / `runtime restart [--force]` / `runtime stop [--force]` | Inspect, restart or stop the daemon; status includes `stayAlive` (human: `Stay-alive: on` or `off`), true when `runtime.keepAlive` is set and an OAuth session may still need refreshing, and `credentialSessions` (`[{profile, mode, state, expiresAt}]`, omitted when there are none; no account or reference); restart and stop refuse active calls unless forced; restart recaptures the login environment and drops pooled sessions, so changed `env:` values apply; stop on a stopped runtime succeeds. Headless mode: status shows `Environment: daemon environment`, and restart starts the new daemon with the forwarded variables of the caller's own environment (no login shell). Against `runtime serve`, restart (also `--force`) is refused with `runtime_supervised` |
+| `runtime serve` | Run the runtime in the foreground under a supervisor: takes the daemon lock itself (`runtime_busy`, exit 6, when another runtime holds it), logs to the daemon log and stderr, never exits when idle; SIGTERM or SIGINT ends dispatched calls as `outcome_unknown`, closes sessions, removes the socket and exits 0 (human `Runtime stopped.`, JSON `{"stopped":true}`). It marks the runtime directory supervised: other CLIs wait up to 15 s for it instead of auto-starting a daemon, then fail `runtime_supervised`. `runtime.supervised: true` in `config.json` (headless only) has the same effect before serve first ran, e.g. on a fresh pod. On Linux it requires headless mode |
 | `version` / `--version` / `--help` | Version (`--version` prints the same line as `version`, before any command runs) and English usage |
 
 All commands provide `--json` except interactive `setup`; use selection/config
 commands for equivalent machine actions. `--no-input` never opens UI, browser,
 biometric or approval prompts (terminal or dialog). Missing necessary input yields an error with the next action.
+Headless mode (`runtime.mode: "headless"`) behaves as if every runtime command
+had `--no-input`: no terminal or dialog prompt, no browser, also with a
+terminal attached and `runtime.approvalDialog` set; a server's approval request
+is declined at once with the `elicitation_declined` warning.
+In headless mode every command that writes configuration (`enable`, `disable`,
+`tools enable|disable`, `local`, `config input|profile`, `import --apply`,
+`add`, `remove`, `sync` with or without `--apply`) fails `config_read_only`
+before it takes a lock or sends a request. On Linux, `tools`, `call`, `auth`
+and `runtime` in desktop mode fail `runtime_unsupported` ("On Linux, MCParcel
+runs in headless mode only."); offline commands work. See
+[headless.md](headless.md).
 `setup --no-input`, `setup --json` and setup without a TTY (stdin and stderr must
 be terminals, in the foreground) fail with `terminal_required` (exit 2) before
 reading any configuration, and write nothing.
@@ -197,6 +209,11 @@ protocol and answer its own prompt. That is why the dialog is opt-in.
 approvals needs OS-level isolation (another user, or a sandbox that denies the
 socket).
 
+Headless mode (`runtime.mode: "headless"`) never prompts: no terminal prompt
+even with stdin and stderr on a terminal, no dialog even with
+`runtime.approvalDialog: true`. The request is declined at once with the "no
+prompt was possible" notice.
+
 ## Output and errors
 
 Human output goes to stdout; progress and prompts to stderr. JSON mode emits one
@@ -240,6 +257,17 @@ pooled process stay, and nothing is retried within the call;
 `runtime_config_mismatch` exit 6; `auth_account_conflict` exit 3;
 `terminal_required` exit 2 (setup without an interactive terminal, or with
 `--json` or `--no-input`; the next action lists the equivalent commands).
+Headless mode adds `config_read_only` (exit 2, "This configuration is
+read-only (headless mode).", next action to change the configuration at its
+source and restart the runtime) and `runtime_supervised` (exit 6, a
+supervisor runs the runtime: `runtime restart` against `runtime serve`, or a
+CLI that waited 15 s for a supervised runtime that did not answer). A missing
+`env:` variable in headless mode is `config_required` with
+`details.variables` (the missing names, never values). `tool_denied` keeps
+exit 4 and `error.code` is the discriminator; `call` returns it before the
+runtime is contacted. A `client_credentials` token-endpoint refusal is
+`auth_failed` naming the OAuth error code (`invalid_client`); 5xx, 429,
+timeouts and network errors are `connection_failed`.
 `server_error` (exit 6) means the server answered the call with a JSON-RPC error
 instead of a result: the message carries the server's text cleaned to one line of
 at most 300 characters (never the error's `data`), and `details` has

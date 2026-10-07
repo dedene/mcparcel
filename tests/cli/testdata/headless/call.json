@@ -1,0 +1,1 @@
+{"schemaVersion":1,"ok":true,"data":{"connection":"local:front","tool":"counter","result":{"content":[{"type":"text","text":"{\"count\":1}"}],"structuredContent":{"count":1}}},"error":null}

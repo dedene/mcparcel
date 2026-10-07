@@ -18,6 +18,8 @@ type Details struct {
 	Outcome      string          `json:"outcome,omitempty"`
 	// RPCCode is a server_error's JSON-RPC error code; 0 is a legal code.
 	RPCCode *int `json:"rpcCode,omitempty"`
+	// Variables names the environment variables a headless runtime is missing.
+	Variables []string `json:"variables,omitempty"`
 }
 type Error struct {
 	Code       string   `json:"code"`
@@ -53,6 +55,7 @@ var registry = map[string]errorSpec{
 	"tool_denied":         {4, "The tool is denied by connection policy.", "Check the source policy and personal tool selection."},
 	"ambiguous_id":        {2, "The connection name is ambiguous.", "Use a canonical connection ID."},
 	"config_conflict":     {7, "The configuration changed since it was loaded.", "Reload the configuration and reapply your changes."},
+	"config_read_only":    {2, "This configuration is read-only (headless mode).", "Change the configuration at its source (for example the ConfigMap) and restart the runtime."},
 	"runtime_unsupported": {2, "This connection requires a runtime feature that is not implemented yet.", "Use a supported connection or wait for its runtime stage."},
 	"terminal_required":   {2, "Setup needs an interactive terminal; it does not run with --json, --no-input or without a terminal.", "Use mcparcel catalog, enable, disable, tools enable/disable, config input set, config profile bind and local add/update instead."},
 
@@ -76,6 +79,7 @@ var registry = map[string]errorSpec{
 	"runtime_version_mismatch": {6, "The CLI and daemon versions differ.", "Run mcparcel runtime restart."},
 	"runtime_busy":             {6, "The daemon has active work.", "Wait for completion or use mcparcel runtime restart --force."},
 	"runtime_start_failed":     {6, "The daemon did not become ready.", "Check runtime status and the daemon log."},
+	"runtime_supervised":       {6, "A supervisor runs this runtime (mcparcel runtime serve).", "Start or restart it through its supervisor. To let the CLI start one, remove runtime.supervised from config.json and the supervised file in the runtime directory."},
 	"schema_cache_miss":        {6, "No cached tool schema is available.", "Run mcparcel tools without --cached."},
 	"invalid_schema":           {6, "The server returned an invalid tool schema.", "Check the MCP server implementation."},
 	"tool_not_found":           {2, "The tool is not advertised by this connection.", "Run mcparcel tools for this connection."},
@@ -105,6 +109,24 @@ func SourceNotRegisteredError() *Error {
 	err := NewError("catalog_unavailable", nil)
 	err.Message = "This catalog is not registered."
 	err.NextAction = "Run 'mcparcel add <owner/repo>' to register a catalog."
+	return err
+}
+
+// HeadlessOnlyError is runtime_unsupported for a runtime command in desktop
+// mode where only headless mode is supported (Linux).
+func HeadlessOnlyError() *Error {
+	err := NewError("runtime_unsupported", nil)
+	err.Message = "On Linux, MCParcel runs in headless mode only."
+	err.NextAction = `Set runtime.mode to "headless" and runtime.stateRoot in config.json.`
+	return err
+}
+
+// HeadlessOnePasswordError is config_required for a 1Password reference in
+// headless mode, which never contacts 1Password.
+func HeadlessOnePasswordError() *Error {
+	err := NewError("config_required", nil)
+	err.Message = "1Password references need the desktop app and are not available in headless mode."
+	err.NextAction = "Use an env: reference for this value in headless mode."
 	return err
 }
 
@@ -153,6 +175,10 @@ func NewError(code string, details *Details) *Error {
 		value.SyncReport = append(json.RawMessage(nil), details.SyncReport...)
 		value.ImportReport = append(json.RawMessage(nil), details.ImportReport...)
 		value.Candidates = append([]string(nil), details.Candidates...)
+		value.Variables = append([]string(nil), details.Variables...)
+		if len(value.Variables) == 0 {
+			value.Variables = nil
+		}
 		if details.RPCCode != nil {
 			rpcCode := *details.RPCCode
 			value.RPCCode = &rpcCode

@@ -78,7 +78,7 @@ func TestLoadIsolation(t *testing.T) {
 			t.Fatal(path, entries, err)
 		}
 	}
-	for _, name := range []string{"HOME=", "TMPDIR=", "SHELL=/bin/sh", "XDG_CONFIG_HOME=", "XDG_DATA_HOME=", "XDG_CACHE_HOME=", "XDG_STATE_HOME=", "MCPARCEL_RUNTIME_DIR=", "PATH=/usr/bin:/bin:/usr/sbin:/sbin", "LANG=C", "LC_ALL=C"} {
+	for _, name := range []string{"HOME=", "TMPDIR=", "SHELL=/bin/sh", "XDG_CONFIG_HOME=", "XDG_DATA_HOME=", "XDG_CACHE_HOME=", "XDG_STATE_HOME=", "MCPARCEL_RUNTIME_DIR=", "PATH=/usr/bin:/bin:/usr/sbin:/sbin", "LANG=C", "LC_ALL=C", testutil.RaceExitEnv} {
 		found := false
 		for _, e := range env {
 			if strings.HasPrefix(e, name) {
@@ -89,7 +89,7 @@ func TestLoadIsolation(t *testing.T) {
 			t.Fatal(name, env)
 		}
 	}
-	if len(env) != 11 {
+	if len(env) != 12 {
 		t.Fatal(env)
 	}
 }

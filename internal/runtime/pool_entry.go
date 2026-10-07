@@ -17,6 +17,7 @@ type poolEntry struct {
 	ctx            context.Context
 	cancel         context.CancelCauseFunc
 	oauth          *auth.OAuthHandler
+	cc             *auth.ClientCredentials // client_credentials token, dropped with the entry
 	closeOnce      sync.Once
 	sweeping       bool // a sweep is waiting to retire it; guarded by pool.mu
 }
@@ -42,7 +43,7 @@ func (p *pool) session(ctx context.Context, id, hash string, c config.Connection
 		}
 		p.retire(id, old)
 	}
-	values, e := envRefValues(ctx, p.opts.LoginEnv, p.opts.Keychain, c, lease.Secrets())
+	values, e := envRefValues(ctx, p.opts.LoginEnv, p.opts.Keychain, p.opts.Headless, c, lease.Secrets())
 	if e != nil {
 		return nil, nil, e
 	}
@@ -66,7 +67,13 @@ func (p *pool) session(ctx context.Context, id, hash string, c config.Connection
 			}
 		}
 	}
-	handler, e := p.oauthHandler(ctx, id, name, c, values, login)
+	var handler *auth.OAuthHandler
+	var cc *auth.ClientCredentials
+	if clientCredentials(c) {
+		cc, e = p.clientCredentialsHandler(c, values)
+	} else {
+		handler, e = p.oauthHandler(ctx, id, name, c, values, login)
+	}
 	if e != nil {
 		return nil, nil, e
 	}
@@ -79,19 +86,24 @@ func (p *pool) session(ctx context.Context, id, hash string, c config.Connection
 	opts := mcpclient.ConnectOptions{Connection: c, Env: env, Headers: headers, Home: p.opts.Paths.Home, Version: p.opts.Version, ConnectTimeout: timeout, ShutdownTimeout: p.opts.ShutdownTimeout}
 	if handler != nil {
 		opts.OAuth = handler
+	} else if cc != nil {
+		opts.OAuth = cc
 	}
 	session, e := p.opts.Connect(connectCtx, opts)
-	if e != nil {
+	if e != nil || session == nil {
 		if handler != nil {
 			handler.Close()
 		}
+		if cc != nil {
+			cc.Close()
+		}
+		if e == nil {
+			e = output.NewError("internal_error", nil)
+		}
 		return nil, nil, e
 	}
-	if session == nil {
-		return nil, nil, output.NewError("internal_error", nil)
-	}
 	entryCtx, stop := context.WithCancelCause(context.Background())
-	entry := &poolEntry{hash: hash, identity: lease.Identity, session: session, ctx: entryCtx, cancel: stop, oauth: handler}
+	entry := &poolEntry{hash: hash, identity: lease.Identity, session: session, ctx: entryCtx, cancel: stop, oauth: handler, cc: cc}
 	p.mu.Lock()
 	if p.closed {
 		p.mu.Unlock()
@@ -222,6 +234,9 @@ func (e *poolEntry) close(p *pool, ctx context.Context) {
 		e.cancel(context.Canceled)
 		if e.oauth != nil {
 			e.oauth.Close()
+		}
+		if e.cc != nil {
+			e.cc.Close()
 		}
 		bounded, cancel := context.WithTimeout(ctx, p.opts.ShutdownTimeout)
 		defer cancel()

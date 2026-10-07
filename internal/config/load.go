@@ -137,6 +137,10 @@ func (s Snapshot) RuntimeConnection(id string) (string, Connection, error) {
 	if c.Transport.HTTP != nil && c.Transport.HTTP.Mode == "sse" || c.Lifecycle != nil && c.Lifecycle.IdleTimeout != "" && c.Lifecycle.IdleTimeout != "session" {
 		return "", Connection{}, ErrRuntimeUnsupported
 	}
+	// Headless mode never contacts 1Password (D10).
+	if s.Local.Headless() && len(SecretRefs(c)) > 0 {
+		return "", Connection{}, ErrHeadlessOnePassword
+	}
 	return canonical, c, nil
 }
 

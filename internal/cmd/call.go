@@ -140,6 +140,13 @@ func (c *CallCmd) Run(ctx context.Context, s *Streams, opts *CommandOptions) err
 	if err != nil {
 		return output.NewError("invalid_arguments", nil)
 	}
+	paths, err := runtimePaths()
+	if err != nil {
+		return err
+	}
+	if _, _, err = checkCallOffline(ctx, paths, c.Target); err != nil {
+		return err
+	}
 	client, err := newRuntimeClient(opts)
 	if err != nil {
 		return err
@@ -181,9 +188,10 @@ func (c *CallCmd) Run(ctx context.Context, s *Streams, opts *CommandOptions) err
 }
 
 // promptFor picks where the call's server may ask its user: the terminal,
-// else the opt-in native dialog, else nowhere (the daemon declines).
+// else the opt-in native dialog, else nowhere (the daemon declines). Headless
+// mode is nowhere, as if --no-input were given (D10).
 func promptFor(ctx context.Context, s *Streams, opts *CommandOptions, paths config.Paths, connection string) (string, func(context.Context, elicit.Prompt) elicit.Answer) {
-	if opts.NoInput {
+	if opts.NoInput || paths.Headless() {
 		return "", nil
 	}
 	if !opts.JSON {
@@ -204,7 +212,7 @@ func promptFor(ctx context.Context, s *Streams, opts *CommandOptions, paths conf
 	if err != nil || state.Local.Runtime == nil || !state.Local.Runtime.ApprovalDialog {
 		return "", nil
 	}
-	show := newDialog(paths)
+	show := newDialogFactory(paths)
 	return "dialog", func(ctx context.Context, p elicit.Prompt) elicit.Answer {
 		argv := elicit.DialogArgs(connection, p)
 		if argv == nil {

@@ -45,7 +45,7 @@ func TestMain(m *testing.M) {
 	}
 
 	if len(os.Args) > 1 && os.Args[1] == "daemon" {
-		p, e := config.ResolvePaths(os.Getenv, os.Getenv("HOME"), "/private/tmp", os.Getuid())
+		p, e := config.ResolvePaths(os.Getenv, os.Getenv("HOME"), testutil.TempRoot(), os.Getuid())
 		if e != nil {
 			os.Exit(2)
 		}
@@ -103,7 +103,7 @@ func TestMain(m *testing.M) {
 		return
 	}
 	if len(os.Args) > 1 && os.Args[1] == "join-helper" {
-		p, e := config.ResolvePaths(os.Getenv, os.Getenv("HOME"), "/private/tmp", os.Getuid())
+		p, e := config.ResolvePaths(os.Getenv, os.Getenv("HOME"), testutil.TempRoot(), os.Getuid())
 		if e != nil {
 			os.Exit(2)
 		}

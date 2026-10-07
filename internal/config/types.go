@@ -61,4 +61,10 @@ type Paths struct {
 	SocketFile     string `json:"-"`
 	LockFile       string `json:"-"`
 	LogFile        string `json:"-"`
+	// StateRoot is the headless state root the four directories above derive
+	// from; "" outside headless mode.
+	StateRoot string `json:"-"`
+	// Supervised is config.json's runtime.supervised: a supervisor owns the
+	// runtime whether or not runtime serve has marked the state root yet.
+	Supervised bool `json:"-"`
 }

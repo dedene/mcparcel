@@ -1,0 +1,1 @@
+{"schemaVersion":1,"ok":false,"data":null,"error":{"code":"auth_failed","message":"The token endpoint rejected the client credentials (invalid_client).","nextAction":"Check auth.clientId, auth.clientSecret, auth.scopes and auth.tokenUrl for this connection."}}

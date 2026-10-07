@@ -194,6 +194,9 @@ func validateConnection(c *Connection, path string, profiles map[string]ProfileR
 		if a.Type != "oauth" {
 			return fieldError(p+".type", "invalid auth type")
 		}
+		if err := validateGrant(a, c.Transport.HTTP, p); err != nil {
+			return err
+		}
 		if strings.ContainsRune(a.ClientName, 0) {
 			return fieldError(p+".clientName", "invalid characters")
 		}
@@ -258,6 +261,48 @@ func validateConnection(c *Connection, path string, profiles map[string]ProfileR
 	}
 	if len(SecretRefs(*c)) > 0 && c.CredentialProfile == "" {
 		return fieldError(path+".credentialProfile", "secret binding requires profile")
+	}
+	return nil
+}
+
+// validateGrant checks the grant-specific OAuth fields. A client_credentials
+// connection names its token endpoint and client and nothing of the
+// browser sign-in; its token URL is HTTPS, or loopback HTTP when the
+// transport consents to insecure HTTP. Only client_credentials has a tokenUrl.
+func validateGrant(a *OAuth, h *HTTP, p string) error {
+	switch a.Grant {
+	case "", GrantAuthorizationCode:
+		if a.TokenURL != "" {
+			return fieldError(p+".tokenUrl", "tokenUrl requires the client_credentials grant")
+		}
+		return nil
+	case GrantClientCredentials:
+	default:
+		return fieldError(p+".grant", "invalid grant")
+	}
+	if a.TokenURL == "" {
+		return fieldError(p+".tokenUrl", "tokenUrl required")
+	}
+	u, err := parseHTTPURL(a.TokenURL)
+	if err != nil {
+		return fieldError(p+".tokenUrl", "invalid token URL")
+	}
+	if u.Scheme == "http" && (h.AllowInsecureHTTP != "loopback" && h.AllowInsecureHTTP != "explicit" || !loopbackHost(u.Hostname())) {
+		return fieldError(p+".tokenUrl", "HTTPS or consented loopback HTTP required")
+	}
+	switch {
+	case a.ClientID == nil:
+		return fieldError(p+".clientId", "clientId required")
+	case a.ClientSecret == nil:
+		return fieldError(p+".clientSecret", "clientSecret required")
+	case a.RedirectURL != "":
+		return fieldError(p+".redirectUrl", "not used by client_credentials")
+	case a.IssuerURL != "":
+		return fieldError(p+".issuerUrl", "not used by client_credentials")
+	case a.ClientName != "":
+		return fieldError(p+".clientName", "not used by client_credentials")
+	case a.TokenEndpointAuthMethod != "" && a.TokenEndpointAuthMethod != "client_secret_post" && a.TokenEndpointAuthMethod != "client_secret_basic":
+		return fieldError(p+".tokenEndpointAuthMethod", "client_secret_post or client_secret_basic required")
 	}
 	return nil
 }

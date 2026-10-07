@@ -33,11 +33,17 @@ type DaemonOptions struct {
 	ShutdownTimeout time.Duration
 	// PromptTimeout backs up the CLI's own elicit.PromptTimeout; set only in tests.
 	PromptTimeout time.Duration
+	// NoIdleExit keeps a supervised runtime (runtime serve) running when idle.
+	NoIdleExit bool
+	// Supervised refuses restart requests: only the supervisor restarts the
+	// runtime, so a CLI cannot replace it with an auto-started daemon.
+	Supervised bool
 }
 
 var (
 	errForced = errors.New("forced daemon shutdown")
-	listenMu  sync.Mutex // umask is process-wide.
+	listenMu  sync.Mutex  // umask is process-wide.
+	processID = os.Getpid // replaced in tests
 )
 
 type authURLKey struct{}
@@ -117,7 +123,7 @@ type daemonService struct {
 	opts        DaemonOptions
 	listener    *net.UnixListener
 	ctx         context.Context
-	cancel      context.CancelFunc
+	cancel      context.CancelCauseFunc
 	mu          sync.Mutex
 	admitting   bool
 	restarting  bool
@@ -145,7 +151,7 @@ func Serve(ctx context.Context, opts DaemonOptions) error {
 		return e
 	}
 	_ = validated.Close()
-	dir, e := config.OpenPrivateDir(opts.Paths.RuntimeDir, false)
+	dir, e := config.OpenPrivateDirUnder(opts.Paths.StateRoot, opts.Paths.RuntimeDir, false)
 	if e != nil {
 		return e
 	}
@@ -183,12 +189,24 @@ func Serve(ctx context.Context, opts DaemonOptions) error {
 		_ = l.Close()
 		return e
 	}
-	life, cancel := context.WithCancel(ctx)
+	// ctx ending (a signal) is a forced shutdown: request contexts derive from
+	// life, so they see errForced and report dispatched work as
+	// outcome_unknown, never as the caller's own cancel.
+	life, cancel := context.WithCancelCause(context.WithoutCancel(ctx))
+	defer cancel(nil)
+	stopAfter := context.AfterFunc(ctx, func() { cancel(errForced) })
+	defer stopAfter()
 	s := &daemonService{opts: opts, listener: l, ctx: life, cancel: cancel, admitting: true, requests: map[string]context.CancelCauseFunc{}, last: time.Now(), started: time.Now()}
 	path := opts.LoginEnv["PATH"]
 	_ = WriteLog(opts.Log, "daemon_started", &path)
 	if opts.EnvFallback {
 		_ = WriteLog(opts.Log, "login_env_fallback", nil)
+	}
+	// As PID 1 (a container entrypoint) this process inherits the orphans of
+	// MCP servers and never reaps them: reaping here would race os/exec's Wait.
+	// The container needs an init (--init, tini) or a shared PID namespace.
+	if processID() == 1 {
+		_ = WriteLog(opts.Log, "pid1_no_reaper", nil)
 	}
 	keepDone := make(chan struct{})
 	if k, ok := opts.Handler.(interface{ RunKeepAlive(context.Context) error }); ok {
@@ -207,6 +225,9 @@ func Serve(ctx context.Context, opts DaemonOptions) error {
 				_ = l.Close()
 				return
 			case <-ticker.C:
+				if opts.NoIdleExit {
+					continue
+				}
 				s.mu.Lock()
 				idle := s.idleLocked()
 				s.mu.Unlock()
@@ -227,7 +248,7 @@ func Serve(ctx context.Context, opts DaemonOptions) error {
 				}
 				s.mu.Unlock()
 				if idle {
-					cancel()
+					cancel(nil)
 				}
 			}
 		}
@@ -239,7 +260,7 @@ func Serve(ctx context.Context, opts DaemonOptions) error {
 		}
 		s.sockets.Go(func() { s.serveSocket(conn) })
 	}
-	cancel()
+	cancel(errForced)
 	s.stop(true)
 	s.sockets.Wait()
 	<-watcherDone
@@ -369,6 +390,10 @@ func (s *daemonService) serveSocket(conn *net.UnixConn) {
 		send(Response{Data: b})
 		return
 	}
+	if req.Method == "restart" && s.opts.Supervised {
+		send(Response{Error: output.NewError("runtime_supervised", nil)})
+		return
+	}
 	if req.Method == "restart" || req.Method == "stop" {
 		s.mu.Lock()
 		if s.restarting || !s.admitting {
@@ -391,7 +416,7 @@ func (s *daemonService) serveSocket(conn *net.UnixConn) {
 		} else {
 			send(Response{Data: json.RawMessage(`{"stopped":true}`)})
 		}
-		s.cancel()
+		s.cancel(nil)
 		_ = s.listener.Close()
 		return
 	}

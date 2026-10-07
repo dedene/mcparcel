@@ -36,7 +36,10 @@ func poolError(err, cause error, id string, dispatched bool) *output.Error {
 	}
 	code := "internal_error"
 	var safe *output.Error
-	if errors.As(err, &safe) && safe != nil {
+	if errors.Is(err, config.ErrHeadlessOnePassword) {
+		safe = output.HeadlessOnePasswordError()
+	}
+	if safe != nil || errors.As(err, &safe) && safe != nil {
 		code = safe.Code
 	} else {
 		switch {
@@ -91,6 +94,9 @@ func poolError(err, cause error, id string, dispatched bool) *output.Error {
 	var ambiguous *config.AmbiguousIDError
 	if errors.As(err, &ambiguous) {
 		details = &output.Details{Candidates: append([]string(nil), ambiguous.Candidates...)}
+	}
+	if !dispatched && safe != nil && safe.Details != nil && len(safe.Details.Variables) > 0 {
+		details = &output.Details{Variables: safe.Details.Variables}
 	}
 	if dispatched {
 		details = &output.Details{RequestID: id, Dispatched: true}
