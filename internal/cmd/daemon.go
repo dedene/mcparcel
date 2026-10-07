@@ -24,6 +24,10 @@ func (c *DaemonCmd) Run(ctx context.Context, _ *Streams) error {
 	if err != nil {
 		return err
 	}
+	if paths.Supervised {
+		// Only runtime serve runs a supervised runtime.
+		return output.NewError("runtime_supervised", nil)
+	}
 	lock, err := runtimeclient.AdoptLock(paths, uintptr(c.LockFD))
 	if err != nil {
 		return err

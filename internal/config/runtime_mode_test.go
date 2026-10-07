@@ -36,6 +36,21 @@ func TestStateRootRejectedInDesktop(t *testing.T) {
 	runtimeCase(t, `{"schemaVersion":1,"runtime":{"mode":"desktop","keepAlive":true}}`, true, true, "")
 }
 
+// runtime.supervised declares a supervisor-owned runtime in the config
+// itself, so no CLI auto-starts one before runtime serve marks the state root.
+func TestSupervisedOnlyInHeadless(t *testing.T) {
+	runtimeCase(t, `{"schemaVersion":1,"runtime":{"mode":"headless","stateRoot":"/var/lib/mcparcel","supervised":true}}`, true, true, "")
+	runtimeCase(t, `{"schemaVersion":1,"runtime":{"mode":"headless","stateRoot":"/var/lib/mcparcel","supervised":false}}`, true, true, "")
+	runtimeCase(t, `{"schemaVersion":1,"runtime":{"supervised":true}}`, false, false, "runtime.supervised")
+	runtimeCase(t, `{"schemaVersion":1,"runtime":{"mode":"desktop","supervised":true}}`, false, false, "runtime.supervised")
+	runtimeCase(t, `{"schemaVersion":1,"runtime":{"mode":"desktop","supervised":false}}`, true, true, "")
+	runtimeCase(t, `{"schemaVersion":1,"runtime":{"mode":"headless","stateRoot":"/var/lib/mcparcel","supervised":"yes"}}`, false, false, "")
+	l, err := DecodeLocal([]byte(`{"schemaVersion":1,"runtime":{"mode":"headless","stateRoot":"/var/lib/mcparcel","supervised":true}}`))
+	if err != nil || !l.Runtime.Supervised {
+		t.Fatal(l, err)
+	}
+}
+
 func TestStateRootMustBeAbsoluteAndClean(t *testing.T) {
 	for _, root := range []string{"var/lib/mcparcel", "./state", "/"} {
 		runtimeCase(t, `{"schemaVersion":1,"runtime":{"mode":"headless","stateRoot":"`+root+`"}}`, false, false, "runtime.stateRoot")

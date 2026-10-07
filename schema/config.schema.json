@@ -130,6 +130,11 @@
         "stateRoot": {
           "type": "string",
           "pattern": "^/[^\\x00]+$"
+        },
+        "supervised": {
+          "type": "boolean",
+          "default": false,
+          "$comment": "Headless only: mcparcel runtime serve owns the runtime and no CLI auto-starts one."
         }
       },
       "required": [],
@@ -154,6 +159,11 @@
           "required": [
             "stateRoot"
           ]
+        },
+        "properties": {
+          "supervised": {
+            "const": false
+          }
         }
       }
     },

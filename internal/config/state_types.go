@@ -23,6 +23,9 @@ type RuntimeDefaults struct {
 	ApprovalDialog bool   `json:"approvalDialog,omitempty"`
 	Mode           string `json:"mode,omitempty"`      // "" = desktop
 	StateRoot      string `json:"stateRoot,omitempty"` // required iff headless
+	// Supervised (headless only) declares that mcparcel runtime serve owns
+	// the runtime, so a CLI never auto-starts one, also before serve ran.
+	Supervised bool `json:"supervised,omitempty"`
 }
 type Local struct {
 	SchemaVersion      int                `json:"schemaVersion"`

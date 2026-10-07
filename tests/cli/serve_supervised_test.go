@@ -46,6 +46,39 @@ func TestServeRefusesRestart(t *testing.T) {
 	}
 }
 
+// runtime.supervised in config.json covers a fresh state root before serve
+// first ran, as on every pod start with an emptyDir. A call that comes first,
+// here without the Front variables as under claw-wrap, waits for serve and
+// starts no daemon of its own, which would answer config_required and keep
+// serve out with runtime_busy.
+func TestConfigSupervisedFreshStateRoot(t *testing.T) {
+	r := newFrontRig(t, map[string]any{"supervised": true})
+	r.setEnv("FRONT_CLIENT_ID", "")
+	r.setEnv("FRONT_CLIENT_SECRET", "")
+	a := r.start(binaryA, "", "call", "front.counter", "--json")
+	time.Sleep(500 * time.Millisecond)
+	select {
+	case <-a.done:
+		v := r.finish(a)
+		t.Fatalf("call did not wait for serve: %d %s", v.code, v.stdout)
+	default:
+	}
+	if daemons := r.daemonPIDs(); len(daemons) != 0 {
+		t.Fatalf("call auto-started a runtime: %v", daemons)
+	}
+	r.setEnv("FRONT_CLIENT_ID", frontClientID)
+	r.setEnv("FRONT_CLIENT_SECRET", frontSecret)
+	_, pid := r.serve()
+	v := r.check(r.finish(a), 0, "")
+	r.outputs = append(r.outputs, v.stdout, v.stderr)
+	if structured(t, v)["count"] != float64(1) || r.status().PID != pid {
+		t.Fatal("call did not run on serve", v.stdout)
+	}
+	if daemons := r.daemonPIDs(); len(daemons) != 0 {
+		t.Fatalf("auto-started runtime beside serve: %v", daemons)
+	}
+}
+
 // While serve is down (a supervisor restart, start ordering, a crash), a
 // call waits for it instead of auto-starting a daemon that would keep the
 // supervised runtime out with runtime_busy.

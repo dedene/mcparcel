@@ -50,6 +50,7 @@ func resolveCommandPaths() (config.Paths, config.RuntimeDefaults, error) {
 		if paths, err = config.ApplyStateRoot(paths, rt.StateRoot); err != nil {
 			return config.Paths{}, config.RuntimeDefaults{}, err
 		}
+		paths.Supervised = rt.Supervised
 	}
 	return paths, rt, nil
 }

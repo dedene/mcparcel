@@ -786,6 +786,12 @@ Lifecycles:
   does not answer; `runtime restart` (with or without `--force`) is refused
   with `runtime_supervised`; `runtime stop` still works. Delete the file to
   return to auto-start. On Linux, serve also requires headless mode.
+  The file exists only once serve has taken the lock, and a fresh state root
+  (an emptyDir on every pod start) has none, so a CLI that runs first would
+  still auto-start a daemon. `runtime.supervised: true` in `config.json`
+  (headless only) declares the supervised lifecycle in the configuration
+  itself: CLIs behave as if the file were present, and the auto-start daemon
+  entry point refuses to run with `runtime_supervised`.
 
 ## Failure contract
 

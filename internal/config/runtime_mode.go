@@ -51,6 +51,9 @@ func validateRuntime(rt *RuntimeDefaults) error {
 		if rt.StateRoot != "" {
 			return fieldError("runtime.stateRoot", "allowed only in headless mode")
 		}
+		if rt.Supervised {
+			return fieldError("runtime.supervised", "allowed only in headless mode")
+		}
 	case ModeHeadless:
 		if !cleanAbsolute(rt.StateRoot) {
 			return fieldError("runtime.stateRoot", "clean absolute path required in headless mode")

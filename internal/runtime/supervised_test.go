@@ -75,6 +75,29 @@ func TestEnsureNeverStartsSupervisedRuntime(t *testing.T) {
 	}
 }
 
+// runtime.supervised in config.json makes a fresh state root (an emptyDir
+// on pod start, before runtime serve wrote its marker) supervised too:
+// Ensure waits for the supervisor and never starts a daemon of its own.
+func TestEnsureNeverStartsConfigSupervisedRuntime(t *testing.T) {
+	t.Setenv("SHELL", "/bin/sh")
+	p, _ := testutil.IsolatedPaths(t)
+	p.Supervised = true
+	if on, e := Supervised(p); e != nil || !on {
+		t.Fatal("config-supervised paths not supervised", on, e)
+	}
+	ensureTimeout = 300 * time.Millisecond
+	t.Cleanup(func() { ensureTimeout = 15 * time.Second })
+	exe, _ := os.Executable()
+	c := &Client{Paths: p, Version: "dev", Executable: exe}
+	wantCode(t, c.Ensure(testCtx(t)), "runtime_supervised")
+	if held, e := lockHeld(p); e != nil || held {
+		t.Fatal("Ensure started a runtime beside the supervisor", held, e)
+	}
+	if _, e := os.Lstat(p.SocketFile); !os.IsNotExist(e) {
+		t.Fatal("socket created", e)
+	}
+}
+
 // serveAt serves h on p in-process until the test ends.
 func serveAt(t *testing.T, p config.Paths, h Handler) {
 	t.Helper()

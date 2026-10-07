@@ -77,7 +77,7 @@ var registry = map[string]errorSpec{
 	"runtime_version_mismatch": {6, "The CLI and daemon versions differ.", "Run mcparcel runtime restart."},
 	"runtime_busy":             {6, "The daemon has active work.", "Wait for completion or use mcparcel runtime restart --force."},
 	"runtime_start_failed":     {6, "The daemon did not become ready.", "Check runtime status and the daemon log."},
-	"runtime_supervised":       {6, "A supervisor runs this runtime (mcparcel runtime serve).", "Start or restart it through its supervisor; remove the supervised file in the runtime directory to let the CLI start one."},
+	"runtime_supervised":       {6, "A supervisor runs this runtime (mcparcel runtime serve).", "Start or restart it through its supervisor. To let the CLI start one, remove runtime.supervised from config.json and the supervised file in the runtime directory."},
 	"schema_cache_miss":        {6, "No cached tool schema is available.", "Run mcparcel tools without --cached."},
 	"invalid_schema":           {6, "The server returned an invalid tool schema.", "Check the MCP server implementation."},
 	"tool_not_found":           {2, "The tool is not advertised by this connection.", "Run mcparcel tools for this connection."},

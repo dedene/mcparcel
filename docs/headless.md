@@ -8,9 +8,10 @@ server. The agent container holds no secret.
 
 Built in stage 12 ([plan](superpowers/plans/2026-10-07-mcparcel-stage-12-headless-linux.md)).
 The contracts behind this guide are in [runtime.md](runtime.md#headless-mode-stage-12),
-[catalog.md](catalog.md) and [cli.md](cli.md). Not yet done: the end-to-end
-proof through real claw-wrap in a read-only Linux container (stage 12, task
-10), and a run against the real Front server.
+[catalog.md](catalog.md) and [cli.md](cli.md). The end-to-end proof through
+real claw-wrap in a read-only Linux container is in
+[feasibility.md](feasibility.md) (`make test-headless-e2e`). Not yet done: a
+run against the real Front server.
 
 ## The pod
 
@@ -339,14 +340,35 @@ A call whose server asks for approval returns at once with an
 `mcparcel runtime serve` runs the daemon in the foreground. It takes the
 daemon lock itself, logs to the daemon log and to stderr, never exits when
 idle, and on SIGTERM ends active calls (`outcome_unknown` for dispatched ones),
-closes its sessions and exits 0. It marks `run/supervised`, after which CLIs
-wait up to 15 seconds for the served runtime instead of starting their own and
-`runtime restart` is refused (`runtime_supervised`). Delete that file to go
-back to auto-start.
+closes its sessions and exits 0. A supervised runtime makes CLIs wait up to 15
+seconds for it instead of starting their own (then `runtime_supervised`, exit
+6), and refuses `runtime restart` (`runtime_supervised`).
+
+Declare it in the ConfigMap's `config.json`:
+
+```json
+{"schemaVersion": 1, "runtime": {"mode": "headless", "stateRoot": "/var/lib/mcparcel", "supervised": true}}
+```
+
+`supervised` is allowed in headless mode only. Do not rely on the
+`run/supervised` file that `serve` writes once it holds the lock: the state
+emptyDir is empty on every pod start, so a CLI that runs before `serve` has
+started finds neither socket nor file and would auto-start a daemon from
+claw-wrap's environment, which in this design has no Front variables. `serve`
+then fails `runtime_busy` and restarts in a loop, while the auto-started
+daemon answers `config_required`. With `supervised: true` the CLI never
+starts a daemon, whatever the emptyDir holds. Remove both the setting and the
+file to go back to auto-start.
 
 With `serve` in a third container that holds the Front variables and mounts
 `mcparcel-state` and `mcparcel-config` at the same paths, claw-wrap holds no
 Front secret and only runs the CLI. Both containers must run as the same UID
 (the socket checks the peer UID) and use the same configuration path, or the
 CLI gets `runtime_config_mismatch`. That container needs a reaping PID 1 too.
-Choose this or auto-start before deploying; the guide above uses auto-start.
+Run it as a native sidecar (an `initContainers` entry with
+`restartPolicy: Always`, Kubernetes 1.29 or later) listed before claw-wrap,
+with a startup probe that waits for the socket (for example
+`exec: {command: [test, -S, /var/lib/mcparcel/run/daemon.sock]}`), so
+the kubelet starts claw-wrap and the agent only once the runtime answers.
+Then calls do not spend their first 15 seconds waiting. Choose this or
+auto-start before deploying; the guide above uses auto-start.

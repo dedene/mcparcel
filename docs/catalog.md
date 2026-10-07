@@ -235,7 +235,9 @@ state and runtime then live under `<stateRoot>/data`, `/cache`, `/state` and
 `/run` (`XDG_DATA_HOME`, `XDG_CACHE_HOME`, `XDG_STATE_HOME` and
 `MCPARCEL_RUNTIME_DIR` no longer apply); the configuration stays at
 `$XDG_CONFIG_HOME/mcparcel` and is read-only (`config_read_only` for every
-write). Linux supports headless mode only.
+write). Linux supports headless mode only. `runtime.supervised: true`
+(headless only, default `false`) declares that `mcparcel runtime serve` owns
+the runtime, so no CLI auto-starts one ([runtime.md](runtime.md)).
 
 Local profile example (reference and account name are placeholders):
 

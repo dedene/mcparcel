@@ -11,9 +11,11 @@ import (
 
 // supervisedMarker in the runtime directory records that a supervisor runs
 // this user's runtime (mcparcel runtime serve). It outlives serve on purpose:
-// while serve is down (start ordering, a crash, a supervisor restart), a CLI
-// must wait for it instead of auto-starting a daemon from its own
+// once serve has started, while it is down (a crash, a supervisor restart) a
+// CLI must wait for it instead of auto-starting a daemon from its own
 // environment, which would hold the lock and keep the supervised runtime out.
+// It cannot cover the time before serve first takes the lock, such as a
+// fresh emptyDir on every pod start; runtime.supervised in config.json does.
 const supervisedMarker = "supervised"
 
 // MarkSupervised records the runtime directory as supervisor-owned. The
@@ -31,8 +33,12 @@ func MarkSupervised(paths config.Paths) error {
 	return f.Close()
 }
 
-// Supervised reports whether a supervisor owns the runtime directory.
+// Supervised reports whether a supervisor owns the runtime: config.json
+// says so (runtime.supervised), or runtime serve marked the directory.
 func Supervised(paths config.Paths) (bool, error) {
+	if paths.Supervised {
+		return true, nil
+	}
 	dir, err := config.OpenPrivateDirUnder(paths.StateRoot, paths.RuntimeDir, false)
 	if errors.Is(err, os.ErrNotExist) {
 		return false, nil

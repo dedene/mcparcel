@@ -69,6 +69,23 @@ func TestCommandPathsHeadlessStateRoot(t *testing.T) {
 	}
 }
 
+func TestCommandPathsSupervised(t *testing.T) {
+	p, root := headlessEnv(t)
+	if got, err := commandPaths(); err != nil || got.Supervised {
+		t.Fatalf("%+v %v", got, err)
+	}
+	raw, err := json.Marshal(map[string]any{"schemaVersion": 1, "runtime": map[string]any{"mode": "headless", "stateRoot": root, "supervised": true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(p.ConfigFile, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := commandPaths(); err != nil || !got.Supervised || got.StateRoot != root {
+		t.Fatalf("%+v %v", got, err)
+	}
+}
+
 func TestRuntimeCommandModeByPlatform(t *testing.T) {
 	metadataEnv(t)
 	code, stdout, stderr := run(t, "runtime", "status", "--json")
