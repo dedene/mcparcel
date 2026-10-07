@@ -87,39 +87,39 @@ you say so. `Automated` is `yes` when the runner runs the row by default and
 
 | Connection | Transport | Status | Automated | Evidence or blocker |
 | --- | --- | --- | --- | --- |
-| `local:blender` | stdio-uvx | not_run | no | Needs Blender running with the blender-mcp addon. |
-| `local:browserstack` | stdio-npx | not_run | yes | |
-| `local:bugsnag` | stdio-npx | not_run | yes | |
+| `local:blender` | stdio-uvx | passed | no | 2026-10-07, 0.1.0-rc.1+6476830.dirty, rev 51, hmac 43826a442e7b |
+| `local:browserstack` | stdio-npx | passed | yes | 2026-10-07, 0.1.0-rc.1+6476830.dirty, rev 1, hmac 478f01f3866a |
+| `local:bugsnag` | stdio-npx | passed | yes | 2026-10-07, 0.1.0-rc.1+6476830.dirty, rev 3, hmac 609b4614c5ce |
 | `local:chrome-devtools` | stdio-npx | not_run | no | Needs Chrome running and accepting `--autoConnect`. |
 | `local:codex-cu` | stdio-node | not_run | no | Needs the Codex Computer Use plugin; run from a terminal. |
-| `local:context-mode` | stdio-npx | not_run | yes | |
-| `local:context7` | stdio-npx | not_run | yes | |
-| `local:exa` | stdio-npx | not_run | yes | |
-| `local:excalidraw` | stdio-docker | not_run | no | Needs Docker Desktop running. |
-| `local:figma` | https-oauth | not_run | yes | |
-| `local:firecrawl` | stdio-npx | not_run | yes | |
-| `local:front-mcp` | https-oauth | not_run | yes | |
-| `local:glitchtip` | https-oauth | not_run | yes | |
-| `local:higgsfield` | https-oauth | not_run | yes | |
-| `local:home-assistant` | http-internal | not_run | no | Needs the home network. |
-| `local:lighthouse` | stdio-npx | not_run | yes | |
-| `local:maestro` | stdio-binary | not_run | yes | |
+| `local:context-mode` | stdio-npx | passed | yes | 2026-10-07, 0.1.0-rc.1+6476830.dirty, rev 5, hmac 75bb411346fc |
+| `local:context7` | stdio-npx | passed | yes | 2026-10-07, 0.1.0-rc.1+6476830.dirty, rev 7, hmac ee947ad5b31f |
+| `local:exa` | stdio-npx | passed | yes | 2026-10-07, 0.1.0-rc.1+6476830.dirty, rev 9, hmac 04e2be2bde8d |
+| `local:excalidraw` | stdio-docker | blocked | no | The host Excalidraw canvas server was not running on 2026-10-07 and the container has auto-start disabled (tool_error at call, same under mcporter): start the canvas server on the host, then rerun. |
+| `local:figma` | https-oauth | passed | yes | 2026-10-07, 0.1.0-rc.1+6476830.dirty, rev 11, hmac c963425c362b |
+| `local:firecrawl` | stdio-npx | passed | yes | 2026-10-07, 0.1.0-rc.1+6476830.dirty, rev 13, hmac 26dd50c2f1ca |
+| `local:front-mcp` | https-oauth | passed | yes | 2026-10-07, 0.1.0-rc.1+6476830.dirty, rev 15, hmac 3ad334eb6f8e |
+| `local:glitchtip` | https-oauth | passed | yes | 2026-10-07, 0.1.0-rc.1+6476830.dirty, rev 17, hmac 02a6276a9d01 |
+| `local:higgsfield` | https-oauth | passed | yes | 2026-10-07, 0.1.0-rc.1+6476830.dirty, rev 19, hmac 3f95a175a155 |
+| `local:home-assistant` | http-internal | passed | no | 2026-10-07, 0.1.0-rc.1+6476830.dirty, rev 53, hmac f98674eb9e81 |
+| `local:lighthouse` | stdio-npx | passed | yes | 2026-10-07, 0.1.0-rc.1+6476830.dirty, rev 21, hmac 1fdd2d503040 |
+| `local:maestro` | stdio-binary | passed | yes | 2026-10-07, 0.1.0-rc.1+6476830.dirty, rev 23, hmac 8779fbde8f4e |
 | `local:mobbin` | https-oauth | not_run | no | Not signed in on 2026-10-07, so no workflow tool yet: sign in, then pick a read-only search tool. |
-| `local:neuronwriter` | https-oauth | not_run | yes | |
-| `local:notion` | https-oauth | not_run | yes | |
-| `local:octocode` | stdio-npx | not_run | yes | |
-| `local:ovh-logs` | stdio-uvx | not_run | yes | |
-| `local:paper` | http-loopback | not_run | no | Needs the Paper app running with a file open. |
-| `local:perplexity` | stdio-npx | not_run | yes | |
-| `local:proxmox-mcp-plus` | stdio-uvx | not_run | yes | |
-| `local:rails-blocks` | stdio-binary | not_run | yes | |
-| `local:rubrikit-staging` | https-oauth | not_run | yes | |
+| `local:neuronwriter` | https-oauth | passed | yes | 2026-10-07, 0.1.0-rc.1+6476830.dirty, rev 25, hmac 2ddba5127fdf |
+| `local:notion` | https-oauth | passed | yes | 2026-10-07, 0.1.0-rc.1+6476830.dirty, rev 27, hmac 9864404bedff |
+| `local:octocode` | stdio-npx | passed | yes | 2026-10-07, 0.1.0-rc.1+6476830.dirty, rev 29, hmac d0c7aa746b83 |
+| `local:ovh-logs` | stdio-uvx | passed | yes | 2026-10-07, 0.1.0-rc.1+6476830.dirty, rev 31, hmac 23d98dd27941 |
+| `local:paper` | http-loopback | passed | no | 2026-10-07, 0.1.0-rc.1+6476830.dirty, rev 55, hmac b0529c308ccc |
+| `local:perplexity` | stdio-npx | passed | yes | 2026-10-07, 0.1.0-rc.1+6476830.dirty, rev 33, hmac 279d9e68c4d4 |
+| `local:proxmox-mcp-plus` | stdio-uvx | passed | yes | 2026-10-07, 0.1.0-rc.1+6476830.dirty, rev 35, hmac 9e67c9fd40b0 |
+| `local:rails-blocks` | stdio-binary | passed | yes | 2026-10-07, 0.1.0-rc.1+6476830.dirty, rev 37, hmac 3aac1238d86d |
+| `local:rubrikit-staging` | https-oauth | passed | yes | 2026-10-07, 0.1.0-rc.1+6476830.dirty, rev 39, hmac c01667e355dd |
 | `local:se-ranking` | https-header | not_run | no | The server rejected the Authorization header on 2026-10-07: fix the key, then pick a read-only tool. |
-| `local:sequential-thinking` | stdio-npx | not_run | yes | |
-| `local:slack` | https-oauth | not_run | yes | |
-| `local:treg` | https-header | not_run | yes | |
-| `local:typefully` | https-oauth | not_run | yes | |
-| `local:uptimerobot` | https-oauth | not_run | yes | |
+| `local:sequential-thinking` | stdio-npx | passed | yes | 2026-10-07, 0.1.0-rc.1+6476830.dirty, rev 41, hmac 0d3480d3c862 |
+| `local:slack` | https-oauth | passed | yes | 2026-10-07, 0.1.0-rc.1+6476830.dirty, rev 43, hmac 3c14b70a0891 |
+| `local:treg` | https-header | passed | yes | 2026-10-07, 0.1.0-rc.1+6476830.dirty, rev 45, hmac ea4dfb9dc027 |
+| `local:typefully` | https-oauth | passed | yes | 2026-10-07, 0.1.0-rc.1+6476830.dirty, rev 47, hmac cb9af94acf21 |
+| `local:uptimerobot` | https-oauth | passed | yes | 2026-10-07, 0.1.0-rc.1+6476830.dirty, rev 49, hmac e8acf1d616d3 |
 
 Replacement ready means the 32 original connections are `passed` or `waived`;
 `codex-cu` is tracked separately (stage 8b).
