@@ -298,3 +298,16 @@ func newDialog(paths config.Paths) func(context.Context, []string) (string, erro
 		return string(b), err
 	}
 }
+
+// onePasswordAppDirs never points at the real /Applications: black-box tests
+// put a 1Password.app directory in StateDir/fixture-apps when they need one.
+func onePasswordAppDirs(paths config.Paths) []string {
+	return []string{filepath.Join(paths.StateDir, "fixture-apps")}
+}
+
+// retainEnabled is true only when StateDir/fixture-retain exists, so the
+// race-built test binaries are not copied by every test that starts a daemon.
+func retainEnabled(paths config.Paths) bool {
+	_, err := os.Stat(filepath.Join(paths.StateDir, "fixture-retain"))
+	return err == nil
+}

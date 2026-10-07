@@ -179,3 +179,26 @@ func TestPoolEnvRefAuthRequiredNextAction(t *testing.T) {
 		t.Fatal("error leaked value")
 	}
 }
+
+// The env: Keychain fallback's identity is fixed: /usr/bin/security, account
+// = login user, service = the variable name. No binary path, version or
+// signature takes part, so an upgrade reads the same item. Changing any of
+// this strands stored values; fail here on purpose.
+func TestKeychainReadArgvIsFixed(t *testing.T) {
+	if securityBin != "/usr/bin/security" {
+		t.Fatal(securityBin)
+	}
+	p, _ := testutil.IsolatedPaths(t)
+	script, argv := filepath.Join(p.Home, "security"), filepath.Join(p.Home, "argv")
+	body := "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\" >> '" + argv + "'; done\nprintf 'value\\n'\n"
+	if err := os.WriteFile(script, []byte(body), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if v, err := keychainRead(t.Context(), script, "fixture user", "EXA_API_KEY"); err != nil || v != "value" {
+		t.Fatal(v, err)
+	}
+	got, err := os.ReadFile(argv)
+	if err != nil || string(got) != "find-generic-password\n-a\nfixture user\n-s\nEXA_API_KEY\n-w\n" {
+		t.Fatalf("argv %q %v", got, err)
+	}
+}

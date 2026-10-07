@@ -63,10 +63,21 @@ Een lokale sessie van 24 uur garandeert geen onmiddellijke intrekking bij offboa
 
 ## Status
 
-Dit project bevindt zich in de ontwerpfase. Er is hier nog geen implementatie,
-geen npm-publicatie en geen geregistreerd domein.
+Release candidate `0.1.0-rc.1`. It installs from a local tarball and is not
+published to npm. The npm package supports macOS on Apple Silicon only; Linux
+runs headless from a static binary (see [docs/headless.md](docs/headless.md)).
+The macOS binary is ad-hoc signed. It is not Developer ID signed or notarized.
 
-Een eerdere verpakkingsproef in an earlier prototype toonde
-lokaal aan dat een npm-package een Go-binary kan starten via `npx`. Die proef
-ondersteunde alleen macOS Apple Silicon en bevatte geen MCP-functionaliteit.
-Er is nog geen code vanuit die map overgenomen.
+## Install from a local tarball
+
+You need Node.js 20 or newer; Go and Homebrew are not needed to run it.
+
+```sh
+make npm-pack
+npx --yes --package ./dist/mcparcel-0.1.0-rc.1.tgz mcparcel doctor
+# or install it globally
+npm install -g ./dist/mcparcel-0.1.0-rc.1.tgz
+```
+
+Upgrading, rolling back and returning to mcporter are described in
+[docs/migration.md](docs/migration.md).

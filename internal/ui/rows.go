@@ -144,25 +144,13 @@ func enabledMark(row config.EffectiveConnection) string {
 // missingConfig names each declared input without a value or default, then the
 // credential profile when it is unbound or the bound profile is gone.
 func missingConfig(state config.State, row config.EffectiveConnection) []string {
-	if row.Definition == nil {
-		return nil
-	}
-	sel := state.Selections.Connections[row.ID]
+	inputs, profile := config.MissingConfig(state, row)
 	var out []string
-	names := make([]string, 0, len(row.Definition.Inputs))
-	for name := range row.Definition.Inputs {
-		names = append(names, name)
+	for _, name := range inputs {
+		out = append(out, "input "+output.DisplayMetadata(name))
 	}
-	slices.Sort(names)
-	for _, name := range names {
-		if _, ok := sel.Inputs[name]; !ok && row.Definition.Inputs[name].Default == nil {
-			out = append(out, "input "+output.DisplayMetadata(name))
-		}
-	}
-	if row.Definition.CredentialProfile != "" {
-		if _, ok := state.Local.CredentialProfiles[sel.CredentialProfile]; sel.CredentialProfile == "" || !ok {
-			out = append(out, "credential profile")
-		}
+	if profile {
+		out = append(out, "credential profile")
 	}
 	return out
 }

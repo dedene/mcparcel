@@ -97,7 +97,8 @@ func TestMain(m *testing.M) {
 				_ = session.Close(closeCtx)
 			}()
 		}
-		if e = Serve(ctx, DaemonOptions{Paths: p, Version: v, Lock: lock, LoginEnv: login, EnvFallback: e != nil, Handler: h, Log: log}); e != nil {
+		self, _ := os.Executable()
+		if e = Serve(ctx, DaemonOptions{Paths: p, Version: v, Executable: self, Lock: lock, LoginEnv: login, EnvFallback: e != nil, Handler: h, Log: log}); e != nil {
 			os.Exit(2)
 		}
 		return
@@ -110,7 +111,7 @@ func TestMain(m *testing.M) {
 		ctx, c := context.WithTimeout(context.Background(), 10*time.Second)
 		defer c()
 		exe, _ := os.Executable()
-		if _, e = StartDaemon(ctx, p, exe, os.Environ()); e != nil {
+		if _, e = startPlain(ctx, p, exe, os.Environ()); e != nil {
 			_, _ = fmt.Fprintf(os.Stderr, "helper start: %T\n", e)
 			os.Exit(2)
 		}

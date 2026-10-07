@@ -65,6 +65,13 @@ func WriteHuman(w io.Writer, data any) error {
 			return NewError("protocol_error", nil)
 		}
 		b.WriteString(humanInspect(*value))
+	case DoctorData:
+		humanDoctor(&b, value)
+	case *DoctorData:
+		if value == nil {
+			return NewError("protocol_error", nil)
+		}
+		humanDoctor(&b, *value)
 	case string:
 		b.WriteString(value)
 	case error:

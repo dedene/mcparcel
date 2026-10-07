@@ -45,6 +45,7 @@ var registry = map[string]errorSpec{
 	"invalid_catalog":           {2, "The fetched catalog is invalid or is not a regular file.", "Fix the catalog path or content in the repository, then retry."},
 	"invalid_repository":        {2, "Invalid repository argument.", "Use a repository name in owner/repo form."},
 	"catalog_too_large":         {2, "The catalog response exceeds its size limit.", "Keep catalog files at or below 2 MiB and API responses within the supported bounds."},
+	"catalog_requires_upgrade":  {4, "This catalog needs a newer MCParcel.", "Upgrade MCParcel (docs/migration.md), then run the command again."},
 	"catalog_bindings_conflict": {2, "The catalog update conflicts with saved local bindings.", "Review the candidate and reconcile selections.json bindings before retrying sync."},
 
 	"import_blocked":      {2, "Selected import entries require changes.", "Review the import report, provide bindings, or choose an applicable --only subset."},
@@ -91,6 +92,7 @@ var registry = map[string]errorSpec{
 	"export_failed":            {1, "The call finished, but MCParcel could not save its image or audio blocks.", "The full result is in data.result; fix the output directory. Do not call the tool again just to export."},
 	"input_required":           {6, "The MCP server requires an unsupported interactive response.", "Use a client that supports this server interaction."},
 	"canceled":                 {130, "The operation was canceled.", ""},
+	"doctor_failed":            {8, "Doctor found failed checks.", "Fix the failed checks, starting with the first; each row has its next action."},
 
 	"keychain_unavailable":      {3, "The macOS Keychain could not store or read the sign-in.", "Unlock the login keychain, then try again."},
 	"auth_callback_unavailable": {3, "The sign-in callback address is in use.", "Close the program using that port, then try again."},

@@ -2,7 +2,7 @@ SHELL := /bin/bash
 
 .DEFAULT_GOAL := build
 
-.PHONY: build build-linux npm-binary test test-linux test-headless-e2e test-packaging lint fmt-check vet-linux ci tools
+.PHONY: build build-linux npm-binary npm-pack test test-linux test-headless-e2e test-packaging lint fmt-check vet-linux ci tools
 
 BIN := $(CURDIR)/bin/mcparcel
 NPM_BIN := $(CURDIR)/packaging/npm/dist/mcparcel
@@ -15,6 +15,15 @@ VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT := $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo "")
 DATE := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -X $(PKG).version=$(VERSION) -X $(PKG).commit=$(COMMIT) -X $(PKG).date=$(DATE)
+
+# packaging/npm/package.json is the release version source. The npm binary is
+# <version>+<commit>, and a build from a tree with uncommitted changes adds
+# .dirty.<UTC seconds>: it claims no clean commit, and two such builds never
+# pass the daemon handshake as the same version. Recursive (=) so only npm
+# targets run node and git status.
+NPM_VERSION = $(shell node -p "require('./packaging/npm/package.json').version" 2>/dev/null)
+NPM_DIRTY = $(shell test -z "$$(git status --porcelain 2>/dev/null)" || date -u +.dirty.%Y%m%d%H%M%S)
+NPM_LDFLAGS = -X $(PKG).version=$(NPM_VERSION)+$(COMMIT)$(NPM_DIRTY) -X $(PKG).commit=$(COMMIT) -X $(PKG).date=$(DATE)
 
 # The 1Password desktop integration and the Keychain binding need CGO.
 export CGO_ENABLED := 1
@@ -36,9 +45,19 @@ build-linux:
 		GOOS=linux GOARCH=$$arch CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o $(DIST)/mcparcel-linux-$$arch $(CMD) || exit 1; \
 	done
 
+# Ad-hoc signed with a stable identifier (the linker's own signature says
+# a.out). Not Developer ID signed or notarized.
 npm-binary:
+	@test -n "$(NPM_VERSION)" -a -n "$(COMMIT)" || { echo "npm-binary needs node and a git checkout"; exit 1; }
 	@mkdir -p $(dir $(NPM_BIN))
-	@GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o $(NPM_BIN) $(CMD)
+	@GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "$(NPM_LDFLAGS)" -o $(NPM_BIN) $(CMD)
+	@codesign --force --sign - --identifier mcparcel $(NPM_BIN)
+	@codesign --verify --strict $(NPM_BIN)
+
+# A local tarball in dist/; package.json keeps private: true, so npm publish refuses.
+npm-pack: npm-binary
+	@mkdir -p $(DIST)
+	@cd packaging/npm && npm pack --pack-destination $(DIST)
 
 test:
 	@go test -race -timeout 20m ./...

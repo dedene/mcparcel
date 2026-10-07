@@ -223,8 +223,12 @@ func KeychainLookup(ctx context.Context, name string) (string, error) {
 	if err != nil || u.Username == "" {
 		return "", errKeychain
 	}
-	return keychainRead(ctx, "/usr/bin/security", u.Username, name)
+	return keychainRead(ctx, securityBin, u.Username, name)
 }
+
+// securityBin is the Keychain tool. Items it creates trust it, not mcparcel,
+// so a new mcparcel binary or signature reads them without a prompt.
+const securityBin = "/usr/bin/security"
 
 // keychainRead never surfaces stderr or exit details; only success matters.
 func keychainRead(ctx context.Context, bin, account, service string) (string, error) {

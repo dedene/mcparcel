@@ -25,33 +25,51 @@ func legacyState(personal Personal, local Local) State {
 }
 
 func ReadState(ctx context.Context, paths Paths) (State, error) {
-	if err := ctx.Err(); err != nil {
+	var state State
+	err := withReadLock(ctx, paths, func() error {
+		var readErr error
+		state, readErr = readStateUnlocked(paths)
+		return readErr
+	})
+	if err != nil {
 		return State{}, err
+	}
+	return state, nil
+}
+
+// withReadLock runs read under the shared configuration lock. It never
+// creates the lock file: when it is absent, read runs unlocked, then once more
+// under the lock if a writer created it meanwhile. It waits for a writer's
+// exclusive lock until ctx ends. The error is the lock's, the context's or the
+// last read's.
+func withReadLock(ctx context.Context, paths Paths, read func() error) error {
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	lock, err := acquireConfigLock(ctx, paths, false, false)
 	if err == nil {
 		defer releaseConfigLock(lock)
-		state, err := readStateUnlocked(paths)
+		readErr := read()
 		if canceled := ctx.Err(); canceled != nil {
-			return State{}, canceled
+			return canceled
 		}
-		return state, err
+		return readErr
 	}
 	if !errors.Is(err, os.ErrNotExist) {
-		return State{}, err
+		return err
 	}
-	state, readErr := readStateUnlocked(paths)
+	readErr := read()
 	lock, err = acquireConfigLock(ctx, paths, false, false)
 	if err == nil {
 		defer releaseConfigLock(lock)
-		state, readErr = readStateUnlocked(paths)
+		readErr = read()
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return State{}, err
+		return err
 	}
 	if err := ctx.Err(); err != nil {
-		return State{}, err
+		return err
 	}
-	return state, readErr
+	return readErr
 }
 
 func readStateUnlocked(paths Paths) (State, error) {

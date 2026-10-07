@@ -9,7 +9,19 @@ var (
 	ErrConfigRequired = errors.New("configuration required")
 	ErrUnsafePath     = errors.New("unsafe local path")
 	ErrNotFound       = errors.New("connection unavailable")
+	// ErrNotCreated marks an ErrUnsafePath from a private directory or file
+	// that could not be created (a read-only, full or unwritable parent), not
+	// one that failed a safety check. Only a caller that can do without the
+	// directory tells the two apart; to everyone else it is ErrUnsafePath.
+	ErrNotCreated = errors.New("directory could not be created")
 )
+
+type notCreatedError struct{}
+
+func (notCreatedError) Error() string { return ErrUnsafePath.Error() }
+func (notCreatedError) Is(target error) bool {
+	return target == ErrUnsafePath || target == ErrNotCreated
+}
 
 type InputRef struct {
 	Input string `json:"input"`

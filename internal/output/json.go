@@ -28,13 +28,21 @@ type ToolList struct {
 
 func WriteJSON(w io.Writer, data any, failure *Error) error {
 	if failure != nil {
-		if failure.Code == "tool_error" || failure.Code == "input_required" || failure.Code == "export_failed" {
+		switch failure.Code {
+		case "tool_error", "input_required", "export_failed":
 			switch data.(type) {
 			case CallData, *CallData:
 			default:
 				data = nil
 			}
-		} else {
+		case "doctor_failed":
+			// Doctor ran: its rows are the result, like a tool_error's result.
+			switch data.(type) {
+			case DoctorData, *DoctorData:
+			default:
+				data = nil
+			}
+		default:
 			data = nil
 		}
 	}

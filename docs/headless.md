@@ -311,6 +311,16 @@ contain `pid1_no_reaper`. `mcparcel runtime status` (in the sidecar, with
 `XDG_CONFIG_HOME=/etc`) prints `Environment: daemon environment`; it never
 starts a daemon.
 
+`XDG_CONFIG_HOME=/etc mcparcel doctor --json` in the sidecar checks the mode,
+state root, configuration, the `env:` variable names and the runtime's version
+without starting a daemon or writing anything. It reads the variables of the
+`kubectl exec` shell, not the daemon's, so a missing variable is only a warning
+there. `runtime.binary` is skipped: headless mode runs the image's binary in
+place and keeps no retained copy. `doctor front --live` never
+starts a runtime in headless mode, also when the daemon idles out between
+doctor's probe and its live call; run it after a claw-wrap call started one (or
+under `runtime serve`). Do not add `doctor` to the claw-wrap allow list.
+
 Do not run `tools` or `call` from a `kubectl exec` shell in the sidecar. That
 shell does not have the Front variables, and a CLI started there that finds no
 daemon starts one without them, which then fails `config_required` until a

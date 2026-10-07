@@ -17,31 +17,6 @@ import (
 	"github.com/dedene/mcparcel/internal/output"
 )
 
-type Status struct {
-	Running         bool       `json:"running"`
-	PID             int        `json:"pid"`
-	ProtocolVersion int        `json:"protocolVersion"`
-	BinaryVersion   string     `json:"binaryVersion"`
-	Compatible      bool       `json:"compatible"`
-	Socket          string     `json:"socket"`
-	Log             string     `json:"log"`
-	CapturedPath    string     `json:"capturedPath"`
-	EnvFallback     bool       `json:"envFallback"`
-	ActiveCalls     int        `json:"activeCalls"`
-	StayAlive       bool       `json:"stayAlive"`
-	StartedAt       *time.Time `json:"startedAt"`
-	// CredentialSessions lists the daemon's 1Password profile sessions.
-	CredentialSessions []CredentialSession `json:"credentialSessions,omitempty"`
-}
-
-// CredentialSession is one credential profile session; it never carries an
-// account, a reference or a value.
-type CredentialSession struct {
-	Profile   string    `json:"profile"`
-	Mode      string    `json:"mode"`
-	State     string    `json:"state"` // active | expired
-	ExpiresAt time.Time `json:"expiresAt"`
-}
 type CallRequest struct {
 	Connection string
 	Tool       string
@@ -62,7 +37,13 @@ type Client struct {
 	Paths      config.Paths
 	Version    string
 	Executable string
-	NoInput    bool
+	// Retain starts a desktop daemon from a retained copy of Executable
+	// (RetainedPath); headless mode never retains.
+	Retain bool
+	// NoStart makes Ensure return ErrNotRunning where it would start a
+	// daemon (doctor --live in an unsupervised headless runtime).
+	NoStart bool
+	NoInput bool
 	// OnAuthURL receives the authorization URL of a running login.
 	OnAuthURL func(string)
 	// Prompt ("terminal" or "dialog") and OnElicit let a call's server ask
@@ -93,6 +74,9 @@ func requestFrame(kind, id string, v any) Frame {
 	return Frame{ProtocolVersion, kind, id, b}
 }
 func emptyArgs() args.Raw { return args.Raw{Values: map[string]args.Value{}} }
+
+// ErrNotRunning is Ensure's error with NoStart when no runtime answers.
+var ErrNotRunning = errors.New("the runtime is not running")
 
 // ensureTimeout bounds Ensure, including its wait for a supervised runtime.
 var ensureTimeout = 15 * time.Second
@@ -152,7 +136,10 @@ func (c *Client) Ensure(ctx context.Context) (err error) {
 			}
 			continue
 		}
-		if _, e = StartDaemon(ctx, c.Paths, exe, DaemonEnvironment(c.Paths)); e != nil {
+		if c.NoStart {
+			return ErrNotRunning
+		}
+		if _, e = startDaemon(ctx, c.Paths, exe, DaemonEnvironment(c.Paths), config.OpenPrivateFile, c.retainHook()); e != nil {
 			return e
 		}
 		select {
@@ -164,6 +151,21 @@ func (c *Client) Ensure(ctx context.Context) (err error) {
 }
 
 func (c *Client) exchange(ctx context.Context, intent string, r Request, ensure bool) (Response, string, error) {
+	return c.exchangeAck(ctx, intent, r, ensure, nil)
+}
+
+// handshakeInfo records how far an exchange got: whether it connected, and
+// the handshake's ack and error, which exchange itself does not return.
+type handshakeInfo struct {
+	connected bool
+	ack       HelloAck
+	err       error
+}
+
+func (c *Client) exchangeAck(ctx context.Context, intent string, r Request, ensure bool, info *handshakeInfo) (Response, string, error) {
+	if info == nil {
+		info = &handshakeInfo{}
+	}
 	var out Response
 	id := newRequestID()
 	if id == "" {
@@ -182,6 +184,7 @@ func (c *Client) exchange(ctx context.Context, intent string, r Request, ensure 
 		return out, id, e
 	}
 	defer func() { _ = conn.Close() }()
+	info.connected = true
 	watchDone := make(chan struct{})
 	watchExited := make(chan struct{})
 	go func() {
@@ -192,7 +195,8 @@ func (c *Client) exchange(ctx context.Context, intent string, r Request, ensure 
 		case <-watchDone:
 		}
 	}()
-	_, e = ClientHandshake(conn, c.Version, intent, id, configRoot(c.Paths.ConfigDir))
+	info.ack, e = ClientHandshake(conn, c.Version, intent, id, configRoot(c.Paths.ConfigDir))
+	info.err = e
 	close(watchDone)
 	<-watchExited
 	if ctx.Err() != nil {
@@ -400,44 +404,6 @@ func (c *Client) Refresh(ctx context.Context, canonical string) (RefreshData, er
 		e = decodeBody(r.Data, &out)
 	}
 	return out, e
-}
-
-func (c *Client) baseStatus() Status {
-	return Status{ProtocolVersion: ProtocolVersion, BinaryVersion: c.Version, Compatible: true, Socket: c.Paths.SocketFile, Log: c.Paths.LogFile}
-}
-
-func (c *Client) Status(ctx context.Context) (Status, error) {
-	out := c.baseStatus()
-	probe, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
-	for {
-		r, _, e := c.exchange(probe, "status", Request{Method: "status", Arguments: emptyArgs()}, false)
-		if e == nil {
-			if e = decodeBody(r.Data, &out); e != nil {
-				return out, e
-			}
-			return out, nil
-		}
-		if errors.Is(e, config.ErrUnsafePath) {
-			return out, e
-		}
-		var oe *output.Error
-		if errors.As(e, &oe) {
-			return out, e
-		}
-		held, le := lockHeld(c.Paths)
-		if le != nil {
-			return out, le
-		}
-		if !held && (errors.Is(e, os.ErrNotExist) || errors.Is(e, syscall.ECONNREFUSED)) {
-			return out, nil
-		}
-		select {
-		case <-probe.Done():
-			return out, output.NewError("runtime_start_failed", nil)
-		case <-time.After(25 * time.Millisecond):
-		}
-	}
 }
 
 type StopData struct {

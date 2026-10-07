@@ -22,19 +22,32 @@ func Load(paths Paths) (Snapshot, error) {
 	if err != nil {
 		return Snapshot{}, err
 	}
+	s, err := NewSnapshot(state)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if len(s.Effective.Connections) == 0 {
+		return Snapshot{}, ErrConfigRequired
+	}
+	return s, nil
+}
+
+// NewSnapshot resolves state into the snapshot Load returns, without Load's
+// read and without its "no connections" ErrConfigRequired.
+func NewSnapshot(state State) (Snapshot, error) {
 	effective, err := Resolve(state)
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if len(effective.Connections) == 0 {
-		return Snapshot{}, ErrConfigRequired
-	}
 	s := Snapshot{Personal: state.Personal, Local: state.Local, Effective: &effective, Revision: effective.Revision}
 	s.Hash, err = hashJSON([]any{state.Local, state.Personal, state.Selections, state.Catalogs})
+	if err != nil {
+		return Snapshot{}, err
+	}
 	if state.Legacy {
 		s.Effective.SourceRevisions = map[string]string{"personal": s.Hash}
 	}
-	return s, err
+	return s, nil
 }
 
 func readConfig(path string) ([]byte, error) {

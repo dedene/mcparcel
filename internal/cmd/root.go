@@ -53,6 +53,7 @@ type CLI struct {
 	Call    CallCmd    `cmd:"" help:"Call an MCP tool."`
 	Auth    AuthCmd    `cmd:"" help:"Sign in to, inspect or sign out of OAuth connections."`
 	Runtime RuntimeCmd `cmd:"" help:"Inspect, restart or stop the runtime."`
+	Doctor  DoctorCmd  `cmd:"" help:"Check prerequisites, credential mapping, runtime and stored configuration."`
 	Daemon  DaemonCmd  `cmd:"" hidden:""`
 
 	// VersionFlag is --version; it prints what the version command prints.
@@ -204,7 +205,7 @@ func scanIntent(argv []string) parseIntent {
 		}
 		if i.command == "" && !strings.HasPrefix(token, "-") {
 			i.command = token
-			i.product = token == "tools" || token == "call" || token == "auth" || token == "runtime" || token == "daemon" || token == "config" || token == "import" || token == "catalog" || token == "list" || token == "inspect" || token == "enable" || token == "disable" || token == "local" || token == "add" || token == "remove" || token == "sync" || token == "setup"
+			i.product = token == "tools" || token == "call" || token == "auth" || token == "runtime" || token == "daemon" || token == "config" || token == "import" || token == "catalog" || token == "list" || token == "inspect" || token == "enable" || token == "disable" || token == "local" || token == "add" || token == "remove" || token == "sync" || token == "setup" || token == "doctor"
 		}
 	}
 	return i
@@ -222,6 +223,12 @@ func safeFailure(err error) *output.Error {
 	var ambiguous *config.AmbiguousIDError
 	if errors.As(err, &ambiguous) {
 		return output.NewError("ambiguous_id", &output.Details{Candidates: ambiguous.Candidates})
+	}
+	var newer *config.CatalogNewerError
+	if errors.As(err, &newer) {
+		e := output.NewError("catalog_requires_upgrade", nil)
+		e.Message = "This catalog needs MCParcel " + output.DisplayMetadata(newer.Min) + " or newer; this is " + output.DisplayMetadata(newer.Current) + "."
+		return e
 	}
 	var safe *output.Error
 	if errors.As(err, &safe) && safe != nil {

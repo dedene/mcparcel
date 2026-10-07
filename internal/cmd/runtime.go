@@ -46,13 +46,24 @@ func resolveCommandPaths() (config.Paths, config.RuntimeDefaults, error) {
 	if err != nil {
 		return config.Paths{}, config.RuntimeDefaults{}, err
 	}
-	if rt.Mode == config.ModeHeadless {
-		if paths, err = config.ApplyStateRoot(paths, rt.StateRoot); err != nil {
-			return config.Paths{}, config.RuntimeDefaults{}, err
-		}
-		paths.Supervised = rt.Supervised
+	if paths, err = applyRuntime(paths, rt); err != nil {
+		return config.Paths{}, config.RuntimeDefaults{}, err
 	}
 	return paths, rt, nil
+}
+
+// applyRuntime applies config.json's runtime block to the XDG paths. Every
+// command that uses the runtime, doctor included, maps it this way.
+func applyRuntime(paths config.Paths, rt config.RuntimeDefaults) (config.Paths, error) {
+	if rt.Mode != config.ModeHeadless {
+		return paths, nil
+	}
+	applied, err := config.ApplyStateRoot(paths, rt.StateRoot)
+	if err != nil {
+		return config.Paths{}, err
+	}
+	applied.Supervised = rt.Supervised
+	return applied, nil
 }
 
 // runtimePaths is commandPaths for a command that uses the runtime (tools,
@@ -85,8 +96,9 @@ func newRuntimeClient(opts *CommandOptions) (*runtimeclient.Client, error) {
 	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
 		return nil, output.NewError("runtime_start_failed", nil)
 	}
-	// Headless implies --no-input: no prompt, browser or dialog (D10).
-	return &runtimeclient.Client{Paths: paths, Version: version, Executable: exe, NoInput: opts.NoInput || paths.Headless()}, nil
+	// Headless implies --no-input: no prompt, browser or dialog (D10). It also
+	// runs the image's binary in place: no retained copy.
+	return &runtimeclient.Client{Paths: paths, Version: version, Executable: exe, Retain: !paths.Headless() && retainEnabled(paths), NoInput: opts.NoInput || paths.Headless()}, nil
 }
 
 func statusText(status runtimeclient.Status, headless bool) string {
@@ -107,7 +119,11 @@ func statusText(status runtimeclient.Status, headless bool) string {
 		if status.StayAlive {
 			stay = "on"
 		}
-		fmt.Fprintf(&b, "PID: %d\nVersion: %s\nActive calls: %d\nPATH: %s\nEnvironment: %s\nStay-alive: %s\n", status.PID, status.BinaryVersion, status.ActiveCalls, status.CapturedPath, environment, stay)
+		fmt.Fprintf(&b, "PID: %d\nVersion: %s\n", status.PID, status.BinaryVersion)
+		if status.Executable != "" {
+			fmt.Fprintf(&b, "Executable: %s\n", status.Executable)
+		}
+		fmt.Fprintf(&b, "Active calls: %d\nPATH: %s\nEnvironment: %s\nStay-alive: %s\n", status.ActiveCalls, status.CapturedPath, environment, stay)
 	}
 	fmt.Fprintf(&b, "Socket: %s\nLog: %s\n", status.Socket, status.Log)
 	return b.String()

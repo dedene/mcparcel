@@ -36,6 +36,10 @@ func ResolvePaths(getenv func(string) string, home, osTemp string, uid int) (Pat
 	if p.DataDir, err = root("XDG_DATA_HOME", ".local/share"); err != nil {
 		return Paths{}, err
 	}
+	// The retained runtime binary lives here, opened with the no-follow walk.
+	if p.DataDir, err = realParent(p.DataDir); err != nil {
+		return Paths{}, err
+	}
 	if p.CacheDir, err = root("XDG_CACHE_HOME", ".cache"); err != nil {
 		return Paths{}, err
 	}

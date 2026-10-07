@@ -64,8 +64,8 @@ also work via `npx mcparcel ...`. No global installation or Homebrew is required
 | `auth lock` | Through the runtime (starts it if needed): end every 1Password session, cancel protected work (dispatched calls report `outcome_unknown`, queued ones `auth_required`), stop protected processes and bar every OAuth connection from reusing its stored session until its next `auth login` (cause `locked` in `auth status`). Secret-free connections keep running. JSON `{locked}` |
 | `auth refresh <mcp>` | Drop the connection's cached 1Password values; its next call reads them again through the existing session (no prompt) and reconnects only when a value changed. Never starts the runtime; when it is not running nothing is cached and JSON is `{connection, invalidated: false}`, else `{connection, invalidated: true}`. A connection without `op://` references gives `invalid_arguments` (next action `mcparcel runtime restart` when it uses `env:` references) |
 | `auth logout <mcp>` | Remove the Keychain sign-in through the runtime (starts it if needed); JSON `{connection, removed, providerRevoked}`; `providerRevoked` is always false for now. A `client_credentials` connection is refused offline like `auth login` |
-| `doctor [<mcp>] [--live]` | Local prerequisite checks; only explicit live mode connects to specified MCP |
-| `runtime status` / `runtime restart [--force]` / `runtime stop [--force]` | Inspect, restart or stop the daemon; status includes `stayAlive` (human: `Stay-alive: on` or `off`), true when `runtime.keepAlive` is set and an OAuth session may still need refreshing, and `credentialSessions` (`[{profile, mode, state, expiresAt}]`, omitted when there are none; no account or reference); restart and stop refuse active calls unless forced; restart recaptures the login environment and drops pooled sessions, so changed `env:` values apply; stop on a stopped runtime succeeds. Headless mode: status shows `Environment: daemon environment`, and restart starts the new daemon with the forwarded variables of the caller's own environment (no login shell). Against `runtime serve`, restart (also `--force`) is refused with `runtime_supervised` |
+| `doctor [<mcp>] [--live]` | Offline checks of the runtime mode and version, local storage, configuration documents, connections, credential mapping and prerequisites, one row each (see Doctor). With `<mcp>`, connection rows cover that connection only. `--live` needs `<mcp>` and lists its tools through the runtime. Exit 8 when a row fails |
+| `runtime status` / `runtime restart [--force]` / `runtime stop [--force]` | Inspect, restart or stop the daemon; status includes `executable` (the file the daemon runs from: on desktop its retained copy `<data>/runtime/<version>/mcparcel`, human `Executable:`), `stayAlive` (human: `Stay-alive: on` or `off`), true when `runtime.keepAlive` is set and an OAuth session may still need refreshing, and `credentialSessions` (`[{profile, mode, state, expiresAt}]`, omitted when there are none; no account or reference); restart and stop refuse active calls unless forced; restart recaptures the login environment and drops pooled sessions, so changed `env:` values apply; stop on a stopped runtime succeeds. Headless mode: status shows `Environment: daemon environment`, and restart starts the new daemon with the forwarded variables of the caller's own environment (no login shell). Against `runtime serve`, restart (also `--force`) is refused with `runtime_supervised` |
 | `runtime serve` | Run the runtime in the foreground under a supervisor: takes the daemon lock itself (`runtime_busy`, exit 6, when another runtime holds it), logs to the daemon log and stderr, never exits when idle; SIGTERM or SIGINT ends dispatched calls as `outcome_unknown`, closes sessions, removes the socket and exits 0 (human `Runtime stopped.`, JSON `{"stopped":true}`). It marks the runtime directory supervised: other CLIs wait up to 15 s for it instead of auto-starting a daemon, then fail `runtime_supervised`. `runtime.supervised: true` in `config.json` (headless only) has the same effect before serve first ran, e.g. on a fresh pod. On Linux it requires headless mode |
 | `version` / `--version` / `--help` | Version (`--version` prints the same line as `version`, before any command runs) and English usage |
 
@@ -214,6 +214,80 @@ even with stdin and stderr on a terminal, no dialog even with
 `runtime.approvalDialog: true`. The request is declined at once with the "no
 prompt was possible" notice.
 
+## Doctor
+
+`mcparcel doctor [<mcp>] [--live] [--json] [--no-input]` checks what the
+other commands need and reports one row per check. It is offline by default:
+it never starts or waits for the runtime, runs no login shell, reads no
+Keychain, 1Password, `op` or browser state, makes no network request and writes
+nothing (no lock file, no directory). It may ask a runtime that is already
+running for its version and status, as `runtime status` does. It works in
+desktop and headless mode, also on Linux in desktop mode, where it reports
+`runtime.mode` as failed.
+
+`<mcp>` resolves like `inspect`: an unknown ID fails `connection_unavailable`
+(exit 4), an ambiguous one `ambiguous_id` (exit 2), before any row. When the
+configuration cannot be read, doctor still runs the global checks and emits no
+connection rows. `--live` without `<mcp>` fails `invalid_arguments` (exit 2)
+before any file is read.
+
+`--live` adds one `live.tools` row: it connects to the connection and lists its
+tools, exactly like `tools <mcp>` (on desktop it starts the runtime if needed).
+It is skipped when `runtime.version` failed or the runtime is still starting,
+and fails without contacting the runtime when the connection cannot be called,
+with the code `tools <mcp>` would return: `config.connection`'s code, or
+`connection_disabled` for a disabled connection (whose `config.connection` row
+is a skip without a code). In headless mode it never starts a runtime: with no
+runtime running and no supervisor, or when the runtime exits between the offline
+probe and the live call, it fails with "doctor --live does not start a runtime
+in headless mode: it would run with this shell's environment, not the
+wrapper's." Interrupting doctor exits 130 (`canceled`), never 8. With `--no-input` (always in headless mode) it never prompts: a
+1Password approval or a missing OAuth sign-in gives `auth_required` on the row.
+Without it, the 1Password app may ask for approval as it does for `tools`, so
+agents pass `--no-input`. The live row reflects the configuration the runtime
+reads at that moment, which can be newer than the offline rows when another
+command saved in between.
+
+Rows, in this order: the global rows below, then the connection rows (sorted by
+connection ID, then in the order below), then `live.tools`. Row IDs are stable.
+Each row has `id`, `subject` (connection ID, document, source or storage name;
+omitted for most global rows), `status` (`ok`, `warn`, `fail`, `skip`), `message`
+(one English line), and optionally `nextAction` and `code` (the error code the
+failing command would give).
+
+| Row | Checks |
+| --- | --- |
+| `runtime.mode` | Desktop, or headless with its state root (`Supervised.` when a supervisor owns the runtime). Fails on Linux in desktop mode (`runtime_unsupported`) and when `config.json` cannot be read (`invalid_config`, `unsafe_local_path`); the other `runtime.*` and `storage.*` rows are then skipped |
+| `runtime.version` | Not running (ok; a warning when supervised), a stale socket (ok, the next start removes it), starting or not answering within 2 s (warn), running (ok, version and PID), another version (fail `runtime_version_mismatch` naming both versions and the daemon PID; next action `runtime restart`, or the supervisor), another configuration directory (fail `runtime_config_mismatch`), or a handshake it cannot read (fail; stop it with the version that started it) |
+| `runtime.binary` | Desktop: the running runtime runs from its retained copy `<data>/runtime/<version>/mcparcel` (ok), from a file that is gone (warn: restart it), or from elsewhere because the copy failed (warn). When stopped: whether the copy exists or the next start makes it. Skipped in headless mode, under a supervisor, and when `runtime.version` reports a problem |
+| `storage.dir` | `state`, `data`, `runtime`: private (mode 700, owned by you, no symlinks), absent (created on first use) or unsafe (`unsafe_local_path`). The message names the path |
+| `config.file` | `config.json`, `personal.json`, `selections.json`, then `catalog <source-id>` per registered source, each decoded on its own: valid, not present, invalid (`<field path>: <reason>`, `invalid_config`), unsafe, or a missing active snapshot. All are read under one shared configuration lock; when another command holds it for 5 s, one row with subject `-` fails `config_conflict` and the configuration rows are skipped |
+| `config.state` | The documents agree with each other, or the cross-document error (`invalid_config`) |
+| `version.catalog` | Per registered source: the catalog's `minVersion` against this version; fails `catalog_requires_upgrade` when the catalog needs a newer MCParcel; skipped for development builds |
+| `config.summary` | Enabled, disabled, review-required and unavailable counts; a warning when none is enabled |
+| `prereq.onepassword` | Desktop, when an enabled connection or its bound profile uses an `op://` reference: whether `1Password.app` exists in `/Applications` or `~/Applications` (it does not check that the integration is on) |
+| `config.connection` | One per enabled connection, or the named one: ready; review required (warn); unavailable (warn); missing inputs or profile (fail `config_required`, naming them); not callable by the runtime (fail `runtime_unsupported`, or the headless `op://` error). A named disabled connection is one skipped row |
+| `credentials.profile` | The bound credential profile and its mode; never the account |
+| `credentials.reference` | Desktop: whether every `op://` reference follows the character rule ([catalog.md](catalog.md)); a failure names where (`env NAME`, `header NAME`, `auth clientId`, `auth clientSecret`, `profile bootstrapRef`), never the reference |
+| `credentials.env` | Headless: whether this shell has every `env:` variable (names only; the runtime reads its own environment, so a miss is a warning) |
+| `credentials.oauth` | Headless: an OAuth connection that needs browser sign-in fails `auth_required` |
+| `prereq.command` | Stdio: the command found on the connection's own literal `PATH`, else the running runtime's PATH, else this shell's (headless: this process's). A miss fails, except against this shell's PATH on desktop (warn: the login shell may have more). The next action names what to install. Remote connections are skipped |
+| `live.tools` | `--live` only: the number of tools, or the error's code, message and next action |
+
+No row shows a secret, an `op://` reference, a URL or host, an account, an
+argument, or an env or header value. Rows show connection, source and document
+IDs, field paths, env and header names, commands and local executable paths,
+versions, PIDs and local state paths.
+
+JSON `data` is `{version, mode, live, checks, summary: {ok, warn, fail, skip}}`;
+`mode` is `desktop`, `headless` or `unknown`. With no failed row the envelope is
+`ok:true` and exit 0 (warnings allowed). With one or more, `ok:false`, `data`
+keeps the rows, `error` is `doctor_failed` ("N checks failed.", next action from
+the first failed row) and the exit code is 8. Exit 2, 4 or 1 mean doctor could
+not run. Human output is a plain ASCII table (`Status  Check  Subject  Message`,
+a `next:` line under rows that have one, a summary line) on stdout; the
+`doctor_failed` message goes to stderr.
+
 ## Output and errors
 
 Human output goes to stdout; progress and prompts to stderr. JSON mode emits one
@@ -246,6 +320,7 @@ source revisions and cache age. Secret bindings remain references, never values.
 | 5 | MCP tool returned an error result |
 | 6 | Connection failure, timeout, unknown outcome or runtime mismatch |
 | 7 | Concurrent config conflict |
+| 8 | `doctor` found a failed check (`doctor_failed`; `data` keeps the rows) |
 | 130 | User cancellation |
 
 Error codes distinguish `auth_required`, `auth_expired`, `config_required`,
@@ -256,7 +331,9 @@ Error codes distinguish `auth_required`, `auth_expired`, `config_required`,
 pooled process stay, and nothing is retried within the call;
 `runtime_config_mismatch` exit 6; `auth_account_conflict` exit 3;
 `terminal_required` exit 2 (setup without an interactive terminal, or with
-`--json` or `--no-input`; the next action lists the equivalent commands).
+`--json` or `--no-input`; the next action lists the equivalent commands);
+`doctor_failed` exit 8 (doctor ran and at least one row failed; `data` keeps
+the rows, as for `isError`).
 Headless mode adds `config_read_only` (exit 2, "This configuration is
 read-only (headless mode).", next action to change the configuration at its
 source and restart the runtime) and `runtime_supervised` (exit 6, a
@@ -298,8 +375,9 @@ sanitized OAuth error code is shown), `keychain_unavailable` (Keychain could not
 read or store the sign-in, or it is too large) and `auth_callback_unavailable`
 (fixed callback port in use), all exit 3. Catalog commands add `invalid_repository` (exit 2,
 malformed `owner/repo` argument, nothing fetched), `invalid_catalog` (exit 2, fetched
-content rejected) and `catalog_unavailable` (exit 4, repository unreachable or not
-registered). Human `sync` with no registered catalogs prints a hint to run
+content rejected), `catalog_unavailable` (exit 4, repository unreachable or not
+registered) and `catalog_requires_upgrade` (exit 4, the fetched catalog's `minVersion`
+is above this MCParcel; `add` saves nothing and `sync` keeps the saved snapshot). Human `sync` with no registered catalogs prints a hint to run
 `mcparcel add <owner/repo>`. `runtime stop --json` returns
 `{"stopped":true,"wasRunning":<bool>}` and never starts a daemon. Errors include request ID when execution began. Upstream
 secret-bearing messages are sanitized. No automatic execution of corrective hints.

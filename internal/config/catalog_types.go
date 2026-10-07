@@ -65,7 +65,10 @@ type Connection struct {
 	StartupTimeout    string           `json:"startupTimeout,omitempty"`
 }
 type Catalog struct {
-	SchemaVersion      int                           `json:"schemaVersion"`
+	SchemaVersion int `json:"schemaVersion"`
+	// MinVersion is the oldest MCParcel that may add or sync this catalog
+	// (semver, no build metadata). GitHub catalogs only, not personal.json.
+	MinVersion         string                        `json:"minVersion,omitempty"`
 	Name               string                        `json:"name,omitempty"`
 	Domains            map[string]Domain             `json:"domains,omitempty"`
 	CredentialProfiles map[string]ProfileRequirement `json:"credentialProfiles,omitempty"`

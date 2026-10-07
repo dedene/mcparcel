@@ -60,6 +60,9 @@ func ValidateState(state State) error {
 	if err != nil {
 		return err
 	}
+	if personal.MinVersion != "" {
+		return fieldError("personal.minVersion", "allowed only in a GitHub catalog")
+	}
 	selectionsData, err := json.Marshal(state.Selections)
 	if err != nil {
 		return fieldError("selections", "invalid configuration")

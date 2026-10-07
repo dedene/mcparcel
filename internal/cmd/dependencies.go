@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 
@@ -114,3 +115,12 @@ func (r *pollReader) Read(p []byte) (int, error) {
 		return n, nil
 	}
 }
+
+// onePasswordAppDirs are where doctor looks for 1Password.app (stat only).
+func onePasswordAppDirs(paths config.Paths) []string {
+	return []string{"/Applications", filepath.Join(paths.Home, "Applications")}
+}
+
+// retainEnabled reports whether a desktop runtime starts from a retained copy
+// of this binary; release builds always do.
+func retainEnabled(config.Paths) bool { return true }

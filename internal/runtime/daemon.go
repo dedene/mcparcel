@@ -21,25 +21,6 @@ import (
 	"github.com/dedene/mcparcel/internal/output"
 )
 
-type DaemonOptions struct {
-	Paths           config.Paths
-	Version         string
-	Lock            *os.File
-	LoginEnv        map[string]string
-	EnvFallback     bool
-	Handler         Handler
-	Log             io.Writer
-	IdleTimeout     time.Duration
-	ShutdownTimeout time.Duration
-	// PromptTimeout backs up the CLI's own elicit.PromptTimeout; set only in tests.
-	PromptTimeout time.Duration
-	// NoIdleExit keeps a supervised runtime (runtime serve) running when idle.
-	NoIdleExit bool
-	// Supervised refuses restart requests: only the supervisor restarts the
-	// runtime, so a CLI cannot replace it with an auto-started daemon.
-	Supervised bool
-}
-
 var (
 	errForced = errors.New("forced daemon shutdown")
 	listenMu  sync.Mutex  // umask is process-wide.
@@ -282,7 +263,7 @@ func (s *daemonService) status() Status {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	start := s.started
-	return Status{Running: true, PID: os.Getpid(), ProtocolVersion: ProtocolVersion, BinaryVersion: s.opts.Version, Compatible: true, Socket: s.opts.Paths.SocketFile, Log: s.opts.Paths.LogFile, CapturedPath: s.opts.LoginEnv["PATH"], EnvFallback: s.opts.EnvFallback, ActiveCalls: len(s.requests), StayAlive: stay, StartedAt: &start, CredentialSessions: sessions}
+	return Status{Running: true, PID: os.Getpid(), ProtocolVersion: ProtocolVersion, BinaryVersion: s.opts.Version, Compatible: true, Socket: s.opts.Paths.SocketFile, Log: s.opts.Paths.LogFile, Executable: s.opts.Executable, CapturedPath: s.opts.LoginEnv["PATH"], EnvFallback: s.opts.EnvFallback, ActiveCalls: len(s.requests), StayAlive: stay, StartedAt: &start, CredentialSessions: sessions}
 }
 
 // credentialSessions asks the handler for its credential profile sessions;

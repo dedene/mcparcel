@@ -89,6 +89,7 @@ unions and unsupported schema versions are errors. No ignored config fields.
 
 | Field | Contract |
 | --- | --- |
+| `minVersion` | Optional, top level, GitHub catalogs only (personal.json rejects it: `personal.minVersion: allowed only in a GitHub catalog`). A semantic version without build metadata, such as `0.2.0`. `add` and `sync` (preview and `--apply`) refuse a fetched catalog that needs a newer MCParcel with `catalog_requires_upgrade` (exit 4) and keep the saved snapshot. Prerelease builds rank below their release (`0.1.0-rc.1` < `0.1.0`); build metadata is ignored; a development build (a version that is not semver) never refuses. Reading the configuration never refuses: a saved snapshot above the running version, after a rollback, keeps working, and `doctor` reports it (`version.catalog`) |
 | `connections.<id>.label`, `description` | Optional display strings; label defaults to ID |
 | `domains` | Optional array of declared IDs; empty appears under Other |
 | `inputs` | Map of local, non-secret values: `kind` = `string`, `path` or `url`, optional `default`, required `description` |
@@ -220,7 +221,9 @@ macOS-first paths (respect explicit `XDG_CONFIG_HOME`, `XDG_DATA_HOME` and
 - Selection: `~/.config/mcparcel/selections.json` — revision, enabled IDs, input
   bindings, per-connection profile bindings and disabled tools.
 - Data: `~/.local/share/mcparcel/catalogs/<source-id>/<commit>.json` — snapshots.
-- Data: `~/.local/share/mcparcel/runtime/<version>/mcparcel` — retained daemon binary.
+- Data: `~/.local/share/mcparcel/runtime/<version>/mcparcel` — retained daemon binary;
+  desktop only; the previous version is kept for rollback (see runtime.md,
+  "Packaging and upgrades as built").
 - Cache: `~/.cache/mcparcel/schemas/` — protected schema metadata by connection,
   auth identity and config hash; never tool results.
 - Runtime: private short directory beneath the OS user temp directory — lock/socket;

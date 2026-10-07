@@ -318,3 +318,25 @@ func TestResolvePathsSymlinkFailsClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// A dotfiles-symlinked ~/.local still gives a DataDir the no-follow walk can
+// open, so the retained runtime binary can be written below it.
+func TestDataDirResolvesSymlinkedParent(t *testing.T) {
+	root := symlinkRoot(t)
+	env := map[string]string{"XDG_DATA_HOME": root + "/link/share"}
+	p, err := config.ResolvePaths(func(k string) string { return env[k] }, root+"/home", testutil.TempRoot(), os.Getuid())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.DataDir != root+"/real/share/mcparcel" {
+		t.Fatal(p.DataDir)
+	}
+	dir, err := config.OpenPrivateDir(filepath.Join(p.DataDir, "runtime"), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir.Close()
+	if _, err := os.Stat(root + "/real/share/mcparcel/runtime"); err != nil {
+		t.Fatal(err)
+	}
+}

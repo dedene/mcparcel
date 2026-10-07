@@ -51,6 +51,9 @@ func openPrivateDir(trustedRoot, path string, create bool) (*os.File, error) {
 			}
 			if e == nil || errors.Is(e, unix.EEXIST) {
 				next, e = unix.Openat(fd, part, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+			} else if notCreatable(e) {
+				_ = unix.Close(fd)
+				return nil, notCreatedError{}
 			}
 		}
 		_ = unix.Close(fd)
@@ -91,6 +94,17 @@ func openPrivateDir(trustedRoot, path string, create bool) (*os.File, error) {
 	return os.NewFile(uintptr(fd), path), nil
 }
 
+// notCreatable reports whether a mkdir or a creating open failed for want of
+// space or write access rather than over what is already on the path.
+func notCreatable(err error) bool {
+	for _, errno := range []unix.Errno{unix.EACCES, unix.EPERM, unix.EROFS, unix.ENOSPC, unix.EDQUOT} {
+		if errors.Is(err, errno) {
+			return true
+		}
+	}
+	return false
+}
+
 func OpenPrivateFile(dir *os.File, name string, create bool) (*os.File, error) {
 	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, "/\x00") {
 		return nil, ErrUnsafePath
@@ -102,6 +116,9 @@ func OpenPrivateFile(dir *os.File, name string, create bool) (*os.File, error) {
 	fd, err := unix.Openat(int(dir.Fd()), name, flags, 0o600)
 	if errors.Is(err, unix.ENOENT) {
 		return nil, os.ErrNotExist
+	}
+	if create && notCreatable(err) {
+		return nil, notCreatedError{}
 	}
 	if err != nil {
 		return nil, ErrUnsafePath

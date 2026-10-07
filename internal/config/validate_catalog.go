@@ -18,6 +18,9 @@ func DecodeCatalog(data []byte) (Catalog, error) {
 	if c.SchemaVersion != 1 {
 		return Catalog{}, fieldError("schemaVersion", "unsupported version")
 	}
+	if c.MinVersion != "" && !validMinVersion(c.MinVersion) {
+		return Catalog{}, fieldError("minVersion", "semantic version without build metadata required")
+	}
 	if c.Domains == nil {
 		c.Domains = make(map[string]Domain)
 	}

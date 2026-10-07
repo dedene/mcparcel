@@ -64,7 +64,9 @@ func runDaemon(ctx context.Context, paths config.Paths, lock *os.File, log io.Wr
 		defer opts.Credentials.Close()
 	}
 	pool := runtimeclient.NewPool(opts)
-	return runtimeclient.Serve(ctx, runtimeclient.DaemonOptions{Paths: paths, Version: version, Lock: lock, LoginEnv: login, EnvFallback: captureErr != nil, Handler: pool, Log: log, IdleTimeout: daemonIdleTimeout(paths), NoIdleExit: supervised, Supervised: supervised})
+	// The file this daemon runs from, for runtime status and doctor.
+	exe, _ := os.Executable()
+	return runtimeclient.Serve(ctx, runtimeclient.DaemonOptions{Paths: paths, Version: version, Executable: exe, Lock: lock, LoginEnv: login, EnvFallback: captureErr != nil, Handler: pool, Log: log, IdleTimeout: daemonIdleTimeout(paths), NoIdleExit: supervised, Supervised: supervised})
 }
 
 // The desktop credential sources: 1Password, the Keychain env: fallback and

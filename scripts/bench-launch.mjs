@@ -1,26 +1,22 @@
 // Measures what the npm layers add to one `mcparcel version` call.
 // Usage: make npm-binary && node scripts/bench-launch.mjs [runs]
-import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+
+import { freshEnv, packAndInstall, packageDir, removeFresh } from '../tests/packaging/lib/fresh.mjs';
 
 const runs = Number(process.argv[2] ?? 20);
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const packageDir = path.join(repoRoot, 'packaging', 'npm');
 const workDir = mkdtempSync(path.join(tmpdir(), 'mcparcel-bench-'));
-const prefix = path.join(workDir, 'install');
-mkdirSync(prefix);
-const env = { ...process.env, npm_config_cache: path.join(workDir, 'cache'), npm_config_update_notifier: 'false' };
-
-execFileSync('npm', ['pack', '--pack-destination', workDir], { cwd: packageDir, env, stdio: 'pipe' });
-const tarball = path.join(workDir, readdirSync(workDir).find((name) => name.endsWith('.tgz')));
-execFileSync('npm', ['install', '--prefix', prefix, tarball], { env, stdio: 'pipe' });
+// A fresh HOME and npm config, as the packaging tests use: no ~/.npmrc.
+const env = freshEnv(path.join(workDir, 'home'));
+const { tarball, launcher } = packAndInstall(workDir, env);
+const prefix = path.dirname(path.dirname(path.dirname(launcher)));
 
 const variants = {
   'native binary': [path.join(packageDir, 'dist', 'mcparcel'), ['version']],
-  'node launcher': [path.join(prefix, 'node_modules', '.bin', 'mcparcel'), ['version']],
+  'node launcher': [launcher, ['version']],
   'npx (installed)': ['npx', ['--prefix', prefix, 'mcparcel', 'version']],
   'npx (tarball, warm cache)': ['npx', ['--yes', '--package', tarball, 'mcparcel', 'version']],
 };
@@ -45,4 +41,5 @@ for (const [name, [command, args]] of Object.entries(variants)) {
   samples.sort((a, b) => a - b);
   console.log(`${name.padEnd(28)} ${percentile(samples, 0.5).toFixed(0).padStart(6)}   ${percentile(samples, 0.95).toFixed(0).padStart(6)}`);
 }
+removeFresh(env);
 rmSync(workDir, { recursive: true, force: true });

@@ -54,7 +54,7 @@ func spawned(t *testing.T, extra ...string) *Client {
 		}
 	}
 	t.Cleanup(func() { cleanupDaemon(t, c) })
-	if _, e := StartDaemon(testCtx(t), p, exe, append(env, extra...)); e != nil {
+	if _, e := startPlain(testCtx(t), p, exe, append(env, extra...)); e != nil {
 		t.Fatal(e)
 	}
 	waitStatus(t, c)
@@ -141,7 +141,7 @@ func TestJoinDaemonStillStarting(t *testing.T) {
 	barrier := filepath.Join(p.Home, "barrier")
 	_ = unix.Mkfifo(barrier, 0o600)
 	exe, _ := os.Executable()
-	started, e := StartDaemon(testCtx(t), p, exe, append(env, "MCP_TEST_BARRIER="+barrier))
+	started, e := startPlain(testCtx(t), p, exe, append(env, "MCP_TEST_BARRIER="+barrier))
 	if e != nil || !started {
 		t.Fatal(e)
 	}
@@ -185,7 +185,7 @@ func TestSocketOwnerAndSymlink(t *testing.T) {
 			case "dir":
 				_ = os.Chmod(p.RuntimeDir, 0o755)
 			}
-			_, e := StartDaemon(testCtx(t), p, "/absent", env)
+			_, e := startPlain(testCtx(t), p, "/absent", env)
 			if !errors.Is(e, config.ErrUnsafePath) {
 				t.Fatal(e)
 			}
@@ -218,7 +218,7 @@ func TestStaleSocketRecovery(t *testing.T) {
 	exe, _ := os.Executable()
 	c := &Client{Paths: p, Version: "dev", Executable: exe}
 	t.Cleanup(func() { cleanupDaemon(t, c) })
-	if b, e := StartDaemon(testCtx(t), p, exe, env); e != nil || !b {
+	if b, e := startPlain(testCtx(t), p, exe, env); e != nil || !b {
 		t.Fatal(b, e)
 	}
 	waitStatus(t, c)
@@ -230,7 +230,7 @@ func TestHeldLockRefusedSocket(t *testing.T) {
 	lock := lockFile(t, p)
 	defer func() { _ = lock.Close() }()
 	before, _ := os.Stat(p.SocketFile)
-	if b, e := StartDaemon(testCtx(t), p, "/absent", env); e != nil || b {
+	if b, e := startPlain(testCtx(t), p, "/absent", env); e != nil || b {
 		t.Fatal(b, e)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
@@ -245,12 +245,12 @@ func TestHeldLockRefusedSocket(t *testing.T) {
 
 func TestStartFailureReleasesLock(t *testing.T) {
 	p, env := testutil.IsolatedPaths(t)
-	_, e := StartDaemon(testCtx(t), p, "/absent", env)
+	_, e := startPlain(testCtx(t), p, "/absent", env)
 	wantCode(t, e, "runtime_start_failed")
 	exe, _ := os.Executable()
 	c := &Client{Paths: p, Version: "dev", Executable: exe}
 	t.Cleanup(func() { cleanupDaemon(t, c) })
-	if b, e := StartDaemon(testCtx(t), p, exe, env); e != nil || !b {
+	if b, e := startPlain(testCtx(t), p, exe, env); e != nil || !b {
 		t.Fatal(e)
 	}
 	waitStatus(t, c)
@@ -285,7 +285,7 @@ func TestLockNotInheritedByMCPChild(t *testing.T) {
 	c := &Client{Paths: p, Version: "dev", Executable: exe}
 	marker := filepath.Join(p.Home, "child-pid")
 	t.Cleanup(func() { cleanupDaemon(t, c) })
-	if started, e := StartDaemon(testCtx(t), p, exe, append(env, "MCP_TEST_CHILD_PID="+marker)); e != nil || !started {
+	if started, e := startPlain(testCtx(t), p, exe, append(env, "MCP_TEST_CHILD_PID="+marker)); e != nil || !started {
 		t.Fatal(started, e)
 	}
 	old := waitStatus(t, c).PID
@@ -318,7 +318,7 @@ func TestLockNotInheritedByMCPChild(t *testing.T) {
 	if e = syscall.Kill(child, 0); e != nil {
 		t.Fatal("child was not alive for lock proof", e)
 	}
-	if started, e := StartDaemon(testCtx(t), p, exe, env); e != nil || !started {
+	if started, e := startPlain(testCtx(t), p, exe, env); e != nil || !started {
 		t.Fatal(started, e)
 	}
 	if waitStatus(t, c).PID == old {
@@ -346,7 +346,7 @@ func TestDaemonStartupRetriesTransientCreate(t *testing.T) {
 			}
 			return config.OpenPrivateFile(dir, name, create)
 		}
-		started, err := startDaemon(testCtx(t), p, exe, env, open)
+		started, err := startDaemon(testCtx(t), p, exe, env, open, nil)
 		if err != nil || started == joining || attempts < 4 {
 			t.Fatalf("joining=%v started=%v attempts=%d err=%v", joining, started, attempts, err)
 		}
@@ -362,8 +362,36 @@ func TestDaemonStartupCreateRetryCancellation(t *testing.T) {
 	_, err := startDaemon(ctx, p, "/absent", env, func(*os.File, string, bool) (*os.File, error) {
 		attempts++
 		return nil, os.ErrNotExist
-	})
+	}, nil)
 	if !errors.Is(err, context.DeadlineExceeded) || attempts < 2 {
 		t.Fatalf("attempts=%d err=%v", attempts, err)
+	}
+}
+
+// startPlain is startDaemon without a retained copy.
+func startPlain(ctx context.Context, p config.Paths, exe string, env []string) (bool, error) {
+	return startDaemon(ctx, p, exe, env, config.OpenPrivateFile, nil)
+}
+
+// NoStart: Ensure (and so Tools) reports ErrNotRunning where it would start
+// a daemon, and leaves nothing behind.
+func TestEnsureNoStartStartsNothing(t *testing.T) {
+	p, _ := testutil.IsolatedPaths(t)
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := &Client{Paths: p, Version: "dev", Executable: exe, NoStart: true}
+	if err = c.Ensure(testCtx(t)); !errors.Is(err, ErrNotRunning) {
+		t.Fatal(err)
+	}
+	if _, err = c.Tools(testCtx(t), "local:x", false); !errors.Is(err, ErrNotRunning) {
+		t.Fatal(err)
+	}
+	if held, err := lockHeld(p); err != nil || held {
+		t.Fatal("lock held:", held, err)
+	}
+	if _, err = os.Stat(p.SocketFile); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("socket:", err)
 	}
 }

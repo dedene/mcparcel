@@ -327,3 +327,51 @@ func TestConfigMapSymlinkLayout(t *testing.T) {
 	f, err = OpenConfigFile(dir + "/config.json")
 	openOK(t, f, err)
 }
+
+// A directory that cannot be created under an unwritable parent is still
+// ErrUnsafePath to every caller, and also ErrNotCreated; an unsafe one is not.
+func TestPrivateDirNotCreatedIsMarked(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root ignores directory modes")
+	}
+	root := secureRoot(t)
+	parent := filepath.Join(root, "share")
+	if err := os.Mkdir(parent, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(parent, 0o700) })
+	_, err := OpenPrivateDir(filepath.Join(parent, "mcparcel", "runtime"), true)
+	if !errors.Is(err, ErrUnsafePath) || !errors.Is(err, ErrNotCreated) {
+		t.Fatal(err)
+	}
+	if err = os.Chmod(parent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, err = OpenPrivateDir(parent, true)
+	if !errors.Is(err, ErrUnsafePath) || errors.Is(err, ErrNotCreated) {
+		t.Fatal("0755 directory:", err)
+	}
+}
+
+// The same for a private file: a creating open refused by its directory is
+// ErrNotCreated as well as ErrUnsafePath.
+func TestPrivateFileNotCreatedIsMarked(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root ignores directory modes")
+	}
+	dir, err := OpenPrivateDir(filepath.Join(secureRoot(t), "d"), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dir.Close()
+	if err = os.Chmod(dir.Name(), 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir.Name(), 0o700) })
+	if _, err = OpenPrivateFile(dir, "retain.lock", true); !errors.Is(err, ErrUnsafePath) || !errors.Is(err, ErrNotCreated) {
+		t.Fatal(err)
+	}
+	if _, err = OpenPrivateFile(dir, "retain.lock", false); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("without create:", err)
+	}
+}

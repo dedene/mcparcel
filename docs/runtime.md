@@ -33,8 +33,10 @@ version/request ID, and cancellation tied to CLI disconnect. Validate socket
 ownership and peer UID. Same-OS-user software remains inside the trust boundary.
 
 Copy the verified packaged binary to its private versioned data path before
-starting it, so npm-cache cleanup cannot remove the daemon's executable. Different
-CLI versions negotiate protocol compatibility. Refuse incompatible versions with
+starting it, so npm-cache cleanup cannot remove the daemon's executable (built
+in stage 10; see "Packaging and upgrades as built"). CLI and daemon must run the
+same build version, compared as the whole string (see "Version mismatch"); only
+`restart` and `stop` are exempt. Refuse other versions with
 `runtime_version_mismatch` and `mcparcel runtime restart`; never kill active work
 or launch a second credential daemon silently. Restart refuses active calls unless
 `--force` explicitly cancels them, with unknown outcomes reported.
@@ -764,6 +766,96 @@ when it cannot prompt on the terminal; an unreadable config means no dialog.
 The loopback callback serves one self-contained page with no external requests:
 signed in, failed, expired, and state mismatch. Provider-supplied text is
 HTML-escaped. The page carries MCParcel's own identity; catalogs cannot restyle it.
+
+## Packaging and upgrades as built (stage 10)
+
+### Release version
+
+`packaging/npm/package.json` holds the release version (`0.1.0-rc.1`, still
+`private: true`, so `npm publish` refuses). `make npm-binary` builds the
+darwin-arm64 binary as `<package.json version>+<commit>`, for example
+`0.1.0-rc.1+5319954009e0`, and `make npm-pack` packs it into
+`dist/mcparcel-<version>.tgz`. A build from a tree with uncommitted changes
+appends `.dirty.<UTC seconds>` (`0.1.0-rc.1+5319954009e0.dirty.20261007173258`),
+so it never claims a clean commit. The handshake compares the whole string, so
+two builds of one release candidate, from different commits or from one dirty
+tree at different times, never pass as the same version; semver comparisons
+(`minVersion`) ignore the build metadata after `+`.
+`make build` and `make build-linux` keep the `git describe` version: a dev or
+container build does not claim the release version.
+
+### Retained binary
+
+Desktop mode only. A CLI that starts the daemon first takes the daemon lock,
+then copies its own binary to `<data>/runtime/<version>/mcparcel`
+(`~/.local/share/mcparcel/runtime/...`) and starts the daemon from that copy.
+The copy, the prune and the daemon's start also hold
+`<data>/runtime/retain.lock`, which every CLI using that data directory takes,
+whatever its runtime directory (`MCPARCEL_RUNTIME_DIR`). So two CLIs, of the
+same version or not, never race a copy against a prune or an exec.
+
+- The copy is reused when its size and SHA-256 match the CLI binary and it is
+  a private `0700` file; otherwise it is replaced. A new copy goes to a random
+  temporary file in the private `0700` version directory (a copy-on-write clone
+  on APFS, a byte copy elsewhere), is checked against the source's hash, fsynced
+  and renamed over the target, and the directory is fsynced. A running daemon
+  keeps the inode it executes.
+- After a new copy, every other version directory except the most recently
+  modified one (the rollback target) is removed: only directories owned by the
+  user, never through a symlink. Pruning errors are ignored.
+- An unsafe data directory (wrong owner or mode, a symlinked component or target)
+  fails the start with `unsafe_local_path`, like every other private directory.
+  Any other copy failure starts the daemon from the CLI binary itself: a data
+  directory that cannot be created or written (disk full, read-only mount, a
+  parent the user cannot write, such as a root-owned `~/.local/share`), or an
+  unreadable old copy; `doctor` then warns (`runtime.binary`).
+- `runtime status` reports the daemon's own file: `executable` in JSON,
+  `Executable:` in the text output. `doctor` compares it with the retained path.
+- Symlinks above the data directory are resolved once, as for the state and
+  runtime directories, so a dotfiles-symlinked `~/.local` works.
+- Headless mode retains nothing: the image's binary is immutable, a copy per pod
+  start would be waste, and the state root may be `noexec`. A supervised runtime
+  (`runtime serve`) runs from whatever binary its supervisor starts.
+- Test builds (`mcparceltest`) retain only when `<state>/fixture-retain` exists.
+
+npx keeps its packages under `<npm cache>/_npx`. Removing that directory while
+the daemon runs is harmless: the daemon runs from the retained copy, and the
+next `npx` call reinstalls the same version, which the daemon accepts.
+
+### Version mismatch
+
+The policy is unchanged: CLI and daemon must run the same build version. A
+mismatch is `runtime_version_mismatch` (exit 6) with `mcparcel runtime restart`;
+MCParcel never restarts on its own and never kills active work. `restart` and
+`stop` are exempt, so a newer or older CLI can still stop the daemon. That
+exemption depends on the handshake staying readable across versions:
+`TestHelloWireShapeIsFrozen` pins the `Hello` and `HelloAck` wire shape, and a
+change must bump the frame protocol version on purpose (older CLIs can then no
+longer stop the daemon).
+
+`doctor` looks at the runtime without starting it and tells these states apart:
+stopped, stale socket (harmless; the next start removes it), starting (lock held,
+no answer within 2 s), running, version mismatch (both versions and the daemon's
+PID), configuration mismatch, and unreadable (a handshake this CLI cannot decode).
+The upgrade path is in [migration.md](migration.md).
+
+### Signing
+
+`make npm-binary` re-signs the binary ad hoc with the stable identifier
+`mcparcel` (the linker's own signature says `a.out`) and verifies it with
+`codesign --verify --strict`. The macOS binary is ad-hoc signed. It is not
+Developer ID signed or notarized, and MCParcel makes no signed-distribution
+claim. npm sets no quarantine attribute, so Gatekeeper does not assess it on
+first run.
+
+Keychain access does not depend on the binary or its signature. OAuth items
+(service `mcparcel-oauth`, account = canonical connection ID) and the `env:`
+fallback (`/usr/bin/security find-generic-password -a <user> -s <NAME> -w`) are
+created and read through `/usr/bin/security`, so their access lists trust that
+tool, not mcparcel. No binary path, version, signature or data directory is part
+of an item's identity (`TestOAuthKeyringIdentityIsStable`,
+`TestKeychainReadArgvIsFixed`). The 1Password desktop app may ask once to approve
+a new binary. Both are still to be confirmed by hand on a clean macOS account.
 
 ## Headless mode (stage 12)
 

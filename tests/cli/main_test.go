@@ -379,6 +379,9 @@ func (r *rig) status() runtimeclient.Status {
 	if _, ok := fields["credentialSessions"]; ok {
 		keys = append(keys, "credentialSessions")
 	}
+	if string(fields["running"]) == "true" {
+		keys = append(keys, "executable") // the file the daemon runs from
+	}
 	if len(fields) != len(keys) {
 		r.t.Fatalf("status fields: %s", v.envelope.Data)
 	}

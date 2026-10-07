@@ -35,10 +35,6 @@ func sameSocket(a, b *unix.Stat_t) bool {
 	return a != nil && b != nil && a.Dev == b.Dev && a.Ino == b.Ino
 }
 
-func StartDaemon(ctx context.Context, paths config.Paths, executable string, env []string) (bool, error) {
-	return startDaemon(ctx, paths, executable, env, config.OpenPrivateFile)
-}
-
 // AcquireDaemonLock takes the daemon lock without blocking and removes a
 // stale socket under it. ok is false, with a nil file, when another runtime
 // holds the lock or answers on the socket. The caller owns the open lock.
@@ -105,7 +101,13 @@ func claimRuntime(ctx context.Context, paths config.Paths, dir, lock *os.File) (
 	return true, nil
 }
 
-func startDaemon(ctx context.Context, paths config.Paths, executable string, env []string, open func(*os.File, string, bool) (*os.File, error)) (bool, error) {
+// startDaemon execs executable as the daemon under the daemon lock. retain,
+// when set, runs only once the lock is held; the daemon then starts from the
+// path it returns, and its release runs after the start, so no CLI sharing
+// the data directory prunes that copy in between. An unsafe path fails the
+// start; any other retain error starts from executable itself (doctor's
+// runtime.binary reports it).
+func startDaemon(ctx context.Context, paths config.Paths, executable string, env []string, open func(*os.File, string, bool) (*os.File, error), retain func(context.Context, string) (string, func(), error)) (bool, error) {
 	lock, ok, err := acquireDaemonLock(ctx, paths, open)
 	if err != nil || !ok {
 		return false, err
@@ -121,6 +123,18 @@ func startDaemon(ctx context.Context, paths config.Paths, executable string, env
 	defer null.Close()
 	if !filepath.IsAbs(executable) {
 		return false, output.NewError("runtime_start_failed", nil)
+	}
+	if retain != nil {
+		retained, release, err := retain(ctx, executable)
+		switch {
+		case err == nil:
+			defer release()
+			executable = retained
+		case errors.Is(err, config.ErrUnsafePath):
+			return false, err
+		case ctx.Err() != nil:
+			return false, ctx.Err()
+		}
 	}
 	child := exec.Command(executable, "daemon", "--lock-fd=3")
 	child.Env, child.Dir = env, paths.Home

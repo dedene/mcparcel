@@ -147,3 +147,51 @@ func TestOAuthStateRedacted(t *testing.T) {
 		}
 	}
 }
+
+// keyRecorder records every (service, account) a keyring call uses.
+type keyRecorder struct {
+	testutil.MemKeyring
+	keys map[string]bool
+}
+
+func (k *keyRecorder) note(service, account string) { k.keys[service+"|"+account] = true }
+
+func (k *keyRecorder) Get(service, account string) (string, error) {
+	k.note(service, account)
+	return k.MemKeyring.Get(service, account)
+}
+
+func (k *keyRecorder) Set(service, account, secret string) error {
+	k.note(service, account)
+	return k.MemKeyring.Set(service, account, secret)
+}
+
+func (k *keyRecorder) Delete(service, account string) error {
+	k.note(service, account)
+	return k.MemKeyring.Delete(service, account)
+}
+
+// A stored sign-in is found by fixed strings only: service mcparcel-oauth and
+// the canonical connection ID. No binary path, version, signature or data
+// directory takes part, so an upgraded binary reads the same item. Renaming
+// either strands every stored sign-in; fail here on purpose.
+func TestOAuthKeyringIdentityIsStable(t *testing.T) {
+	if auth.KeyringService != "mcparcel-oauth" {
+		t.Fatal(auth.KeyringService)
+	}
+	k := &keyRecorder{keys: map[string]bool{}}
+	ctx := context.Background()
+	const id = "github:acmeco/pec#linear"
+	if err := auth.SaveOAuth(ctx, k, id, sampleState()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := auth.LoadOAuth(ctx, k, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := auth.DeleteOAuth(ctx, k, id); err != nil {
+		t.Fatal(err)
+	}
+	if len(k.keys) != 1 || !k.keys["mcparcel-oauth|"+id] {
+		t.Fatal(k.keys)
+	}
+}
