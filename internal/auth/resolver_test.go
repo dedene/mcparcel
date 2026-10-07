@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"reflect"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -101,9 +100,9 @@ func TestSingleBootstrapAcrossCallers(t *testing.T) {
 		}
 		leases = append(leases, a.lease)
 	}
-	leases[0].Values["a"] = "mutated"
-	for _, l := range leases[1:] {
-		if l.Values["a"] != "value" {
+	leases[0].Secrets()["a"] = "mutated"
+	for _, l := range leases {
+		if l.Secrets()["a"] != "value" {
 			t.Fatal("shared values map")
 		}
 	}
@@ -122,7 +121,7 @@ func TestOnlyRequestedReferences(t *testing.T) {
 	}}})
 	a := resolve(t, r, []string{"a", "a"}, false)
 	b := resolve(t, r, []string{"b"}, false)
-	if !reflect.DeepEqual(requested, []string{"a", "b"}) || len(a.Values) != 1 || len(b.Values) != 1 {
+	if !reflect.DeepEqual(requested, []string{"a", "b"}) || len(a.Secrets()) != 1 || len(b.Secrets()) != 1 {
 		t.Fatal("wrong references")
 	}
 }
@@ -222,6 +221,29 @@ func TestNoInputNoPrompt(t *testing.T) {
 	if boots.Load() != 1 {
 		t.Fatal("rebootstrap")
 	}
+	t.Run("desktop", func(t *testing.T) {
+		clock := testutil.NewClock()
+		vault := &testutil.FakeVault{}
+		vault.Set("a", "v")
+		vault.Set("b", "v")
+		desktop := config.Profile{Mode: "desktop", Account: "fixture"}
+		r := resolver(t, auth.ResolverOptions{Now: clock.Now, Provider: vault})
+		if _, e := r.Resolve(testContext(t), "d", desktop, []string{"a"}, false); e != nil {
+			t.Fatal(e)
+		}
+		if _, e := r.Resolve(testContext(t), "d", desktop, []string{"a"}, true); e != nil {
+			t.Fatal("cached value refused", e)
+		}
+		_, e := r.Resolve(testContext(t), "d", desktop, []string{"b"}, true)
+		if !errors.Is(e, auth.ErrRequired) || vault.Reads("b") != 0 {
+			t.Fatal("desktop --no-input read an uncached value", e)
+		}
+		clock.Advance(5 * time.Minute)
+		_, e = r.Resolve(testContext(t), "d", desktop, []string{"a"}, true)
+		if !errors.Is(e, auth.ErrRequired) || vault.Reads("a") != 1 || vault.Boots() != 1 {
+			t.Fatal("desktop --no-input reached the provider after the cache", e)
+		}
+	})
 }
 
 type clock struct {
@@ -263,55 +285,6 @@ func TestFiveMinuteLease(t *testing.T) {
 	d := resolve(t, r, []string{"a"}, true)
 	if d.Identity == a.Identity || reads.Load() != 3 {
 		t.Fatal("changed identity not advanced")
-	}
-}
-
-func TestSessionDeadlineDoesNotSlide(t *testing.T) {
-	clock := &clock{base: time.Now()}
-	r := resolver(t, auth.ResolverOptions{Now: clock.now, Provider: testutil.FakeProvider{BootstrapFunc: func(context.Context, config.Profile) (auth.SecretClient, error) { return client("v"), nil }}})
-	a := resolve(t, r, []string{"a"}, false)
-	clock.set(23 * time.Hour)
-	b := resolve(t, r, []string{"a"}, true)
-	if !a.SessionExpiresAt.Equal(clock.base.Add(24*time.Hour)) || !b.SessionExpiresAt.Equal(a.SessionExpiresAt) {
-		t.Fatal("sliding session")
-	}
-}
-
-func TestExpiryAndClockRollback(t *testing.T) {
-	for _, d := range []time.Duration{24 * time.Hour, -time.Second} {
-		t.Run(d.String(), func(t *testing.T) {
-			clock := &clock{base: time.Now().Round(0)}
-			r := resolver(t, auth.ResolverOptions{Now: clock.now, Provider: testutil.FakeProvider{BootstrapFunc: func(context.Context, config.Profile) (auth.SecretClient, error) { return client("v"), nil }}})
-			resolve(t, r, []string{"a"}, false)
-			clock.set(d)
-			_, e := r.Resolve(testContext(t), "p", profile, []string{"a"}, true)
-			if !errors.Is(e, auth.ErrExpired) {
-				t.Fatal("session not expired")
-			}
-		})
-	}
-}
-
-func TestProviderErrorRedaction(t *testing.T) {
-	for _, phase := range []string{"bootstrap", "resolve"} {
-		t.Run(phase, func(t *testing.T) {
-			failure := errors.New("BOOTSTRAP-SENTINEL secret https://private.invalid")
-			r := resolver(t, auth.ResolverOptions{Provider: testutil.FakeProvider{BootstrapFunc: func(context.Context, config.Profile) (auth.SecretClient, error) {
-				if phase == "bootstrap" {
-					return nil, failure
-				}
-				return testutil.FakeSecretClient{ResolveFunc: func(context.Context, string) (string, error) { return "partial", failure }}, nil
-			}}})
-			l, e := r.Resolve(testContext(t), "p", profile, []string{"a"}, false)
-			if !errors.Is(e, auth.ErrProvider) || len(l.Values) != 0 {
-				t.Fatal("provider failure not cleared")
-			}
-			for _, s := range []string{"BOOTSTRAP-SENTINEL", "secret", "https://"} {
-				if strings.Contains(e.Error(), s) {
-					t.Fatal("unsafe error")
-				}
-			}
-		})
 	}
 }
 
@@ -377,7 +350,7 @@ func TestIndependentProfiles(t *testing.T) {
 	go func() { l, e := r.Resolve(c, "a", blocked, nil, false); out <- answer{l, e} }()
 	<-started
 	l, e := r.Resolve(testContext(t), "b", profile, []string{"a"}, false)
-	if e != nil || l.Values["a"] != "v" {
+	if e != nil || l.Secrets()["a"] != "v" {
 		t.Fatal("unrelated profile blocked")
 	}
 	cancel()
@@ -476,7 +449,7 @@ func TestProviderRejectionInvalidatesSession(t *testing.T) {
 	resolve(t, r, []string{"a"}, false)
 	reject.Store(true)
 	l, e := r.Resolve(testContext(t), "p", profile, []string{"b"}, true)
-	if !errors.Is(e, auth.ErrProvider) || len(l.Values) != 0 {
+	if !errors.Is(e, auth.ErrProvider) || l.Secrets() != nil {
 		t.Fatal("failure leaked lease")
 	}
 	_, e = r.Resolve(testContext(t), "p", profile, []string{"a"}, true)

@@ -46,17 +46,15 @@ func TestResolvedRuntimeInput(t *testing.T) {
 }
 
 func TestRuntimeUnsupportedBeforeEffects(t *testing.T) {
-	for _, kind := range []string{"sse", "desktop", "lifecycle"} {
+	for _, kind := range []string{"sse", "lifecycle"} {
 		t.Run(kind, func(t *testing.T) {
 			r := newRig(t)
-			r.http("a", testutil.FixtureOptions{}, kind == "desktop")
+			r.http("a", testutil.FixtureOptions{}, false)
 			r.http("public", testutil.FixtureOptions{}, false)
 			c := r.personal.Connections["a"]
 			switch kind {
 			case "sse":
 				c.Transport.HTTP.Mode = "sse"
-			case "desktop":
-				r.local.CredentialProfiles["shared"] = config.Profile{Mode: "desktop", Account: "fixture"}
 			case "lifecycle":
 				c.Lifecycle = &config.Lifecycle{IdleTimeout: "1m"}
 			}

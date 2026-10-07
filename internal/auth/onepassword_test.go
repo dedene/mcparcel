@@ -3,8 +3,11 @@ package auth
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
+
+	"github.com/1password/onepassword-sdk-go"
 
 	"github.com/dedene/mcparcel/internal/config"
 )
@@ -117,5 +120,55 @@ func TestOnePasswordRejectsDifferentDesktopAccount(t *testing.T) {
 	}
 	if len(accounts) != 2 {
 		t.Fatal("conflict reached SDK", accounts)
+	}
+}
+
+func TestDesktopProfileUsesDesktopClient(t *testing.T) {
+	var steps []string
+	desktop := func(context.Context, string, string) (SecretClient, error) {
+		steps = append(steps, "desktop")
+		return localSecretClient{resolve: func(_ context.Context, ref string) (string, error) {
+			steps = append(steps, "resolve "+ref)
+			return "value", nil
+		}}, nil
+	}
+	service := func(context.Context, string, string) (SecretClient, error) {
+		steps = append(steps, "service-account")
+		return nil, errors.New("service client built")
+	}
+	p := newOnePasswordProvider("test", desktop, service)
+	c, e := p.Bootstrap(context.Background(), config.Profile{Mode: "desktop", Account: "fixture", BootstrapRef: "op://never/read/token"})
+	if e != nil {
+		t.Fatal(e)
+	}
+	v, e := c.Resolve(context.Background(), "requested")
+	if e != nil || v != "value" || !reflect.DeepEqual(steps, []string{"desktop", "resolve requested"}) {
+		t.Fatal("desktop mode sequence", steps)
+	}
+}
+
+func TestOnePasswordRateLimitClassification(t *testing.T) {
+	limited := &onepassword.RateLimitExceededError{}
+	for name, err := range map[string]error{"bare": limited, "wrapped": fmt.Errorf("construct: %w", limited)} {
+		t.Run(name, func(t *testing.T) {
+			if got := safeProviderError(context.Background(), classifySDKError(err)); got != ErrRateLimited {
+				t.Fatal("rate limit not classified", got)
+			}
+		})
+	}
+	if got := safeProviderError(context.Background(), classifySDKError(&onepassword.DesktopSessionExpiredError{})); got != ErrProvider {
+		t.Fatal("other SDK error", got)
+	}
+	inner := sdkSecretClient{secrets: localSecretClient{resolve: func(context.Context, string) (string, error) { return "", limited }}}
+	if _, got := (safeSecretClient{client: inner}).Resolve(context.Background(), "r"); got != ErrRateLimited {
+		t.Fatal("secrets rate limit", got)
+	}
+	_, got := newSDKSecrets(context.Background(), func() (*onepassword.Client, error) { return nil, fmt.Errorf("init: %w", limited) })
+	if got != ErrRateLimited {
+		t.Fatal("construction rate limit", got)
+	}
+	_, got = newSDKSecrets(context.Background(), func() (*onepassword.Client, error) { return nil, errors.New("sensitive diagnostic") })
+	if got != ErrProvider {
+		t.Fatal("construction failure", got)
 	}
 }

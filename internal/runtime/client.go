@@ -30,6 +30,17 @@ type Status struct {
 	ActiveCalls     int        `json:"activeCalls"`
 	StayAlive       bool       `json:"stayAlive"`
 	StartedAt       *time.Time `json:"startedAt"`
+	// CredentialSessions lists the daemon's 1Password profile sessions.
+	CredentialSessions []CredentialSession `json:"credentialSessions,omitempty"`
+}
+
+// CredentialSession is one credential profile session; it never carries an
+// account, a reference or a value.
+type CredentialSession struct {
+	Profile   string    `json:"profile"`
+	Mode      string    `json:"mode"`
+	State     string    `json:"state"` // active | expired
+	ExpiresAt time.Time `json:"expiresAt"`
 }
 type CallRequest struct {
 	Connection string
@@ -341,6 +352,31 @@ func (c *Client) Login(ctx context.Context, id string) (LoginData, error) {
 func (c *Client) Logout(ctx context.Context, canonical string) (LogoutData, error) {
 	var out LogoutData
 	r, _, e := c.exchange(ctx, "work", Request{Method: "logout", Connection: canonical, Arguments: emptyArgs()}, true)
+	if e == nil {
+		e = decodeBody(r.Data, &out)
+	}
+	return out, e
+}
+
+// Lock ends every credential session; like Logout it starts the daemon, which
+// is the only writer of the OAuth lock.
+func (c *Client) Lock(ctx context.Context) (LockData, error) {
+	var out LockData
+	r, _, e := c.exchange(ctx, "work", Request{Method: "lock", Arguments: emptyArgs()}, true)
+	if e == nil {
+		e = decodeBody(r.Data, &out)
+	}
+	return out, e
+}
+
+// Refresh drops a connection's cached 1Password values. It never starts the
+// daemon: a daemon that is not running caches nothing.
+func (c *Client) Refresh(ctx context.Context, canonical string) (RefreshData, error) {
+	out := RefreshData{Connection: canonical}
+	r, _, e := c.exchange(ctx, "work", Request{Method: "refresh", Connection: canonical, Arguments: emptyArgs()}, false)
+	if errors.Is(e, os.ErrNotExist) || errors.Is(e, syscall.ECONNREFUSED) {
+		return out, nil
+	}
 	if e == nil {
 		e = decodeBody(r.Data, &out)
 	}

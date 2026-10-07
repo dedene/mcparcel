@@ -16,7 +16,7 @@ func TestOfflineCommandHelpDescriptionsAndPositionals(t *testing.T) {
 		{[]string{"local", "remove", "--help"}, []string{"Remove a personal connection definition offline."}},
 		{[]string{"enable", "--help"}, []string{"<mcp> ...", "Enable and accept selected connections offline."}},
 		{[]string{"disable", "--help"}, []string{"<mcp> ...", "Disable selected connections offline."}},
-		{[]string{"auth", "--help"}, []string{"Sign in to an HTTP connection in the browser.", "Show stored sign-in state without contacting servers.", "Remove the stored sign-in for a connection."}},
+		{[]string{"auth", "--help"}, []string{"Sign in to an HTTP connection in the browser.", "Show stored sign-in and 1Password session state without contacting servers.", "Remove the stored sign-in for a connection.", "End 1Password sessions and block stored sign-ins until the next auth login.", "Read a connection's 1Password secrets again on its next call."}},
 		{[]string{"auth", "login", "--help"}, []string{"<mcp>"}},
 		{[]string{"auth", "status", "--help"}, []string{"[<mcp>]"}},
 	} {

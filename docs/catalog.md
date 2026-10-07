@@ -201,6 +201,9 @@ macOS-first paths (respect explicit `XDG_CONFIG_HOME`, `XDG_DATA_HOME` and
   relative one is rejected.
 - State: `~/.local/state/mcparcel/daemon.log` — size-bounded, redacted daemon log
   (respects `XDG_STATE_HOME`).
+- State: `~/.local/state/mcparcel/auth-lock.json` — the connections `auth lock`
+  barred from reusing their stored OAuth session (`{"v":1,"connections":[ids]}`,
+  `0600`). Written only by the daemon; a completed sign-in removes its entry.
 
 Local profile example (reference and account name are placeholders):
 
@@ -216,7 +219,10 @@ Local profile example (reference and account name are placeholders):
 This object is stored at `config.json.credentialProfiles.<local-profile-id>`.
 Profile tagged union:
 `desktop-service-account` requires `account` and `bootstrapRef`;
-`desktop` requires `account` and has no service-account prompt-free guarantee.
+`desktop` requires `account` and has no service-account prompt-free guarantee:
+it reads through the 1Password app itself, which may ask again after the app
+locks, so there is no 24-hour promise and `--no-input` is served only from
+the 5-minute cache (`auth_required` after it).
 An `environment` profile for CI (token from a named env variable) is deferred
 from v1; the union leaves room for it. Both may specify
 `sessionDuration` (default `24h`, positive and at most `24h` in v1). Credential

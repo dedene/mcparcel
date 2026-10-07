@@ -14,6 +14,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/dedene/mcparcel/internal/auth"
 	"github.com/dedene/mcparcel/internal/config"
 	"github.com/dedene/mcparcel/internal/elicit"
 	"github.com/dedene/mcparcel/internal/mcpclient"
@@ -256,10 +257,25 @@ func Serve(ctx context.Context, opts DaemonOptions) error {
 
 func (s *daemonService) status() Status {
 	stay := s.stayAlive()
+	sessions := s.credentialSessions()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	start := s.started
-	return Status{Running: true, PID: os.Getpid(), ProtocolVersion: ProtocolVersion, BinaryVersion: s.opts.Version, Compatible: true, Socket: s.opts.Paths.SocketFile, Log: s.opts.Paths.LogFile, CapturedPath: s.opts.LoginEnv["PATH"], EnvFallback: s.opts.EnvFallback, ActiveCalls: len(s.requests), StayAlive: stay, StartedAt: &start}
+	return Status{Running: true, PID: os.Getpid(), ProtocolVersion: ProtocolVersion, BinaryVersion: s.opts.Version, Compatible: true, Socket: s.opts.Paths.SocketFile, Log: s.opts.Paths.LogFile, CapturedPath: s.opts.LoginEnv["PATH"], EnvFallback: s.opts.EnvFallback, ActiveCalls: len(s.requests), StayAlive: stay, StartedAt: &start, CredentialSessions: sessions}
+}
+
+// credentialSessions asks the handler for its credential profile sessions;
+// never call it with s.mu held.
+func (s *daemonService) credentialSessions() []CredentialSession {
+	h, ok := s.opts.Handler.(interface{ CredentialSessions() []auth.SessionInfo })
+	if !ok {
+		return nil
+	}
+	var out []CredentialSession
+	for _, v := range h.CredentialSessions() {
+		out = append(out, CredentialSession{Profile: v.Profile, Mode: v.Mode, State: v.State, ExpiresAt: v.ExpiresAt.UTC()})
+	}
+	return out
 }
 
 // idleLocked reports an idle daemon; s.mu is held.

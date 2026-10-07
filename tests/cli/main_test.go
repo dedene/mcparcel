@@ -362,6 +362,9 @@ func (r *rig) status() runtimeclient.Status {
 		r.t.Fatal(err)
 	}
 	keys := []string{"running", "pid", "protocolVersion", "binaryVersion", "compatible", "socket", "log", "capturedPath", "envFallback", "activeCalls", "stayAlive", "startedAt"}
+	if _, ok := fields["credentialSessions"]; ok {
+		keys = append(keys, "credentialSessions")
+	}
 	if len(fields) != len(keys) {
 		r.t.Fatalf("status fields: %s", v.envelope.Data)
 	}

@@ -9,6 +9,7 @@ import (
 
 	"github.com/dedene/mcparcel/internal/args"
 	"github.com/dedene/mcparcel/internal/output"
+	"github.com/dedene/mcparcel/internal/testutil"
 )
 
 func TestAuthRequestValidation(t *testing.T) {
@@ -117,5 +118,61 @@ func TestClientDeliversAuthURL(t *testing.T) {
 	out, e := c.Logout(testCtx(t), "local:a")
 	if e != nil || out.Connection != "local:a" || !out.Removed || out.ProviderRevoked {
 		t.Fatal(out, e)
+	}
+}
+
+func TestLockRefreshFrames(t *testing.T) {
+	empty := args.Raw{Values: map[string]args.Value{}}
+	for name, tc := range map[string]struct {
+		r  Request
+		ok bool
+	}{
+		"lock":                  {Request{Method: "lock", Arguments: empty}, true},
+		"lock connection":       {Request{Method: "lock", Connection: "local:a", Arguments: empty}, false},
+		"lock tool":             {Request{Method: "lock", Tool: "t", Arguments: empty}, false},
+		"lock force":            {Request{Method: "lock", Force: true, Arguments: empty}, false},
+		"lock prompt":           {Request{Method: "lock", Prompt: "terminal", Arguments: empty}, false},
+		"refresh":               {Request{Method: "refresh", Connection: "local:a", Arguments: empty}, true},
+		"refresh non-canonical": {Request{Method: "refresh", Connection: "a", Arguments: empty}, false},
+		"refresh no connection": {Request{Method: "refresh", Arguments: empty}, false},
+		"refresh timeout":       {Request{Method: "refresh", Connection: "local:a", Timeout: "1s", Arguments: empty}, false},
+		"refresh arguments":     {Request{Method: "refresh", Connection: "local:a", Arguments: args.Raw{Values: map[string]args.Value{"x": {}}}}, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if e := validateBody(frame("request", tc.r)); (e == nil) != tc.ok {
+				t.Fatal(e)
+			}
+			if validateRequest("status", tc.r) == nil {
+				t.Fatal("lock and refresh need the work intent")
+			}
+		})
+	}
+}
+
+// credentialHandler answers lock and refresh.
+type credentialHandler struct{ daemonHandler }
+
+func (h *credentialHandler) Handle(_ context.Context, _ string, r Request, _ func() error) Response {
+	var v any = LockData{Locked: true}
+	if r.Method == "refresh" {
+		v = RefreshData{Connection: r.Connection, Invalidated: true}
+	}
+	b, _ := json.Marshal(v)
+	return Response{Data: b}
+}
+
+func TestClientLockRefresh(t *testing.T) {
+	c, _ := service(t, &credentialHandler{}, 0)
+	if d, e := c.Lock(testCtx(t)); e != nil || !d.Locked {
+		t.Fatal(d, e)
+	}
+	if d, e := c.Refresh(testCtx(t), "local:a"); e != nil || d != (RefreshData{Connection: "local:a", Invalidated: true}) {
+		t.Fatal(d, e)
+	}
+	// A daemon that is not running caches nothing, and refresh does not start one.
+	p, _ := testutil.IsolatedPaths(t)
+	stopped := &Client{Paths: p, Version: "dev", Executable: "/nonexistent"}
+	if d, e := stopped.Refresh(testCtx(t), "local:a"); e != nil || d != (RefreshData{Connection: "local:a"}) {
+		t.Fatal(d, e)
 	}
 }

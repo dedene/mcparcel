@@ -355,6 +355,7 @@ func TestKeepAliveDoesNotExtendCredentialSession(t *testing.T) {
 		resolves.Add(1)
 		return testutil.FakeSecretClient{ResolveFunc: func(context.Context, string) (string, error) { return "pre-secret", nil }}, nil
 	}}})
+	k.opts.ExpiryCheck = 10 * time.Millisecond
 	k.storeGrant(t)
 	k.start()
 	count(t, k.call(testCtx(t), "a", "counter"))
@@ -366,15 +367,6 @@ func TestKeepAliveDoesNotExtendCredentialSession(t *testing.T) {
 		t.Fatal("refreshes", k.refreshes()-before, "resolves", resolves.Load()-resolved)
 	}
 	k.clock.Advance(11 * time.Hour)
-	p := k.pool()
-	p.mu.Lock()
-	entry := p.entries["local:a"]
-	if entry == nil || entry.timer == nil {
-		p.mu.Unlock()
-		t.Fatal("missing lease timer")
-	}
-	entry.timer.Reset(0)
-	p.mu.Unlock()
 	deadline := time.Now().Add(5 * time.Second)
 	for k.closed.Load() != 1 {
 		if time.Now().After(deadline) {

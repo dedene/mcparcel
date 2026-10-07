@@ -45,11 +45,23 @@ func newCredentials(paths config.Paths, _ string) auth.Resolver {
 		}
 		return nil
 	}
+	present := func(name string) bool {
+		_, err := os.Stat(filepath.Join(paths.StateDir, name))
+		return err == nil
+	}
+	// A desktop profile reads through the desktop client itself and never
+	// reads a bootstrap reference.
 	provider := testutil.FakeProvider{BootstrapFunc: func(ctx context.Context, profile config.Profile) (auth.SecretClient, error) {
-		if profile.Account != "Fixture account" || profile.BootstrapRef != "op://Private/fixture/token" {
+		event := "bootstrap"
+		switch {
+		case profile.Account != "Fixture account":
+			return nil, auth.ErrProvider
+		case profile.Mode == "desktop" && profile.BootstrapRef == "":
+			event = "bootstrap-desktop"
+		case profile.BootstrapRef != "op://Private/fixture/token":
 			return nil, auth.ErrProvider
 		}
-		if err := record("bootstrap"); err != nil {
+		if err := record(event); err != nil {
 			return nil, err
 		}
 		if _, err := os.Stat(paths.StateDir + "/fixture-bootstrap-block"); err == nil {
@@ -72,10 +84,23 @@ func newCredentials(paths config.Paths, _ string) auth.Resolver {
 			if err := ctx.Err(); err != nil {
 				return "", err
 			}
+			// StateDir/fixture-revoked and fixture-rate-limit fail every read
+			// as a revoked service account or a rate limit would.
+			if present("fixture-revoked") {
+				return "", fmt.Errorf("%w: %s revoked", auth.ErrProvider, bootstrapToken)
+			}
+			if present("fixture-rate-limit") {
+				return "", fmt.Errorf("%w: %s", auth.ErrRateLimited, bootstrapToken)
+			}
 			event, value := "", ""
 			switch ref {
 			case "op://Fixture/api/key":
 				event, value = "resolve-api", "FIXTURE-API-KEY"
+				// StateDir/fixture-api-value replaces the value, as an edited
+				// 1Password item would.
+				if b, err := os.ReadFile(filepath.Join(paths.StateDir, "fixture-api-value")); err == nil {
+					value = strings.TrimSuffix(string(b), "\n")
+				}
 			case "op://Fixture/other/key":
 				event, value = "resolve-other", "FIXTURE-OTHER-KEY"
 			default:

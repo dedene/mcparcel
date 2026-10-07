@@ -14,6 +14,10 @@ var (
 	ErrRequired        = errors.New("credential authorization required")
 	ErrExpired         = errors.New("credential session expired")
 	ErrProvider        = errors.New("credential provider failed")
+	// ErrRateLimited keeps the session: the provider refused this request only.
+	ErrRateLimited = errors.New("credential provider rate limited")
+	// ErrLocked is the cause of work canceled by Lock.
+	ErrLocked = errors.New("credentials locked")
 )
 
 type SecretClient interface {
@@ -22,14 +26,16 @@ type SecretClient interface {
 type Provider interface {
 	Bootstrap(context.Context, config.Profile) (SecretClient, error)
 }
-type Lease struct {
-	Identity         string
-	ExpiresAt        time.Time
-	SessionExpiresAt time.Time
-	Values           map[string]string
-}
+
+// Resolver hands out leases over one shared provider session per profile.
 type Resolver interface {
-	Resolve(context.Context, string, config.Profile, []string, bool) (Lease, error)
+	Resolve(ctx context.Context, profileID string, profile config.Profile, refs []string, noInput bool) (Lease, error)
+	// Invalidate drops the cached values of refs so the next Resolve reads
+	// them again. It keeps the session and makes no provider call.
+	Invalidate(profileID string, refs []string)
+	// Lock ends every session and cancels in-flight work with cause ErrLocked.
+	Lock()
+	Sessions() []SessionInfo
 	Close() error
 }
 type ResolverOptions struct {
@@ -37,6 +43,9 @@ type ResolverOptions struct {
 	Now           func() time.Time
 	AuthTimeout   time.Duration
 	LeaseDuration time.Duration
+	// SweepEvery is how often expired values and sessions are purged without
+	// a call. Default and maximum: one minute.
+	SweepEvery time.Duration
 }
 
 func safeProviderError(ctx context.Context, err error) error {
@@ -57,6 +66,9 @@ func safeProviderError(ctx context.Context, err error) error {
 	}
 	if errors.Is(err, ErrRequired) {
 		return ErrRequired
+	}
+	if errors.Is(err, ErrRateLimited) {
+		return ErrRateLimited
 	}
 	return ErrProvider
 }

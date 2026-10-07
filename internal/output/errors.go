@@ -66,6 +66,7 @@ var registry = map[string]errorSpec{
 	"auth_expired":             {3, "The credential session expired.", "Run the command interactively to authorize again."},
 	"auth_account_conflict":    {3, "This daemon already uses another 1Password account; run mcparcel runtime restart.", ""},
 	"auth_failed":              {3, "Credential resolution failed.", "Check the profile, desktop integration and vault access."},
+	"auth_rate_limited":        {6, "1Password rate limited the request.", "Wait, then run the call again. Service-account limits are hourly and daily."},
 	"connection_unavailable":   {4, "The connection is not defined.", "Check the connection ID in personal.json."},
 	"tool_error":               {5, "The MCP tool returned an error result.", ""},
 	"connection_failed":        {6, "Could not connect to the MCP server.", "Check the connection configuration and prerequisites."},

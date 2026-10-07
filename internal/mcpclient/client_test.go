@@ -155,8 +155,8 @@ func TestToolsPagination(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	want := []string{"counter", "echo", "echo.dotted", "elicit", "env", "fail", "large", "media", "meta", "refs", "rich", "rootref", "rpcfail", "typed", "wait", "write_drop"}
-	if strings.Join(listNames(t, items), ",") != strings.Join(want, ",") || pages.Load() != 8 {
+	want := []string{"counter", "echo", "echo.dotted", "elicit", "env", "env_set", "fail", "large", "media", "meta", "refs", "rich", "rootref", "rpcfail", "typed", "wait", "write_drop"}
+	if strings.Join(listNames(t, items), ",") != strings.Join(want, ",") || pages.Load() != 9 {
 		t.Fatalf("names/pages %v/%d", listNames(t, items), pages.Load())
 	}
 }
@@ -191,7 +191,7 @@ func TestToolsIgnoresSDKTTL(t *testing.T) {
 			found = true
 		}
 	}
-	if !found || pages.Load() != 16 {
+	if !found || pages.Load() != 18 {
 		t.Fatalf("schema changed=%v pages=%d", found, pages.Load())
 	}
 }

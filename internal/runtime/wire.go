@@ -97,7 +97,7 @@ func validateRequest(intent string, r Request) error {
 	if r.Prompt != "" && (r.Method != "call" || r.NoInput || r.Prompt != "terminal" && r.Prompt != "dialog") {
 		return ErrInvalidFrame
 	}
-	if (intent == "restart" || intent == "stop") && r.Method != intent || intent == "status" && r.Method != "status" || intent == "work" && r.Method != "tools" && r.Method != "call" && r.Method != "login" && r.Method != "logout" {
+	if (intent == "restart" || intent == "stop") && r.Method != intent || intent == "status" && r.Method != "status" || intent == "work" && r.Method != "tools" && r.Method != "call" && r.Method != "login" && r.Method != "logout" && r.Method != "lock" && r.Method != "refresh" {
 		return ErrInvalidFrame
 	}
 	switch r.Method {
@@ -125,6 +125,14 @@ func validateRequest(intent string, r Request) error {
 			return ErrInvalidFrame
 		}
 		if r.Method == "logout" && config.ValidateCanonicalID(r.Connection) != nil {
+			return ErrInvalidFrame
+		}
+	case "lock":
+		if r.Connection != "" || r.Tool != "" || r.Timeout != "" || len(r.Arguments.Values) != 0 || r.Cached || r.Force {
+			return ErrInvalidFrame
+		}
+	case "refresh":
+		if config.ValidateCanonicalID(r.Connection) != nil || r.Tool != "" || r.Timeout != "" || len(r.Arguments.Values) != 0 || r.Cached || r.Force || r.NoInput {
 			return ErrInvalidFrame
 		}
 	case "status", "restart", "stop":

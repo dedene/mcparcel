@@ -63,6 +63,7 @@ func TestProtectedExpiry(t *testing.T) {
 	var offset atomic.Int64
 	now := func() time.Time { return base.Add(time.Duration(offset.Load())) }
 	r.opts.Now = now
+	r.opts.ExpiryCheck = 10 * time.Millisecond
 	r.opts.Credentials = auth.NewResolver(auth.ResolverOptions{Now: now, Provider: testutil.FakeProvider{BootstrapFunc: func(context.Context, config.Profile) (auth.SecretClient, error) {
 		return testutil.FakeSecretClient{ResolveFunc: func(context.Context, string) (string, error) { return "value", nil }}, nil
 	}}})
@@ -76,15 +77,6 @@ func TestProtectedExpiry(t *testing.T) {
 		t.Fatal("no dispatch or response")
 	}
 	offset.Store(int64(24 * time.Hour))
-	p := r.h.(*pool)
-	p.mu.Lock()
-	entry := p.entries["local:a"]
-	if entry == nil || entry.timer == nil {
-		p.mu.Unlock()
-		t.Fatal("missing expiry timer")
-	}
-	entry.timer.Reset(0)
-	p.mu.Unlock()
 	res := response(t, a)
 	responseCode(t, res, "outcome_unknown", true)
 	if r.closed.Load() != 1 {

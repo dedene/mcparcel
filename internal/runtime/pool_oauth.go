@@ -33,7 +33,8 @@ func oauthCapable(c config.Connection) bool {
 
 // oauthHandler returns the connection's OAuth handler, or nil when OAuth does
 // not apply. A marked connection without a usable stored session fails with
-// auth_required before any network request.
+// auth_required before any network request; after auth lock a stored session
+// is not usable until the next sign-in.
 func (p *pool) oauthHandler(ctx context.Context, id, name string, c config.Connection, values map[string]string, login *auth.LoginOptions) (*auth.OAuthHandler, error) {
 	if !oauthCapable(c) {
 		return nil, nil
@@ -65,7 +66,7 @@ func (p *pool) oauthHandler(ctx context.Context, id, name string, c config.Conne
 		return auth.NewOAuthHandler(opts), nil
 	}
 	state, e := auth.LoadOAuth(ctx, p.opts.Keyring, id)
-	usable := e == nil && state.URL == u && state.Failure == nil && state.RefreshToken != ""
+	usable := e == nil && state.URL == u && state.Failure == nil && state.RefreshToken != "" && !p.oauthLocked(id)
 	if c.Auth == nil {
 		if !usable {
 			return nil, nil
@@ -131,11 +132,16 @@ func loginOptions(ctx context.Context, req Request, c config.Connection) (*auth.
 // finishLogin lists tools on the new session so the sign-in completes, and
 // keeps a signed-in session pooled. e is the session's connect error. A
 // session that was never asked to sign in is retired, so its login-mode
-// handler never serves an ordinary call.
-func (p *pool) finishLogin(ctx context.Context, name, canonical string, entry *poolEntry, handler *auth.OAuthHandler, e error, fail func(error) Response) Response {
+// handler never serves an ordinary call. A sign-in an auth lock overtook
+// clears no lock and is retired.
+func (p *pool) finishLogin(ctx context.Context, name, canonical string, entry *poolEntry, handler *auth.OAuthHandler, e error, epoch uint64, fail func(error) Response) Response {
 	if e == nil {
 		if _, e = entry.session.Tools(ctx); e != nil || handler == nil || !handler.SignedIn() {
 			p.retire(canonical, entry)
+		} else if !p.unlockOAuth(canonical, epoch) {
+			// An auth lock ran after this sign-in: it stays locked.
+			p.retire(canonical, entry)
+			e = auth.ErrLocked
 		}
 	}
 	if e != nil {

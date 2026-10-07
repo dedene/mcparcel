@@ -7,11 +7,13 @@ import (
 
 // SessionInput is what auth status knows about one connection: its Keychain
 // item (Found false when absent), its health history and, from task B, its
-// keep-alive setting ("", a duration, "off" or "unavailable").
+// keep-alive setting ("", a duration, "off" or "unavailable"), and whether auth
+// lock barred its stored session.
 type SessionInput struct {
 	Connection, Name, URL string // URL: the configured MCP URL
 	State                 OAuthState
 	Found                 bool
+	Locked                bool
 	Health                ConnectionHealth
 	KeepAlive             string
 	Now                   time.Time
@@ -52,7 +54,7 @@ const (
 // and a next action. It is pure: no Keychain, file or network access.
 func ExplainSession(in SessionInput) SessionReport {
 	r := SessionReport{Connection: in.Connection, KeepAlive: in.KeepAlive, Events: in.Health.Events}
-	signedIn := in.Found && in.State.URL == in.URL && in.State.Failure == nil && in.State.RefreshToken != ""
+	signedIn := in.Found && !in.Locked && in.State.URL == in.URL && in.State.Failure == nil && in.State.RefreshToken != ""
 	success := lastSuccess(in.Health.Events)
 	var refreshExpiry int64
 	if success != nil {
@@ -104,6 +106,9 @@ func explainCause(in SessionInput, signedIn bool, success *HealthEvent) *Session
 		case len(events) == 0:
 			return &SessionCause{"never_signed_in", "Not signed in yet."}
 		}
+	}
+	if in.Found && in.Locked {
+		return &SessionCause{"locked", "Locked by mcparcel auth lock."}
 	}
 	if in.Found && in.State.TokenURL == "" && in.State.RefreshToken == "" && in.State.Failure == nil {
 		return &SessionCause{"server_requested", "The server asked for sign-in."}

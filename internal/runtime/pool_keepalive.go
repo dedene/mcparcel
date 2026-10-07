@@ -38,7 +38,7 @@ func (p *pool) StayAlive() bool {
 }
 
 // keepAliveTargets lists the runnable OAuth-capable connections whose
-// lifecycle.keepAlive is not "off".
+// lifecycle.keepAlive is not "off" and that auth lock did not bar.
 func (p *pool) keepAliveTargets(context.Context) ([]auth.KeepAliveTarget, error) {
 	snapshot, err := p.opts.Load(p.opts.Paths)
 	if err != nil {
@@ -55,7 +55,7 @@ func (p *pool) keepAliveTargets(context.Context) ([]auth.KeepAliveTarget, error)
 	var targets []auth.KeepAliveTarget
 	for _, id := range ids {
 		canonical, c, err := snapshot.RuntimeConnection(id)
-		if err != nil || !oauthCapable(c) {
+		if err != nil || !oauthCapable(c) || p.oauthLocked(canonical) {
 			continue
 		}
 		if interval, ok := auth.KeepAliveInterval(keepAliveSetting(c)); ok {
@@ -98,7 +98,7 @@ func (p *pool) refreshStored(ctx context.Context, canonical, trigger string) err
 		return err
 	}
 	_, c, err := snapshot.RuntimeConnection(canonical)
-	if err != nil || !oauthCapable(c) {
+	if err != nil || !oauthCapable(c) || p.oauthLocked(canonical) {
 		return auth.ErrKeepAliveDormant
 	}
 	p.mu.Lock()

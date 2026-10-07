@@ -59,6 +59,9 @@ func NewFixtureServerWithOptions(opts FixtureOptions) *mcp.Server {
 	mcp.AddTool(server, &mcp.Tool{Name: "env"}, func(_ context.Context, _ *mcp.CallToolRequest, in EnvInput) (*mcp.CallToolResult, EnvOutput, error) {
 		return nil, EnvOutput{Value: opts.lookup(in.Name)}, nil
 	})
+	mcp.AddTool(server, &mcp.Tool{Name: "env_set"}, func(_ context.Context, _ *mcp.CallToolRequest, in EnvInput) (*mcp.CallToolResult, EnvSetOutput, error) {
+		return nil, EnvSetOutput{Set: opts.lookup(in.Name) != ""}, nil
+	})
 	server.AddTool(&mcp.Tool{Name: "wait", InputSchema: map[string]any{"type": "object"}}, func(ctx context.Context, _ *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if err := opts.started(ctx, "wait"); err != nil {
 			return nil, err

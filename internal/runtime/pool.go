@@ -31,6 +31,9 @@ type PoolOptions struct {
 	Now             func() time.Time
 	ConnectTimeout  time.Duration
 	ShutdownTimeout time.Duration
+	// ExpiryCheck is how often a protected session's deadline is checked
+	// without a call (default one minute), so a wake from sleep is noticed.
+	ExpiryCheck time.Duration
 }
 type pool struct {
 	opts     PoolOptions
@@ -46,8 +49,20 @@ type pool struct {
 	stopDone chan struct{}
 	stopErr  error
 	keep     *auth.KeepAlive
+	// lockEpoch counts auth locks; work admitted before one is refused
+	// protected access. Guarded by mu.
+	lockEpoch uint64
+	lockMu    sync.Mutex
+	locks     map[string]bool // auth-lock.json in memory, nil until read; guarded by lockMu
 }
-type poolWork struct{ ctx context.Context }
+
+// poolWork is one admitted request. protected marks work on a connection that
+// uses 1Password secrets or OAuth, which auth lock cancels; guarded by mu.
+type poolWork struct {
+	ctx       context.Context
+	epoch     uint64
+	protected bool
+}
 
 func NewPool(opts PoolOptions) Handler {
 	if opts.Load == nil {
@@ -70,6 +85,9 @@ func NewPool(opts PoolOptions) Handler {
 	}
 	if opts.ShutdownTimeout <= 0 {
 		opts.ShutdownTimeout = 5 * time.Second
+	}
+	if opts.ExpiryCheck <= 0 {
+		opts.ExpiryCheck = time.Minute
 	}
 	login := make(map[string]string, len(opts.LoginEnv))
 	for k, v := range opts.LoginEnv {
@@ -97,15 +115,21 @@ func (p *pool) Handle(ctx context.Context, id string, req Request, before func()
 		return Response{Error: output.NewError("schema_cache_miss", nil)}
 	}
 	p.requests[w] = cancel
+	w.epoch = p.lockEpoch
 	p.workers.Add(1)
 	p.mu.Unlock()
 	defer func() { cancel(nil); p.mu.Lock(); delete(p.requests, w); p.mu.Unlock(); p.workers.Done() }()
 	fail := func(e error) Response { return Response{Error: poolError(e, context.Cause(workCtx), id, false)} }
-	if req.Method != "call" && req.Method != "tools" && req.Method != "login" && req.Method != "logout" {
-		return fail(output.NewError("protocol_error", nil))
-	}
-	if req.Method == "logout" {
+	switch req.Method {
+	case "call", "tools", "login":
+	case "logout":
 		return p.logout(workCtx, req.Connection)
+	case "lock":
+		return p.lock(workCtx)
+	case "refresh":
+		return p.refresh(req.Connection)
+	default:
+		return fail(output.NewError("protocol_error", nil))
 	}
 	if p.opts.Credentials == nil {
 		return fail(errors.New("missing credentials resolver"))
@@ -186,6 +210,14 @@ func (p *pool) Handle(ctx context.Context, id string, req Request, before func()
 	}
 	lease := auth.Lease{Identity: "public"}
 	refs := config.SecretRefs(c)
+	if len(refs) > 0 || oauthCapable(c) {
+		if e = p.admitProtected(w); e != nil {
+			if len(refs) == 0 {
+				return fail(auth.NotSignedIn(req.Connection))
+			}
+			return fail(e)
+		}
+	}
 	if oauthCapable(c) && len(refs) == 0 {
 		defer func() {
 			if resp.Error != nil && resp.Error.Code == "auth_required" {
@@ -206,20 +238,13 @@ func (p *pool) Handle(ctx context.Context, id string, req Request, before func()
 		}()
 	}
 	if len(refs) > 0 {
-		authCtx, authCancel := context.WithTimeout(workCtx, 120*time.Second)
-		lease, e = p.opts.Credentials.Resolve(authCtx, c.CredentialProfile, snapshot.Local.CredentialProfiles[c.CredentialProfile], refs, req.NoInput)
-		authCancel()
-		if e != nil {
-			p.opts.Log("auth_failed")
+		if lease, e = p.resolveLease(workCtx, canonical, c, snapshot.Local.CredentialProfiles[c.CredentialProfile], refs, req.NoInput); e != nil {
 			return fail(e)
 		}
-		if !p.opts.Now().Before(lease.SessionExpiresAt) {
-			return fail(auth.ErrExpired)
-		}
 	}
-	entry, handler, e := p.session(workCtx, canonical, hash, c, lease, gate, req.Connection, login)
+	entry, handler, e := p.session(workCtx, canonical, hash, c, lease, gate, req.Connection, login, w.epoch)
 	if login != nil {
-		return p.finishLogin(workCtx, req.Connection, canonical, entry, handler, e, fail)
+		return p.finishLogin(workCtx, req.Connection, canonical, entry, handler, e, w.epoch, fail)
 	}
 	if e != nil {
 		return fail(e)
@@ -336,7 +361,7 @@ func (p *pool) Handle(ctx context.Context, id string, req Request, before func()
 		if callCtx.Err() != nil {
 			return poolError(callCtx.Err(), context.Cause(callCtx), id, false)
 		}
-		if len(refs) > 0 && !p.opts.Now().Before(lease.SessionExpiresAt) {
+		if len(refs) > 0 && auth.Expired(p.opts.Now(), lease.SessionExpiresAt) {
 			return output.NewError("auth_expired", nil)
 		}
 		p.mu.Lock()
@@ -366,7 +391,7 @@ func (p *pool) Handle(ctx context.Context, id string, req Request, before func()
 	if result.Retire || result.Dispatched && !certain && (e != nil || callCtx.Err() != nil) {
 		p.retire(canonical, entry)
 	}
-	if result.Dispatched && (errors.Is(context.Cause(workCtx), errForced) || errors.Is(context.Cause(callCtx), auth.ErrExpired)) {
+	if result.Dispatched && (errors.Is(context.Cause(workCtx), errForced) || errors.Is(context.Cause(callCtx), auth.ErrExpired) || errors.Is(context.Cause(callCtx), auth.ErrLocked)) {
 		e = output.NewError("outcome_unknown", nil)
 	}
 	if e == nil && result.IsError {

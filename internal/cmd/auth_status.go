@@ -14,7 +14,8 @@ import (
 )
 
 type authStatusData struct {
-	Items []authStatusItem `json:"items"`
+	Items    []authStatusItem  `json:"items"`
+	Profiles []authProfileItem `json:"profiles"`
 }
 
 // authStatusItem keeps the stage 7 fields and adds the explanation. Events
@@ -39,8 +40,10 @@ type authStatusFailure struct {
 	Code string `json:"code"`
 }
 
-// Run reads Keychain items and the health file locally; it never starts the
-// runtime and never prints a token, a redirect or a client identifier.
+// Run reads Keychain items, the health file and the OAuth lock locally, and
+// asks a running daemon for its 1Password sessions; it never starts the
+// runtime and never prints a token, a redirect, a client identifier, an
+// account or a reference.
 func (c *AuthStatusCmd) Run(ctx context.Context, s *Streams, opts *CommandOptions) error {
 	paths, err := commandPaths()
 	if err != nil {
@@ -56,24 +59,30 @@ func (c *AuthStatusCmd) Run(ctx context.Context, s *Streams, opts *CommandOption
 		ids = append(ids, id)
 	}
 	slices.Sort(ids)
+	profile := ""
 	if c.MCP != "" {
 		id, err := config.ResolveID(c.MCP, effective.Aliases, ids)
 		if err != nil {
 			return err
 		}
 		ids = []string{id}
+		if row := effective.Connections[id].Connection; row != nil && len(config.SecretRefs(*row)) > 0 {
+			profile = row.CredentialProfile
+		}
 	}
 	keyring := newKeyring(paths)
 	// An unreadable health file means no history; status still answers.
 	health, _ := auth.ReadHealth(paths.StateDir)
+	// An unreadable lock file fails closed, as in the daemon.
+	locks, lockErr := auth.ReadOAuthLock(paths.StateDir)
 	now := time.Now()
-	data := authStatusData{Items: []authStatusItem{}}
+	data := authStatusData{Items: []authStatusItem{}, Profiles: []authProfileItem{}}
 	for _, id := range ids {
 		row := effective.Connections[id]
 		if row.Connection == nil || row.Connection.Transport.HTTP == nil {
-			if c.MCP != "" {
+			if c.MCP != "" && profile == "" {
 				e := output.NewError("invalid_arguments", nil)
-				e.Message = "Only HTTP connections use sign-in."
+				e.Message = c.MCP + " uses neither sign-in nor 1Password."
 				return e
 			}
 			continue
@@ -94,7 +103,7 @@ func (c *AuthStatusCmd) Run(ctx context.Context, s *Streams, opts *CommandOption
 		if c.MCP != "" {
 			name = c.MCP
 		}
-		report := auth.ExplainSession(auth.SessionInput{Connection: id, Name: name, URL: u, State: state, Found: found, Health: health[id], KeepAlive: keepAliveSetting(*row.Connection), Now: now})
+		report := auth.ExplainSession(auth.SessionInput{Connection: id, Name: name, URL: u, State: state, Found: found, Locked: lockErr != nil || locks[id], Health: health[id], KeepAlive: keepAliveSetting(*row.Connection), Now: now})
 		item := authStatusItem{
 			Connection: id, State: report.State, RefreshToken: state.RefreshToken != "",
 			LastRefreshAt: report.LastRefreshAt, AccessTokenExpiresAt: report.AccessTokenExpiresAt, RefreshTokenExpiresAt: report.RefreshTokenExpiresAt,
@@ -108,6 +117,11 @@ func (c *AuthStatusCmd) Run(ctx context.Context, s *Streams, opts *CommandOption
 			item.Events = report.Events
 		}
 		data.Items = append(data.Items, item)
+	}
+	if c.MCP == "" || profile != "" {
+		if rows := profileRows(ctx, paths, snapshot, profile); rows != nil {
+			data.Profiles = rows
+		}
 	}
 	if opts.JSON {
 		return writeSuccess(s, opts, data)
@@ -123,9 +137,10 @@ func (c *AuthStatusCmd) Run(ctx context.Context, s *Streams, opts *CommandOption
 			writeAuthStatusDetail(&b, item)
 		}
 	}
-	if len(data.Items) == 0 {
+	if len(data.Items) == 0 && len(data.Profiles) == 0 {
 		b.WriteString("No OAuth connections.\n")
 	}
+	writeProfileRows(&b, data.Profiles)
 	return writeSuccess(s, opts, b.String())
 }
 

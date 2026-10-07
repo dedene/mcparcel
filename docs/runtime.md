@@ -350,6 +350,70 @@ shared tokens/keys as required. The 24-hour window is local convenience policy, 
 server-enforced membership validation. A central broker for immediate membership
 checks is a different deployment and explicitly deferred.
 
+### 1Password sessions as built (stage 6)
+
+- Access goes through the official 1Password Go SDK (`onepassword-sdk-go`
+  v0.4.1) with desktop app integration ("Integrate with other apps" on). No `op`
+  CLI, no subprocess. `OP_SERVICE_ACCOUNT_TOKEN` is never read and never passed
+  to a child.
+- `desktop-service-account`: each bootstrap reads `bootstrapRef` through the
+  desktop client (the app may prompt once) and builds the service-account
+  client from it. The token is held only inside that SDK client in daemon
+  memory and released when the session ends (lock, expiry, failure, changed
+  profile, daemon exit). A profile changed while its bootstrap is in flight
+  ends that session as soon as the bootstrap returns; its callers get
+  `auth_expired`. No zeroization claim.
+- `desktop`: the desktop client reads the secrets itself; `bootstrapRef` is
+  never read. The SDK may re-authorize on its own after the app locks, which
+  can prompt, so there is no 24-hour promise and `--no-input` is answered from
+  the 5-minute cache only: on a miss it returns `auth_required` without calling
+  1Password.
+- One bootstrap per profile at a time, shared by concurrent callers; only the
+  connection's references are read; values are cached for at most 5 minutes;
+  the session lasts `sessionDuration` (default and maximum 24 hours) and a
+  re-read never extends it. `--no-input` without a session returns
+  `auth_required` (`auth_expired` after an expiry) and calls nothing.
+- Reconnects: each reference has its own version, which goes up when its value
+  changes (compared by an HMAC digest under a random per-session key; no value
+  is kept past the cache). A lease's identity is the session plus the summed
+  versions of the connection's references, so a changed secret replaces only
+  the processes that use it, after the connection's active call drains.
+- Expiry is checked on the wall and the monotonic clock: the monotonic clock
+  stops while a Mac sleeps, and any backwards wall step ends the session. Every
+  minute the resolver purges expired values and ended sessions, and the pool
+  stops each protected process whose session ended, so a deadline passed in
+  sleep is caught within a minute of awake time.
+- A rate limit returns `auth_rate_limited` (exit 6) and keeps the session,
+  cache and process; nothing is retried within the call. A revoked service
+  account or any other provider failure ends the session and stops the
+  connection's process; the next interactive call makes one bootstrap attempt.
+  No retry loop, no identity switch, no stale value. Provider text never
+  reaches an error or the log.
+- `auth lock` ends every 1Password session and cancels protected work (on
+  connections with `op://` references or OAuth): a dispatched call reports
+  `outcome_unknown`; a call admitted before the lock that had not reached its
+  secrets gets `auth_required` without a provider call. Protected processes
+  stop, each once its canceled call unwound (bounded by the shutdown timeout).
+  `<state>/auth-lock.json` then lists every OAuth-capable connection and every
+  one with sign-in history: their stored sessions are not used (a marked
+  connection gets `auth_required` with next action `mcparcel auth login <mcp>`,
+  an unmarked one connects without OAuth), keep-alive skips them and
+  `auth status` shows cause `locked`. Only a completed `auth login` removes an
+  entry, and only one admitted after the lock: a sign-in that finishes while
+  the lock runs gets `auth_required` and clears nothing. An unreadable file
+  counts as all locked. Work admitted after the lock never sees a pre-lock
+  1Password session; it bootstraps again. A 1Password prompt still open
+  at lock time keeps its call quarantined: the profile's next interactive call
+  gets `auth_failed`, not a second prompt, until that call returns.
+- `auth refresh <mcp>` drops the connection's cached values without a provider
+  call; the next call reads them through the existing session, without a
+  prompt. A read already in flight may still cache what it read.
+- `runtime status` lists `credentialSessions` and `auth status` lists profile
+  rows; neither shows an account, a reference or a value.
+- Log events: `auth_failed`, `auth_rate_limited`, `auth_locked`,
+  `credential_invalidated` and `credential_rotated`, without profile, reference
+  or value.
+
 ## OAuth recommendation for review
 
 Keep distributed API keys and OAuth client secrets in 1Password. Store each user's
@@ -396,7 +460,8 @@ deliberately independent of whether Keychain would permit a silent read.
 `auth logout <mcp>` removes local OAuth tokens/registration; provider-side revocation
 is a separate capability, reported accurately (`providerRevoked` is always false
 for now). `auth status` reads the Keychain item locally, never starts the runtime
-and prints no token. `auth lock` is not built yet.
+and prints no token. `auth lock` as built: see "1Password sessions as built
+(stage 6)" below.
 
 ### OAuth as built (stage 7 core)
 
@@ -475,8 +540,8 @@ and prints no token. `auth lock` is not built yet.
   `timeout`, `network_error`, `canceled`, `issuer_mismatch`,
   `registration_unsupported` or `<stage>_failed`. Never token, code, state,
   verifier, URL, connection name or provider text.
-- Deferred: implicit login, `auth lock`,
-  `tokenEndpointAuthMethod` enforcement, provider revocation.
+- Deferred: implicit login, `tokenEndpointAuthMethod` enforcement, provider
+  revocation.
 
 ## OAuth session health
 

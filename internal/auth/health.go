@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -295,7 +296,7 @@ func (h *Health) writeLocked() error {
 		}
 		delete(h.data, oldestConnection(h.data))
 	}
-	return replaceHealthFile(h.dir, b)
+	return replaceStateFile(h.dir, healthFile, b)
 }
 
 func oldestConnection(data map[string]ConnectionHealth) string {
@@ -319,7 +320,8 @@ func oldestConnection(data map[string]ConnectionHealth) string {
 	return oldest
 }
 
-func replaceHealthFile(stateDir string, data []byte) (err error) {
+// replaceStateFile atomically replaces the private file name in stateDir.
+func replaceStateFile(stateDir, name string, data []byte) (err error) {
 	dir, err := config.OpenPrivateDir(stateDir, true)
 	if err != nil {
 		return err
@@ -329,7 +331,7 @@ func replaceHealthFile(stateDir string, data []byte) (err error) {
 	if _, err := rand.Read(nonce[:]); err != nil {
 		return err
 	}
-	temp := ".oauth-health-" + hex.EncodeToString(nonce[:]) + ".tmp"
+	temp := "." + strings.TrimSuffix(name, ".json") + "-" + hex.EncodeToString(nonce[:]) + ".tmp"
 	dirfd := int(dir.Fd())
 	fd, err := unix.Openat(dirfd, temp, unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0o600)
 	if err != nil {
@@ -349,7 +351,7 @@ func replaceHealthFile(stateDir string, data []byte) (err error) {
 	if err := file.Sync(); err != nil {
 		return err
 	}
-	if err := unix.Renameat(dirfd, temp, dirfd, healthFile); err != nil {
+	if err := unix.Renameat(dirfd, temp, dirfd, name); err != nil {
 		return err
 	}
 	renamed = true

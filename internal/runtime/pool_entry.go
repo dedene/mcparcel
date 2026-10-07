@@ -16,15 +16,16 @@ type poolEntry struct {
 	session        mcpclient.Session
 	ctx            context.Context
 	cancel         context.CancelCauseFunc
-	timer          *time.Timer
 	oauth          *auth.OAuthHandler
 	closeOnce      sync.Once
 	sweeping       bool // a sweep is waiting to retire it; guarded by pool.mu
 }
 
 // session returns the pooled entry for id, connecting when needed. login
-// non-nil always replaces the entry with a new sign-in.
-func (p *pool) session(ctx context.Context, id, hash string, c config.Connection, lease auth.Lease, gate chan struct{}, name string, login *auth.LoginOptions) (*poolEntry, *auth.OAuthHandler, error) {
+// non-nil always replaces the entry with a new sign-in. epoch is the work's
+// lock epoch: a protected entry is never installed after an auth lock that
+// ran while it was connecting.
+func (p *pool) session(ctx context.Context, id, hash string, c config.Connection, lease auth.Lease, gate chan struct{}, name string, login *auth.LoginOptions, epoch uint64) (*poolEntry, *auth.OAuthHandler, error) {
 	p.mu.Lock()
 	old := p.entries[id]
 	closed := p.closed
@@ -36,9 +37,12 @@ func (p *pool) session(ctx context.Context, id, hash string, c config.Connection
 		return old, old.oauth, nil
 	}
 	if old != nil {
+		if old.hash == hash && old.identity != lease.Identity && lease.Identity != "public" {
+			p.opts.Log("credential_rotated")
+		}
 		p.retire(id, old)
 	}
-	values, e := envRefValues(ctx, p.opts.LoginEnv, p.opts.Keychain, c, lease.Values)
+	values, e := envRefValues(ctx, p.opts.LoginEnv, p.opts.Keychain, c, lease.Secrets())
 	if e != nil {
 		return nil, nil, e
 	}
@@ -94,20 +98,48 @@ func (p *pool) session(ctx context.Context, id, hash string, c config.Connection
 		entry.close(p, context.Background())
 		return nil, nil, output.NewError("canceled", nil)
 	}
+	if (lease.Identity != "public" || handler != nil) && epoch != p.lockEpoch {
+		p.mu.Unlock()
+		entry.close(p, context.Background())
+		return nil, nil, auth.ErrLocked
+	}
 	p.entries[id] = entry
 	if lease.Identity != "public" {
 		p.expiry.Add(1)
-		entry.timer = time.AfterFunc(max(0, lease.SessionExpiresAt.Sub(p.opts.Now())), func() {
-			defer p.expiry.Done()
-			entry.cancel(auth.ErrExpired)
-			<-gate
-			defer func() { gate <- struct{}{} }()
-			p.retire(id, entry)
-		})
+		go p.watchExpiry(id, entry, lease.SessionExpiresAt, gate)
 	}
 	p.mu.Unlock()
 	p.opts.Log("connection_opened")
 	return entry, handler, nil
+}
+
+// watchExpiry retires a protected entry once its credential session ends. It
+// checks every ExpiryCheck rather than sleeping until the deadline: a timer
+// stops while a Mac sleeps, so only a check on the wall clock notices a
+// deadline passed during sleep. A wall clock stepped back ends the session too,
+// as it does in the resolver.
+func (p *pool) watchExpiry(id string, entry *poolEntry, deadline time.Time, gate chan struct{}) {
+	defer p.expiry.Done()
+	last := p.opts.Now()
+	for {
+		now := p.opts.Now()
+		if auth.Expired(now, deadline) || now.Round(0).Before(last.Round(0)) {
+			break
+		}
+		last = now
+		wait := min(p.opts.ExpiryCheck, max(deadline.Sub(now), time.Millisecond))
+		timer := time.NewTimer(wait)
+		select {
+		case <-entry.ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+	}
+	entry.cancel(auth.ErrExpired)
+	<-gate
+	defer func() { gate <- struct{}{} }()
+	p.retire(id, entry)
 }
 
 // startupTimeout bounds connect, initialize and tool listing: the
@@ -188,9 +220,6 @@ func (p *pool) retire(id string, entry *poolEntry) {
 func (e *poolEntry) close(p *pool, ctx context.Context) {
 	e.closeOnce.Do(func() {
 		e.cancel(context.Canceled)
-		if e.timer != nil && e.timer.Stop() {
-			p.expiry.Done()
-		}
 		if e.oauth != nil {
 			e.oauth.Close()
 		}

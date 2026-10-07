@@ -19,6 +19,11 @@ type (
 	EnvOutput struct {
 		Value string `json:"value"`
 	}
+	// EnvSetOutput says whether a variable is set, never its value, so a
+	// live proof with real secrets prints none.
+	EnvSetOutput struct {
+		Set bool `json:"set"`
+	}
 	FixtureOptions struct {
 		PageSize  int
 		Started   chan<- string

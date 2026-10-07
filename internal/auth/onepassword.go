@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"runtime"
 	"sync"
 
@@ -39,22 +40,34 @@ func newOnePasswordProvider(version string, desktop func(context.Context, string
 
 func NewOnePasswordProvider(version string) Provider {
 	return newOnePasswordProvider(version, func(ctx context.Context, account, version string) (SecretClient, error) {
-		c, err := constructSDKClient(func() (*onepassword.Client, error) {
+		return newSDKSecrets(ctx, func() (*onepassword.Client, error) {
 			return onepassword.NewClient(ctx, onepassword.WithDesktopAppIntegration(account), onepassword.WithIntegrationInfo("MCParcel", version))
 		})
-		if err != nil {
-			return nil, safeProviderError(ctx, err)
-		}
-		return sdkSecrets(c), nil
 	}, func(ctx context.Context, token, version string) (SecretClient, error) {
-		c, err := constructSDKClient(func() (*onepassword.Client, error) {
+		return newSDKSecrets(ctx, func() (*onepassword.Client, error) {
 			return onepassword.NewClient(ctx, onepassword.WithServiceAccountToken(token), onepassword.WithIntegrationInfo("MCParcel", version))
 		})
-		if err != nil {
-			return nil, safeProviderError(ctx, err)
-		}
-		return sdkSecrets(c), nil
 	})
+}
+
+func newSDKSecrets(ctx context.Context, create func() (*onepassword.Client, error)) (SecretClient, error) {
+	c, err := constructSDKClient(create)
+	if err != nil {
+		return nil, safeProviderError(ctx, classifySDKError(err))
+	}
+	return sdkSecrets(c), nil
+}
+
+// classifySDKError maps a rate limit to ErrRateLimited and returns any other
+// error unchanged for safeProviderError to reduce. DesktopSessionExpiredError
+// is left alone: the SDK re-authorizes on it itself and returns the retry's
+// error raw.
+func classifySDKError(err error) error {
+	var limited *onepassword.RateLimitExceededError
+	if errors.As(err, &limited) {
+		return ErrRateLimited
+	}
+	return err
 }
 
 func (p *onePasswordProvider) Bootstrap(ctx context.Context, profile config.Profile) (SecretClient, error) {
@@ -77,6 +90,10 @@ func (p *onePasswordProvider) Bootstrap(ctx context.Context, profile config.Prof
 	}
 	if desktop == nil {
 		return nil, ErrProvider
+	}
+	if profile.Mode == "desktop" {
+		// The desktop client itself serves the session; BootstrapRef is unused.
+		return safeSecretClient{client: desktop}, nil
 	}
 	token, err := desktop.Resolve(ctx, profile.BootstrapRef)
 	desktop = nil
@@ -112,7 +129,10 @@ func sdkSecrets(c *onepassword.Client) SecretClient {
 func (c sdkSecretClient) Resolve(ctx context.Context, ref string) (string, error) {
 	value, err := c.secrets.Resolve(ctx, ref)
 	runtime.KeepAlive(c.owner)
-	return value, err
+	if err != nil {
+		return "", classifySDKError(err)
+	}
+	return value, nil
 }
 
 var sdkConstructionMu sync.Mutex

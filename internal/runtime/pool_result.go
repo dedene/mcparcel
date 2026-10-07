@@ -68,6 +68,10 @@ func poolError(err, cause error, id string, dispatched bool) *output.Error {
 			code = "auth_expired"
 		case errors.Is(err, auth.ErrAccountConflict):
 			code = "auth_account_conflict"
+		case errors.Is(err, auth.ErrLocked):
+			code = "auth_required"
+		case errors.Is(err, auth.ErrRateLimited):
+			code = "auth_rate_limited"
 		case errors.Is(err, auth.ErrProvider):
 			code = "auth_failed"
 		case errors.Is(err, context.Canceled):
@@ -76,8 +80,12 @@ func poolError(err, cause error, id string, dispatched bool) *output.Error {
 			code = "timeout"
 		}
 	}
-	if dispatched && (code == "timeout" || errors.Is(cause, auth.ErrExpired) || errors.Is(cause, errForced)) {
+	if dispatched && (code == "timeout" || errors.Is(cause, auth.ErrExpired) || errors.Is(cause, errForced) || errors.Is(cause, auth.ErrLocked)) {
 		code = "outcome_unknown"
+	}
+	if !dispatched && errors.Is(cause, auth.ErrLocked) {
+		// auth lock canceled the work before dispatch.
+		code = "auth_required"
 	}
 	var details *output.Details
 	var ambiguous *config.AmbiguousIDError
