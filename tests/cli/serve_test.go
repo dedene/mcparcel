@@ -144,9 +144,9 @@ func TestServeSIGTERMDrainsAndUnlinksSocket(t *testing.T) {
 	if v.code != 0 {
 		t.Fatalf("serve exit %d: %s", v.code, v.stderr)
 	}
-	// The existing shutdown path: a SIGTERM ends the runtime's context, so the
-	// call in flight reports canceled with an unknown outcome.
-	inflight := r.check(r.finish(a), 130, "canceled")
+	// A SIGTERM is a forced runtime shutdown, not the caller's own cancel:
+	// the dispatched call may have run, as with runtime stop --force.
+	inflight := r.check(r.finish(a), 6, "outcome_unknown")
 	if d := inflight.envelope.Error.Details; d["dispatched"] != true || d["outcome"] != "unknown" {
 		t.Fatal(inflight.stdout)
 	}

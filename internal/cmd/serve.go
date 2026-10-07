@@ -10,7 +10,9 @@ import (
 
 // RuntimeServeCmd runs the runtime in the foreground, for a supervisor that
 // owns its lifetime: it takes the daemon lock itself, logs to the daemon log
-// and stderr, never exits when idle, and drains and exits 0 on SIGTERM.
+// and stderr, never exits when idle, and drains and exits 0 on SIGTERM. It
+// marks the runtime directory supervised, so CLIs wait for it rather than
+// auto-start a daemon, and it refuses runtime restart.
 type RuntimeServeCmd struct{}
 
 func (c *RuntimeServeCmd) Run(ctx context.Context, s *Streams, opts *CommandOptions) error {
@@ -26,6 +28,9 @@ func (c *RuntimeServeCmd) Run(ctx context.Context, s *Streams, opts *CommandOpti
 		return output.NewError("runtime_busy", nil)
 	}
 	defer lock.Close()
+	if err = runtimeclient.MarkSupervised(paths); err != nil {
+		return err
+	}
 	log, err := runtimeclient.OpenLog(paths)
 	if err != nil {
 		return err

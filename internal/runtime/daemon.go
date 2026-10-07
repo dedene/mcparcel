@@ -34,6 +34,9 @@ type DaemonOptions struct {
 	PromptTimeout time.Duration
 	// NoIdleExit keeps a supervised runtime (runtime serve) running when idle.
 	NoIdleExit bool
+	// Supervised refuses restart requests: only the supervisor restarts the
+	// runtime, so a CLI cannot replace it with an auto-started daemon.
+	Supervised bool
 }
 
 var (
@@ -119,7 +122,7 @@ type daemonService struct {
 	opts        DaemonOptions
 	listener    *net.UnixListener
 	ctx         context.Context
-	cancel      context.CancelFunc
+	cancel      context.CancelCauseFunc
 	mu          sync.Mutex
 	admitting   bool
 	restarting  bool
@@ -185,7 +188,13 @@ func Serve(ctx context.Context, opts DaemonOptions) error {
 		_ = l.Close()
 		return e
 	}
-	life, cancel := context.WithCancel(ctx)
+	// ctx ending (a signal) is a forced shutdown: request contexts derive from
+	// life, so they see errForced and report dispatched work as
+	// outcome_unknown, never as the caller's own cancel.
+	life, cancel := context.WithCancelCause(context.WithoutCancel(ctx))
+	defer cancel(nil)
+	stopAfter := context.AfterFunc(ctx, func() { cancel(errForced) })
+	defer stopAfter()
 	s := &daemonService{opts: opts, listener: l, ctx: life, cancel: cancel, admitting: true, requests: map[string]context.CancelCauseFunc{}, last: time.Now(), started: time.Now()}
 	path := opts.LoginEnv["PATH"]
 	_ = WriteLog(opts.Log, "daemon_started", &path)
@@ -238,7 +247,7 @@ func Serve(ctx context.Context, opts DaemonOptions) error {
 				}
 				s.mu.Unlock()
 				if idle {
-					cancel()
+					cancel(nil)
 				}
 			}
 		}
@@ -250,7 +259,7 @@ func Serve(ctx context.Context, opts DaemonOptions) error {
 		}
 		s.sockets.Go(func() { s.serveSocket(conn) })
 	}
-	cancel()
+	cancel(errForced)
 	s.stop(true)
 	s.sockets.Wait()
 	<-watcherDone
@@ -365,6 +374,10 @@ func (s *daemonService) serveSocket(conn *net.UnixConn) {
 		send(Response{Data: b})
 		return
 	}
+	if req.Method == "restart" && s.opts.Supervised {
+		send(Response{Error: output.NewError("runtime_supervised", nil)})
+		return
+	}
 	if req.Method == "restart" || req.Method == "stop" {
 		s.mu.Lock()
 		if s.restarting || !s.admitting {
@@ -387,7 +400,7 @@ func (s *daemonService) serveSocket(conn *net.UnixConn) {
 		} else {
 			send(Response{Data: json.RawMessage(`{"stopped":true}`)})
 		}
-		s.cancel()
+		s.cancel(nil)
 		_ = s.listener.Close()
 		return
 	}
