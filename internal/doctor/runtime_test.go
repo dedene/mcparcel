@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/dedene/mcparcel/internal/config"
+	"github.com/dedene/mcparcel/internal/output"
 	runtimeclient "github.com/dedene/mcparcel/internal/runtime"
 )
 
@@ -45,13 +46,13 @@ func TestRuntimeVersionRows(t *testing.T) {
 	}
 }
 
-func TestRuntimeModeLinuxDesktopFails(t *testing.T) {
+func TestRuntimeModeUnsupportedDesktopFails(t *testing.T) {
 	in := inputFor(t, docs{personal: stdioPaper, selections: enabledPaper})
 	in.DesktopSupported = false
 	checks := Offline(in)
 	c := find(t, checks, "runtime.mode", "")
 	want(t, c, Fail, "runtime_unsupported")
-	if c.Message != "On Linux, MCParcel runs in headless mode only." {
+	if c.Message != "Desktop mode is not supported on this platform." {
 		t.Fatal(c.Message)
 	}
 	want(t, find(t, checks, "runtime.version", ""), Skip, "")
@@ -63,6 +64,29 @@ func TestRuntimeModeLinuxDesktopFails(t *testing.T) {
 	if !strings.HasPrefix(c.Message, "Headless mode (state root /") || !strings.HasSuffix(c.Message, "). Supervised.") || Mode(h) != "headless" {
 		t.Fatal(c.Message)
 	}
+}
+
+// Linux desktop mode without a desktop session runs once config.json
+// exists; without one too, runtime.mode fails as runtime commands do.
+func TestRuntimeModeLinuxSession(t *testing.T) {
+	in := inputFor(t, docs{personal: stdioPaper, selections: enabledPaper})
+	in.DesktopSession = false
+	want(t, find(t, Offline(in), "runtime.mode", ""), OK, "")
+	in.Files.Files[0].Present = false
+	checks := Offline(in)
+	c := find(t, checks, "runtime.mode", "")
+	want(t, c, Fail, "runtime_unsupported")
+	if e := output.LinuxNoSessionError(); c.Message != e.Message || c.NextAction != e.NextAction {
+		t.Fatal(c.Message, c.NextAction)
+	}
+	want(t, find(t, checks, "runtime.version", ""), Skip, "")
+	want(t, find(t, checks, "runtime.binary", ""), Skip, "")
+	in.DesktopSession = true
+	want(t, find(t, Offline(in), "runtime.mode", ""), OK, "")
+	// Headless mode never needs a session.
+	h := headlessInput(inputFor(t, docs{personal: stdioPaper, selections: enabledPaper}))
+	h.DesktopSession, h.Files.Files[0].Present = false, false
+	want(t, find(t, Offline(h), "runtime.mode", ""), OK, "")
 }
 
 func TestUnreadableConfigSkipsRuntimeRows(t *testing.T) {

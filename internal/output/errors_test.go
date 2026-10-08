@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -13,6 +14,11 @@ import (
 )
 
 func TestErrorExitRegistry(t *testing.T) {
+	keychainMessage, keychainAction := "No usable Secret Service keyring could store or read the sign-in.",
+		"Start and unlock GNOME Keyring, KWallet or another Secret Service provider in your desktop session, then run mcparcel runtime restart."
+	if runtime.GOOS == "darwin" {
+		keychainMessage, keychainAction = "The macOS Keychain could not store or read the sign-in.", "Unlock the login keychain, then try again."
+	}
 	rows := []struct {
 		code            string
 		exit            int
@@ -35,7 +41,7 @@ func TestErrorExitRegistry(t *testing.T) {
 		{"auth_expired", 3, "The credential session expired.", "Run the command interactively to authorize again."},
 		{"auth_failed", 3, "Credential resolution failed.", "Check the profile, desktop integration and vault access."},
 		{"auth_rate_limited", 6, "1Password rate limited the request.", "Wait, then run the call again. Service-account limits are hourly and daily."},
-		{"keychain_unavailable", 3, "The macOS Keychain could not store or read the sign-in.", "Unlock the login keychain, then try again."},
+		{"keychain_unavailable", 3, keychainMessage, keychainAction},
 		{"auth_callback_unavailable", 3, "The sign-in callback address is in use.", "Close the program using that port, then try again."},
 		{"connection_unavailable", 4, "The connection is not defined.", "Check the connection ID in personal.json."},
 		{"tool_error", 5, "The MCP tool returned an error result.", ""},

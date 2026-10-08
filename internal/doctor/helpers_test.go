@@ -84,8 +84,10 @@ func inputFor(t *testing.T, d docs) Input {
 		t.Fatal(err)
 	}
 	return Input{
-		Version:          "1.2.3",
-		DesktopSupported: true,
+		Version:            "1.2.3",
+		DesktopSupported:   true,
+		DesktopSession:     true,
+		DesktopOnePassword: true,
 		Paths: config.Paths{
 			Home: root + "/home", ConfigDir: root + "/config/mcparcel", DataDir: root + "/data/mcparcel",
 			StateDir: root + "/state/mcparcel", RuntimeDir: root + "/run", LogFile: root + "/state/mcparcel/daemon.log",

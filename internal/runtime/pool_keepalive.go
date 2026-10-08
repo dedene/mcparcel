@@ -9,6 +9,9 @@ import (
 	"github.com/dedene/mcparcel/internal/config"
 )
 
+// keyringWedged is auth.KeyringWedged; tests replace it.
+var keyringWedged = auth.KeyringWedged
+
 // keepAliveSaveRetries are the waits before each retry of a temporary
 // handler's failed save; a variable so tests can shorten them.
 var keepAliveSaveRetries = []time.Duration{time.Second, 2 * time.Second, 4 * time.Second}
@@ -88,6 +91,11 @@ func (p *pool) refreshStored(ctx context.Context, canonical, trigger string) err
 	p.workers.Add(1)
 	p.mu.Unlock()
 	defer p.workers.Done()
+	if keyringWedged(p.opts.Keyring) {
+		// A keyring prompt is still open: a rotated refresh token could not
+		// be stored, so this tick fetches none.
+		return auth.ErrKeepAliveBusy
+	}
 	gate := p.gate(canonical)
 	select {
 	case <-gate:

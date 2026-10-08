@@ -116,7 +116,7 @@ test('the packaged binary is ad-hoc signed with a stable identifier', { skip: pr
 // tests/cli checks that the tagged test binary does contain these markers.
 test('the release binary has no fixture stand-ins', () => {
   const binary = readFileSync(path.join(packageDir, 'dist', 'mcparcel'));
-  for (const marker of ['fixture-terminal', 'fixture-dialog-answer', 'fixture-keyring', 'fixture-retain', 'fixture-apps']) {
+  for (const marker of ['fixture-terminal', 'fixture-dialog-answer', 'fixture-keyring', 'fixture-retain', 'fixture-apps', 'fixture-no-desktop-app', 'fixture-no-session-bus', 'fixture-no-desktop-session']) {
     assert.equal(binary.includes(marker), false, marker);
   }
 });

@@ -117,7 +117,7 @@ item whose name has spaces or colons must be referenced by its ID.
 Personal definitions may also use `{secret: "env:NAME", prefix?, suffix?}`: the
 daemon resolves NAME at connect time from its captured login environment, falling
 back to the Keychain generic password with service NAME and the login user as
-account. In headless mode it resolves NAME from the daemon's own environment
+account (macOS only; Linux has no such fallback). In headless mode it resolves NAME from the daemon's own environment
 only, without a Keychain fallback (runtime.md "Headless mode"); `env:` is then
 the only secret source, since `op://` references are refused. Temporary bridge until 1Password profiles (stage 6). Allowed in stdio env,
 HTTP headers and the OAuth `clientId`/`clientSecret` fields; protected variable names are
@@ -242,8 +242,8 @@ state and runtime then live under `<stateRoot>/data`, `/cache`, `/state` and
 `/run` (`XDG_DATA_HOME`, `XDG_CACHE_HOME`, `XDG_STATE_HOME` and
 `MCPARCEL_RUNTIME_DIR` no longer apply); the configuration stays at
 `$XDG_CONFIG_HOME/mcparcel` and is read-only (`config_read_only` for every
-write). Linux supports headless mode only; there, 1Password works through
-service-account profiles. `runtime.supervised: true`
+write). macOS and Linux support both modes. On Linux, 1Password works
+through service-account profiles only, in either mode. `runtime.supervised: true`
 (headless only, default `false`) declares that `mcparcel runtime serve` owns
 the runtime, so no CLI auto-starts one ([runtime.md](runtime.md)).
 

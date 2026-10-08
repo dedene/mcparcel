@@ -63,9 +63,16 @@ func (p *pool) oauthHandler(ctx context.Context, id, name string, c config.Conne
 		}
 	}
 	if login != nil {
-		// A re-login may reuse the stored client registration.
-		if prev, e := auth.LoadOAuth(ctx, p.opts.Keyring, id); e == nil {
+		// A re-login may reuse the stored client registration. The read also
+		// proves the keyring works before any callback listener or browser:
+		// a sign-in it could not store is refused here. It waits up to two
+		// minutes for an unlock prompt.
+		prev, e := auth.LoadOAuthInteractive(ctx, p.opts.Keyring, id)
+		switch {
+		case e == nil:
 			opts.Previous = &prev
+		case !errors.Is(e, auth.ErrNoSession):
+			return nil, e
 		}
 		return auth.NewOAuthHandler(opts), nil
 	}

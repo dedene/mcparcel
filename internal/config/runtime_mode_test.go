@@ -139,21 +139,36 @@ func TestReadRuntimeAbsentIsDesktop(t *testing.T) {
 	}
 }
 
-func TestLinuxDesktopRuntimeCommandUnsupported(t *testing.T) {
+func TestDesktopRuntimeCommandByPlatform(t *testing.T) {
 	headless := RuntimeDefaults{Mode: ModeHeadless, StateRoot: "/var/lib/mcparcel"}
 	for _, c := range []struct {
 		goos string
 		rt   RuntimeDefaults
 		want error
 	}{
-		{"linux", RuntimeDefaults{}, ErrHeadlessOnly},
-		{"linux", RuntimeDefaults{Mode: ModeDesktop}, ErrHeadlessOnly},
+		{"linux", RuntimeDefaults{}, nil},
+		{"linux", RuntimeDefaults{Mode: ModeDesktop}, nil},
 		{"linux", headless, nil},
 		{"darwin", RuntimeDefaults{}, nil},
 		{"darwin", headless, nil},
+		{"windows", RuntimeDefaults{}, ErrHeadlessOnly},
+		{"windows", headless, nil},
 	} {
 		if err := CheckMode(c.rt, DesktopSupported(c.goos)); !errors.Is(err, c.want) || (c.want == nil && err != nil) {
 			t.Fatal(c.goos, c.rt, err)
 		}
+	}
+}
+
+// Desktop mode runs on macOS and Linux, but only macOS has the 1Password
+// desktop app integration.
+func TestDesktopOnePasswordSupported(t *testing.T) {
+	for goos, want := range map[string]bool{"darwin": true, "linux": false, "windows": false} {
+		if DesktopOnePasswordSupported(goos) != want {
+			t.Fatal(goos)
+		}
+	}
+	if !DesktopSupported("linux") || !DesktopSupported("darwin") || DesktopSupported("windows") {
+		t.Fatal("DesktopSupported")
 	}
 }

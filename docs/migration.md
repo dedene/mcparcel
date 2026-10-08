@@ -2,7 +2,8 @@
 
 Release candidate `0.1.0-rc.1`, 7 October 2026. MCParcel is installed from a local
 tarball; it is not published to npm. The npm package runs on macOS with Apple
-Silicon only; for Linux, see [headless.md](headless.md). Moving from mcporter
+Silicon only; on Linux, use the static binary from `make build-linux` (see
+[runtime.md](runtime.md#linux-desktop-mode) and [headless.md](headless.md)). Moving from mcporter
 happens one connection at a time: see [Agent instructions during the mixed period](#agent-instructions-during-the-mixed-period).
 
 ## Install

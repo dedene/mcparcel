@@ -25,6 +25,15 @@ const (
 type Input struct {
 	Version          string // CLI version
 	DesktopSupported bool
+	// DesktopSession is a display or usable session bus (always on macOS);
+	// Linux desktop mode without one and without config.json is refused.
+	DesktopSession bool
+	// DesktopOnePassword is desktop mode with the 1Password desktop app
+	// (macOS); without it only service-account profiles read 1Password.
+	DesktopOnePassword bool
+	// KeyringReachable reports a usable D-Bus session bus; nil where the
+	// keyring is no Secret Service (macOS) or in headless mode.
+	KeyringReachable func() bool
 	Paths            config.Paths
 	Runtime          config.RuntimeDefaults
 	RuntimeErr       error             // ReadRuntime failure: runtime.* and storage.* rows skip
@@ -52,6 +61,7 @@ func Offline(in Input) []output.DoctorCheck {
 	checks = append(checks, storageChecks(in)...)
 	checks = append(checks, configChecks(in)...)
 	checks = append(checks, onePasswordAppCheck(in)...)
+	checks = append(checks, keyringCheck(in)...)
 	checks = append(checks, connectionChecks(in)...)
 	checks = append(checks, upgradeChecks(in)...)
 	return order(checks)
@@ -91,7 +101,7 @@ func Summarize(checks []output.DoctorCheck) output.DoctorSummary {
 // The row catalogue in contract order: global rows, then per-connection rows
 // (sorted by subject first), then live.tools.
 var (
-	globalOrder     = []string{"runtime.mode", "runtime.version", "runtime.binary", "storage.dir", "config.file", "config.state", "version.catalog", "config.summary", "prereq.onepassword"}
+	globalOrder     = []string{"runtime.mode", "runtime.version", "runtime.binary", "storage.dir", "config.file", "config.state", "version.catalog", "config.summary", "prereq.onepassword", "prereq.keyring"}
 	connectionOrder = []string{"config.connection", "credentials.profile", "credentials.token", "credentials.reference", "credentials.env", "credentials.oauth", "prereq.command"}
 )
 

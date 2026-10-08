@@ -83,13 +83,13 @@ func installHint(command string, desktop bool) string {
 	return hint + "."
 }
 
-// onePasswordAppCheck is prereq.onepassword: on desktop, when an enabled
-// connection with an op:// reference is bound to a profile that uses the
-// desktop app, 1Password.app must exist in one of the app directories. A
-// service-account profile needs no app. It only stats; it never calls the
-// SDK or runs op.
+// onePasswordAppCheck is prereq.onepassword: on desktop with the 1Password
+// app integration (macOS), when an enabled connection with an op://
+// reference is bound to a profile that uses the desktop app, 1Password.app
+// must exist in one of the app directories. A service-account profile needs
+// no app. It only stats; it never calls the SDK or runs op.
 func onePasswordAppCheck(in Input) []output.DoctorCheck {
-	if Mode(in) != config.ModeDesktop || in.Snapshot == nil || in.Snapshot.Effective == nil {
+	if Mode(in) != config.ModeDesktop || !in.DesktopOnePassword || in.Snapshot == nil || in.Snapshot.Effective == nil {
 		return nil
 	}
 	needed := false
@@ -115,4 +115,36 @@ func onePasswordAppCheck(in Input) []output.DoctorCheck {
 		}
 	}
 	return []output.DoctorCheck{{ID: "prereq.onepassword", Status: Fail, Code: "auth_failed", Message: "The 1Password desktop app was not found; 1Password references need it.", NextAction: "Install the 1Password desktop app and turn on Settings > Developer > Integrate with other apps."}}
+}
+
+// keyringCheck is prereq.keyring: in desktop mode with a Secret Service
+// keyring (Linux), when an enabled HTTP connection may sign in, whether a
+// usable D-Bus session bus exists. It never calls the keyring, so it cannot
+// tell whether a provider runs or is unlocked. Without a bus it fails when a
+// connection is marked OAuth, else it warns.
+func keyringCheck(in Input) []output.DoctorCheck {
+	if Mode(in) != config.ModeDesktop || in.KeyringReachable == nil || in.Snapshot == nil || in.Snapshot.Effective == nil {
+		return nil
+	}
+	signIn, marked := false, false
+	for _, row := range in.Snapshot.Effective.Connections {
+		c := row.Connection
+		if !row.Enabled || !row.Available || c == nil || c.Transport.HTTP == nil || c.Auth != nil && c.Auth.Grant == config.GrantClientCredentials {
+			continue
+		}
+		signIn = true
+		marked = marked || c.Auth != nil
+	}
+	if !signIn {
+		return nil
+	}
+	if in.KeyringReachable() {
+		return []output.DoctorCheck{{ID: "prereq.keyring", Status: OK, Message: "A D-Bus session bus is reachable; doctor does not check that a Secret Service provider runs or is unlocked."}}
+	}
+	e := output.KeyringUnreachableError()
+	c := output.DoctorCheck{ID: "prereq.keyring", Status: Warn, Code: e.Code, Message: e.Message, NextAction: e.NextAction}
+	if marked {
+		c.Status = Fail
+	}
+	return []output.DoctorCheck{c}
 }

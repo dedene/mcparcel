@@ -20,7 +20,7 @@ func (c *DaemonCmd) Run(ctx context.Context, _ *Streams) error {
 	if c.LockFD != 3 {
 		return output.NewError("unsafe_local_path", nil)
 	}
-	paths, err := runtimePaths()
+	paths, err := daemonPaths()
 	if err != nil {
 		return err
 	}
@@ -83,7 +83,8 @@ var (
 // daemonPoolOptions configures the runtime's pool. Both modes get the
 // 1Password resolver, which reads service-account tokens from login; headless
 // mode constructs neither the Keychain nor the keyring (D10, D11), and its
-// pool refuses every profile but a service-account one.
+// pool refuses every profile but a service-account one. Desktop mode without
+// the 1Password app (Linux) refuses the profiles that use it.
 func daemonPoolOptions(paths config.Paths, login map[string]string, log io.Writer) runtimeclient.PoolOptions {
 	opts := runtimeclient.PoolOptions{
 		Paths: paths, LoginEnv: login, Version: version, Health: auth.NewHealth(paths.StateDir, time.Now),
@@ -96,6 +97,7 @@ func daemonPoolOptions(paths config.Paths, login map[string]string, log io.Write
 		opts.Headless = true
 		return opts
 	}
+	opts.NoDesktopApp = !desktopOnePassword(paths)
 	opts.Keychain, opts.Keyring = keychainFactory(paths), keyringFactory(paths)
 	return opts
 }

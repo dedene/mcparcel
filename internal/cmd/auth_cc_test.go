@@ -3,7 +3,6 @@ package cmd
 import (
 	"encoding/json"
 	"os"
-	goruntime "runtime"
 	"strings"
 	"testing"
 
@@ -24,10 +23,12 @@ func ccEnv(t *testing.T, headless bool) config.Paths {
 	if headless {
 		headlessEnv(t)
 	} else {
-		if goruntime.GOOS != "darwin" {
-			t.Skip("desktop runtime commands are macOS only (D2)")
+		// A workstation's config.json: Linux desktop mode then runs without
+		// a desktop session too.
+		p := metadataEnv(t)
+		if err := os.WriteFile(p.ConfigFile, []byte(`{"schemaVersion":1}`), 0o600); err != nil {
+			t.Fatal(err)
 		}
-		metadataEnv(t)
 	}
 	paths, err := runtimePaths()
 	if err != nil {

@@ -321,6 +321,24 @@ func TestE2EMissingSecret(t *testing.T) {
 	delta(t, before, 0, 0, map[string]int{"read_conversation": 0})
 }
 
+// TestE2EConfigNotFound: a sidecar whose XDG_CONFIG_HOME misses the
+// ConfigMap finds no config.json and has no desktop session, so it fails
+// fast instead of quietly running desktop mode, and no runtime starts.
+func TestE2EConfigNotFound(t *testing.T) {
+	desktopRuntime := fmt.Sprintf("/tmp/mcp-%d", os.Getuid())
+	before := front.counts()
+	for _, args := range [][]string{{"call", "front.read_conversation", "id=1", "--json"}, {"runtime", "status", "--json"}} {
+		r := check(t, cli(t, callerEnv("XDG_CONFIG_HOME"), args...), 2, "runtime_unsupported")
+		if !strings.Contains(r.stdout, "No MCParcel configuration was found and there is no desktop session.") || !strings.Contains(r.stdout, "point XDG_CONFIG_HOME at the directory that holds mcparcel/config.json") {
+			t.Fatalf("%v: %s", args, r.stdout)
+		}
+	}
+	if _, err := os.Lstat(desktopRuntime); !os.IsNotExist(err) {
+		t.Fatalf("desktop runtime directory %s exists: %v", desktopRuntime, err)
+	}
+	delta(t, before, 0, 0, map[string]int{"read_conversation": 0})
+}
+
 // snapshot describes a tree: every entry's path, type, mode, owner, symlink
 // target and content hash.
 func snapshot(root string) (string, error) {

@@ -18,18 +18,40 @@ import (
 	runtimeclient "github.com/dedene/mcparcel/internal/runtime"
 )
 
-// desktopSupported reports whether this platform runs desktop mode; Linux runs
-// headless mode only.
+// desktopSupported reports whether this platform runs desktop mode (macOS
+// and Linux).
 func desktopSupported() bool { return config.DesktopSupported(runtime.GOOS) }
+
+// desktopOnePassword reports whether desktop mode here can use the 1Password
+// desktop app; on Linux only service-account profiles read 1Password.
+func desktopOnePassword(config.Paths) bool { return config.DesktopOnePasswordSupported(runtime.GOOS) }
+
+// keyringReachable reports whether this process reaches the system keyring:
+// on Linux, whether a usable D-Bus session bus exists.
+func keyringReachable(config.Paths) bool { return auth.KeyringReachable() }
+
+// desktopSession reports whether this process runs in a desktop session. Off
+// Linux it always does; on Linux it needs a display or a usable session bus.
+func desktopSession(config.Paths) bool {
+	if runtime.GOOS != "linux" {
+		return true
+	}
+	return os.Getenv("DISPLAY") != "" || os.Getenv("WAYLAND_DISPLAY") != "" || auth.KeyringReachable()
+}
 
 // newCredentials is the 1Password resolver. env is the daemon's login
 // environment, which a service-account profile's tokenEnv is read from;
-// headless mode never wires the desktop app.
+// headless mode, and desktop mode without the app, never wire the desktop app.
 func newCredentials(paths config.Paths, version string, env map[string]string) auth.Resolver {
-	return auth.NewResolver(auth.ResolverOptions{Provider: auth.NewOnePasswordProvider(version, auth.OnePasswordOptions{DesktopApp: !paths.Headless(), Env: env})})
+	desktop := !paths.Headless() && desktopOnePassword(paths)
+	return auth.NewResolver(auth.ResolverOptions{Provider: auth.NewOnePasswordProvider(version, auth.OnePasswordOptions{DesktopApp: desktop, Env: env})})
 }
 
+// newKeychain is the env: fallback to a Keychain generic password; macOS only.
 func newKeychain(config.Paths) func(context.Context, string) (string, error) {
+	if runtime.GOOS != "darwin" {
+		return nil
+	}
 	return runtimeclient.KeychainLookup
 }
 
@@ -119,8 +141,12 @@ func (r *pollReader) Read(p []byte) (int, error) {
 	}
 }
 
-// onePasswordAppDirs are where doctor looks for 1Password.app (stat only).
+// onePasswordAppDirs are where doctor looks for 1Password.app (stat only);
+// none off macOS.
 func onePasswordAppDirs(paths config.Paths) []string {
+	if runtime.GOOS != "darwin" {
+		return nil
+	}
 	return []string{"/Applications", filepath.Join(paths.Home, "Applications")}
 }
 

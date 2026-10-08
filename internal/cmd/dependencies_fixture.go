@@ -22,9 +22,34 @@ import (
 	"github.com/dedene/mcparcel/internal/testutil"
 )
 
-// desktopSupported is true in fixture builds so the black-box desktop
-// scenarios also run on Linux; production Linux builds run headless only.
+// desktopSupported is true in fixture builds, as on macOS and Linux.
 func desktopSupported() bool { return true }
+
+// fixturePresent reports whether the marker file StateDir/name exists.
+func fixturePresent(paths config.Paths, name string) bool {
+	_, err := os.Stat(filepath.Join(paths.StateDir, name))
+	return err == nil
+}
+
+// desktopOnePassword is true unless StateDir/fixture-no-desktop-app exists,
+// which stands in for Linux, where desktop mode has no 1Password app.
+func desktopOnePassword(paths config.Paths) bool {
+	return !fixturePresent(paths, "fixture-no-desktop-app")
+}
+
+// keyringReachable is true unless StateDir/fixture-no-session-bus exists,
+// which stands in for Linux without a usable D-Bus session bus, or
+// fixture-no-desktop-session does: as in production, a process without a
+// desktop session has no usable bus either.
+func keyringReachable(paths config.Paths) bool {
+	return !fixturePresent(paths, "fixture-no-session-bus") && desktopSession(paths)
+}
+
+// desktopSession is true unless StateDir/fixture-no-desktop-session exists,
+// which stands in for Linux without a display or session bus.
+func desktopSession(paths config.Paths) bool {
+	return !fixturePresent(paths, "fixture-no-desktop-session")
+}
 
 func newCredentials(paths config.Paths, _ string, env map[string]string) auth.Resolver {
 	var mu sync.Mutex
@@ -234,7 +259,7 @@ func (k *fixtureKeyring) Delete(service, account string) error {
 }
 
 // browserOpens is true: the fixture browser below follows the URL.
-const browserOpens = true
+func browserOpens() bool { return true }
 
 // newBrowser never opens a browser: it follows the sign-in URL to the
 // daemon's callback and keeps the page in StateDir/fixture-browser-page.

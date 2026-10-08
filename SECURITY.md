@@ -2,8 +2,8 @@
 
 MCParcel handles credentials: it resolves 1Password references, reads
 1Password service-account tokens from environment variables and token files,
-stores OAuth tokens in the macOS Keychain and passes secrets to MCP servers.
-Reports about any of that are welcome.
+stores OAuth tokens in the macOS Keychain or the Linux Secret Service and
+passes secrets to MCP servers. Reports about any of that are welcome.
 
 ## Reporting a vulnerability
 

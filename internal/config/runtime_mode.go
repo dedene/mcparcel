@@ -15,8 +15,9 @@ const (
 )
 
 // ErrHeadlessOnly is returned for a runtime command in desktop mode on a
-// platform without desktop support (Linux).
-var ErrHeadlessOnly = errors.New("linux supports headless mode only")
+// platform without desktop support. macOS and Linux both support it; this
+// guards future targets.
+var ErrHeadlessOnly = errors.New("desktop mode is not supported on this platform")
 
 // maxSocketPath keeps sockaddr_un.sun_path within its smallest platform size.
 const maxSocketPath = 100
@@ -33,7 +34,12 @@ func (p Paths) Headless() bool { return p.StateRoot != "" }
 var ErrHeadlessOnePassword = fmt.Errorf("%w: 1Password desktop-app profiles are unavailable in headless mode", ErrConfigRequired)
 
 // DesktopSupported reports whether desktop mode can run on goos.
-func DesktopSupported(goos string) bool { return goos == "darwin" }
+func DesktopSupported(goos string) bool { return goos == "darwin" || goos == "linux" }
+
+// DesktopOnePasswordSupported reports whether desktop mode on goos can use
+// the 1Password desktop app; elsewhere only service-account profiles read
+// 1Password.
+func DesktopOnePasswordSupported(goos string) bool { return goos == "darwin" }
 
 // CheckMode refuses desktop mode where only headless mode is supported.
 func CheckMode(rt RuntimeDefaults, desktopSupported bool) error {

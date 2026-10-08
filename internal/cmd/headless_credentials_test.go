@@ -117,6 +117,10 @@ func TestHeadlessNoKeyringConstructed(t *testing.T) {
 	if opts = daemonPoolOptions(desktop, map[string]string{}, io.Discard); *calls != [3]int{1, 1, 2} || opts.Headless || opts.Credentials == nil {
 		t.Fatal("desktop factories", *calls)
 	}
+	// Desktop mode without the 1Password app (Linux) refuses its profiles.
+	if opts.NoDesktopApp == desktopOnePassword(desktop) {
+		t.Fatal("NoDesktopApp", opts.NoDesktopApp)
+	}
 }
 
 // The resolver reads service-account tokens from the daemon's environment,

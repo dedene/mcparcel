@@ -37,6 +37,9 @@ func modeCheck(in Input) output.DoctorCheck {
 	case !in.DesktopSupported:
 		e := output.HeadlessOnlyError()
 		c.Status, c.Code, c.Message, c.NextAction = Fail, e.Code, e.Message, e.NextAction
+	case noSession(in):
+		e := output.LinuxNoSessionError()
+		c.Status, c.Code, c.Message, c.NextAction = Fail, e.Code, e.Message, e.NextAction
 	default:
 		c.Message = "Desktop mode."
 	}
@@ -46,7 +49,23 @@ func modeCheck(in Input) output.DoctorCheck {
 // runtimeUsable reports whether the runtime can be reached at all: the mode
 // is known and supported here.
 func runtimeUsable(in Input) bool {
-	return in.RuntimeErr == nil && (headless(in) || in.DesktopSupported)
+	return in.RuntimeErr == nil && (headless(in) || in.DesktopSupported && !noSession(in))
+}
+
+// noSession reports desktop mode that runtime commands refuse: no desktop
+// session and no config.json (Linux), most likely a container or service
+// that misses its headless configuration. A config the lock kept doctor from
+// reading counts as present.
+func noSession(in Input) bool {
+	if headless(in) || in.DesktopSession || in.FilesErr != nil {
+		return false
+	}
+	for _, f := range in.Files.Files {
+		if f.Name == "config.json" {
+			return !f.Present
+		}
+	}
+	return true
 }
 
 func versionCheck(in Input) output.DoctorCheck {

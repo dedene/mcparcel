@@ -114,6 +114,16 @@ func (c *AuthStatusCmd) Run(ctx context.Context, s *Streams, opts *CommandOption
 		state, err := auth.LoadOAuth(ctx, keyring, id)
 		found := err == nil
 		if err != nil && !errors.Is(err, auth.ErrNoSession) {
+			if c.MCP == "" && row.Connection.Auth == nil {
+				// The listing shows an unmarked connection only when it holds
+				// an item; one the keyring cannot read is left out.
+				continue
+			}
+			var safe *output.Error
+			if errors.As(err, &safe) && safe.Code == "keychain_unavailable" {
+				// Keeps a pending keyring prompt's own text.
+				return safe
+			}
 			return output.NewError("keychain_unavailable", nil)
 		}
 		if c.MCP == "" && !found && row.Connection.Auth == nil {

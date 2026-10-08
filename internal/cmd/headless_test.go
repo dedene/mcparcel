@@ -5,7 +5,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	goruntime "runtime"
 	"testing"
 
 	"github.com/dedene/mcparcel/internal/config"
@@ -86,30 +85,46 @@ func TestCommandPathsSupervised(t *testing.T) {
 	}
 }
 
+// desktopSessionIs makes this process have a desktop session (a display or
+// session bus) or not for the test.
+func desktopSessionIs(t *testing.T, session bool) {
+	t.Helper()
+	saved := desktopSessionCheck
+	t.Cleanup(func() { desktopSessionCheck = saved })
+	desktopSessionCheck = func(config.Paths) bool { return session }
+}
+
+// Desktop mode runs on macOS and Linux. Without a desktop session and
+// without config.json (Linux in a misconfigured container) runtime commands,
+// runtime serve included, refuse with runtime_unsupported; with a config.json
+// they run.
 func TestRuntimeCommandModeByPlatform(t *testing.T) {
-	metadataEnv(t)
-	code, stdout, stderr := run(t, "runtime", "status", "--json")
-	if goruntime.GOOS == "darwin" {
-		if code != 0 || stderr != "" {
-			t.Fatal(code, stdout, stderr)
-		}
-	} else {
-		e := envelopeError(t, stdout)
-		if code != 2 || e.Code != "runtime_unsupported" || e.Message != "On Linux, MCParcel runs in headless mode only." || stderr != "" {
-			t.Fatal(code, stdout, stderr)
-		}
-		// runtime serve is a runtime command too: no desktop runtime on Linux.
-		code, stdout, stderr = run(t, "runtime", "serve", "--json")
-		if e = envelopeError(t, stdout); code != 2 || e.Code != "runtime_unsupported" || stderr != "" {
-			t.Fatal("desktop runtime serve", code, stdout, stderr)
-		}
-	}
-	// Offline commands work in desktop mode on every platform.
-	if code, stdout, stderr = run(t, "list", "--json"); code != 0 || stderr != "" {
+	p := metadataEnv(t)
+	desktopSessionIs(t, true)
+	if code, stdout, stderr := run(t, "runtime", "status", "--json"); code != 0 || stderr != "" {
 		t.Fatal(code, stdout, stderr)
 	}
+	desktopSessionIs(t, false)
+	want := output.LinuxNoSessionError()
+	for _, argv := range [][]string{{"runtime", "status", "--json"}, {"runtime", "serve", "--json"}, {"call", "paper.x", "--json"}, {"auth", "lock", "--json"}} {
+		code, stdout, stderr := run(t, argv...)
+		if e := envelopeError(t, stdout); code != 2 || e.Code != "runtime_unsupported" || e.Message != want.Message || e.NextAction != want.NextAction || stderr != "" {
+			t.Fatal(argv, code, stdout, stderr)
+		}
+	}
+	noRuntime(t, p)
+	// Offline commands work in desktop mode on every platform.
+	if code, stdout, stderr := run(t, "list", "--json"); code != 0 || stderr != "" {
+		t.Fatal(code, stdout, stderr)
+	}
+	if err := os.WriteFile(p.ConfigFile, []byte(`{"schemaVersion":1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if code, stdout, stderr := run(t, "runtime", "status", "--json"); code != 0 || stderr != "" {
+		t.Fatal("desktop runtime status with config.json", code, stdout, stderr)
+	}
 	headlessEnv(t)
-	if code, stdout, stderr = run(t, "runtime", "status", "--json"); code != 0 || stderr != "" {
+	if code, stdout, stderr := run(t, "runtime", "status", "--json"); code != 0 || stderr != "" {
 		t.Fatal("headless runtime status", code, stdout, stderr)
 	}
 }

@@ -99,6 +99,12 @@ func doctorInput(ctx context.Context, target string) (doctor.Input, error) {
 	in.Paths, in.Runtime, in.RuntimeErr = paths, rt, err
 	in.Retain = retainEnabled(paths)
 	in.AppDirs = doctorAppDirs(paths)
+	in.DesktopSession, in.DesktopOnePassword = desktopSessionCheck(paths), desktopOnePassword(paths)
+	if !paths.Headless() && !in.DesktopOnePassword {
+		// Desktop mode without the 1Password app is Linux, whose keyring is
+		// a Secret Service on the session bus.
+		in.KeyringReachable = func() bool { return keyringReachableCheck(paths) }
+	}
 
 	filesCtx, cancel := context.WithTimeout(ctx, doctorConfigWait)
 	in.Files, in.FilesErr = config.CheckFiles(filesCtx, paths)

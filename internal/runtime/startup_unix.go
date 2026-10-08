@@ -14,6 +14,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/dedene/mcparcel/internal/auth"
 	"github.com/dedene/mcparcel/internal/config"
 	"github.com/dedene/mcparcel/internal/lockfile"
 	"github.com/dedene/mcparcel/internal/output"
@@ -185,6 +186,12 @@ func safeSocketStat(st *unix.Stat_t) error {
 	return nil
 }
 
+// busEnv names the D-Bus session bus address a desktop daemon may inherit.
+const busEnv = "DBUS_SESSION_BUS_ADDRESS"
+
+// busAddressOK is auth.BusAddressFrom; tests replace it.
+var busAddressOK = auth.BusAddressFrom
+
 // DaemonEnvironment is the environment the CLI starts a daemon with. A
 // headless daemon gets the D11 names only (base names, what enabled
 // connections reference and the service-account token variables) and derives
@@ -200,6 +207,12 @@ func DaemonEnvironment(p config.Paths) []string {
 		if v, ok := os.LookupEnv(k); ok {
 			env[k] = v
 		}
+	}
+	// The keyring is reached through the session bus. Only an owned unix
+	// socket in a private directory passes on; a daemon that gets none finds
+	// /run/user/<uid>/bus itself.
+	if v, ok := os.LookupEnv(busEnv); ok && busAddressOK(v) {
+		env[busEnv] = v
 	}
 	if env["PATH"] == "" {
 		env["PATH"] = defaultPath

@@ -54,3 +54,12 @@ func headlessProfiles(_ string, p config.Profile) *output.Error {
 	}
 	return output.HeadlessOnePasswordError()
 }
+
+// desktopAppProfiles refuses every profile that uses the 1Password desktop
+// app, for desktop mode where MCParcel cannot use the app (Linux).
+func desktopAppProfiles(id string, p config.Profile) *output.Error {
+	if p.UsesDesktopApp() {
+		return output.DesktopAppUnavailableError(id)
+	}
+	return nil
+}

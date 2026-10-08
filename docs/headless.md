@@ -91,8 +91,12 @@ MCParcel finds its configuration at `$XDG_CONFIG_HOME/mcparcel`. claw-wrap
 passes the tool only `PATH`, `HOME`, `USER`, `TERM`, `COLORTERM` and the tool's
 `env:` map, so set `XDG_CONFIG_HOME: /etc` there (see the claw-wrap block
 below). Without it, MCParcel looks under `$HOME/.config/mcparcel`, finds no
-`config.json`, assumes desktop mode, and on Linux every runtime command fails
-with `runtime_unsupported`.
+`config.json` and assumes desktop mode. A container has no desktop session,
+so every runtime command then fails with `runtime_unsupported` ("No MCParcel
+configuration was found and there is no desktop session."). A `config.json`
+that MCParcel does find but that does not set `"mode": "headless"` is not
+refused: MCParcel runs desktop mode, which a sidecar is not set up for. Check
+that `doctor`'s `runtime.mode` row says `Headless mode`.
 
 `config.json`:
 
@@ -600,7 +604,7 @@ daemon starts one without them, which then fails `config_required` until a
 | `connection_failed` (6) | `Could not get an access token from the token endpoint (http_5xx).` (or `http_429`, `timeout`, `network_error`, `redirect`) | Token endpoint down, rate limited or unreachable; `redirect` means the token URL answered 3xx, which MCParcel never follows. Nothing is cached; the next call tries again. Also used, with its own message, when the MCP server is unreachable. |
 | `tool_denied` (4) | `The tool is denied by connection policy.` | The tool is not in `allow`, or is in `deny`. Checked offline: no daemon starts and no request is sent. |
 | `config_read_only` (2) | `This configuration is read-only (headless mode).` | A command that writes configuration: `enable`, `disable`, `tools enable/disable`, `local ...`, `config input/profile ...`, `import --apply`, `add`, `remove`, `sync` (also without `--apply`). Change the ConfigMap instead. |
-| `runtime_unsupported` (2) | `On Linux, MCParcel runs in headless mode only.` | `config.json` is missing or not headless, usually because `XDG_CONFIG_HOME` is not `/etc`. |
+| `runtime_unsupported` (2) | `No MCParcel configuration was found and there is no desktop session.` | No `config.json` where MCParcel looks, usually because `XDG_CONFIG_HOME` is not `/etc`, so it assumed desktop mode. A `config.json` without `"mode": "headless"` runs desktop mode instead of failing; `doctor`'s `runtime.mode` row shows which mode applies. |
 | `unsafe_local_path` (2) | `A local runtime or configuration path is unsafe.` | A config file that is group- or other-writable on a writable mount, a state directory with the wrong owner or mode, or a socket path over 100 bytes. |
 | `auth_required` (3) | `This server needs sign-in, which headless mode cannot do.` | A connection without `grant: "client_credentials"` asked for OAuth. Headless mode has no browser. |
 

@@ -41,6 +41,10 @@ type PoolOptions struct {
 	// reference except through a service-account profile. LoginEnv is then
 	// the daemon's own environment (D11).
 	Headless bool
+	// NoDesktopApp is desktop mode without the 1Password desktop app (Linux):
+	// NewPool refuses every profile that uses the app, before any provider
+	// call; service-account profiles still work.
+	NoDesktopApp bool
 }
 type pool struct {
 	opts     PoolOptions
@@ -98,6 +102,8 @@ func NewPool(opts PoolOptions) Handler {
 	}
 	if opts.Headless {
 		opts.Keychain, opts.Keyring, opts.Credentials = nil, nil, headlessCredentials(opts.Credentials)
+	} else if opts.NoDesktopApp && opts.Credentials != nil {
+		opts.Credentials = guardCredentials(opts.Credentials, desktopAppProfiles)
 	}
 	login := make(map[string]string, len(opts.LoginEnv))
 	for k, v := range opts.LoginEnv {
@@ -259,7 +265,11 @@ func (p *pool) Handle(ctx context.Context, id string, req Request, before func()
 	} else if names := config.EnvRefs(c); len(names) > 0 && len(refs) == 0 {
 		defer func() {
 			if resp.Error != nil && resp.Error.Code == "auth_required" {
-				resp.Error.NextAction = "Check " + strings.Join(names, ", ") + " (login-shell environment, else the Keychain generic password of the same name), update the value, then run mcparcel runtime restart."
+				source := "login-shell environment, else the Keychain generic password of the same name"
+				if p.opts.Keychain == nil {
+					source = "login-shell environment"
+				}
+				resp.Error.NextAction = "Check " + strings.Join(names, ", ") + " (" + source + "), update the value, then run mcparcel runtime restart."
 			}
 		}()
 	}

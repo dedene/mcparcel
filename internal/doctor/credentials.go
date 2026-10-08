@@ -64,7 +64,12 @@ func credentialChecks(in Input, row config.EffectiveConnection) []output.DoctorC
 	var checks []output.DoctorCheck
 	if row.Definition != nil && row.Definition.CredentialProfile != "" {
 		if name, p, ok := boundProfile(in, c); ok {
-			checks = append(checks, output.DoctorCheck{ID: "credentials.profile", Subject: id, Status: OK, Message: "Bound to profile " + show(name) + " (" + show(p.Mode) + ")."})
+			check := output.DoctorCheck{ID: "credentials.profile", Subject: id, Status: OK, Message: "Bound to profile " + show(name) + " (" + show(p.Mode) + ")."}
+			if Mode(in) == config.ModeDesktop && !in.DesktopOnePassword && p.UsesDesktopApp() {
+				e := output.DesktopAppUnavailableError(name)
+				check.Status, check.Code, check.Message, check.NextAction = Fail, e.Code, e.Message, e.NextAction
+			}
+			checks = append(checks, check)
 		}
 	}
 	mode := Mode(in)

@@ -113,7 +113,7 @@ func (c *Client) Ensure(ctx context.Context) (err error) {
 			return e
 		}
 		if errors.Is(e, config.ErrUnsafePath) {
-			return e
+			return unsafeRuntimeDir(c.Paths, e)
 		}
 		if !errors.Is(e, os.ErrNotExist) && !errors.Is(e, syscall.ECONNREFUSED) && !errors.Is(e, syscall.ENOENT) {
 			return output.NewError("runtime_start_failed", nil)
@@ -148,6 +148,17 @@ func (c *Client) Ensure(ctx context.Context) (err error) {
 		case <-time.After(25 * time.Millisecond):
 		}
 	}
+}
+
+// unsafeRuntimeDir is err, an unsafe runtime directory or socket. On Linux
+// in desktop mode it becomes unsafe_local_path naming MCPARCEL_RUNTIME_DIR.
+func unsafeRuntimeDir(p config.Paths, err error) error {
+	if runtimeDirAction == "" || p.Headless() {
+		return err
+	}
+	e := output.NewError("unsafe_local_path", nil)
+	e.NextAction = runtimeDirAction
+	return e
 }
 
 func (c *Client) exchange(ctx context.Context, intent string, r Request, ensure bool) (Response, string, error) {

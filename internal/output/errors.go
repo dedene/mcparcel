@@ -94,7 +94,7 @@ var registry = map[string]errorSpec{
 	"canceled":                 {130, "The operation was canceled.", ""},
 	"doctor_failed":            {8, "Doctor found failed checks.", "Fix the failed checks, starting with the first; each row has its next action."},
 
-	"keychain_unavailable":      {3, "The macOS Keychain could not store or read the sign-in.", "Unlock the login keychain, then try again."},
+	"keychain_unavailable":      {3, keychainUnavailableMessage, keychainUnavailableAction},
 	"auth_callback_unavailable": {3, "The sign-in callback address is in use.", "Close the program using that port, then try again."},
 }
 
@@ -115,10 +115,11 @@ func SourceNotRegisteredError() *Error {
 }
 
 // HeadlessOnlyError is runtime_unsupported for a runtime command in desktop
-// mode where only headless mode is supported (Linux).
+// mode where only headless mode is supported. Every shipped platform runs
+// desktop mode; this guards future targets.
 func HeadlessOnlyError() *Error {
 	err := NewError("runtime_unsupported", nil)
-	err.Message = "On Linux, MCParcel runs in headless mode only."
+	err.Message = "Desktop mode is not supported on this platform."
 	err.NextAction = `Set runtime.mode to "headless" and runtime.stateRoot in config.json.`
 	return err
 }

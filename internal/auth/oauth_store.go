@@ -13,10 +13,15 @@ import (
 	"github.com/dedene/mcparcel/internal/output"
 )
 
-// KeyringService names the one Keychain service that holds every OAuth item.
+// KeyringService names the one keyring service that holds every OAuth item.
 const KeyringService = "mcparcel-oauth"
 
-const keyringTimeout = 10 * time.Second
+const (
+	keyringTimeout = 10 * time.Second
+	// keyringInteractiveTimeout leaves the user time to answer an unlock
+	// prompt before a sign-in starts.
+	keyringInteractiveTimeout = 2 * time.Minute
+)
 
 // ErrNoSession means no usable OAuth item exists for the connection.
 var ErrNoSession = errors.New("no OAuth session")
@@ -29,22 +34,23 @@ type Keyring interface {
 	Delete(service, account string) error
 }
 
-// SystemKeyring is the macOS Keychain through go-keyring.
-type SystemKeyring struct{}
-
-func (SystemKeyring) Get(service, account string) (string, error) {
-	v, err := keyring.Get(service, account)
-	return v, notFound(err)
+// keyringGate is implemented by a keyring whose calls run one at a time
+// (the Linux Secret Service, whose prompts block a call until answered).
+// acquire takes the call slot: release frees it, and wedge marks it as held
+// by an abandoned call until release runs. stuck reports that mark.
+type keyringGate interface {
+	acquire(ctx context.Context) (release, wedge func(), err error)
+	stuck() bool
 }
 
-func (SystemKeyring) Set(service, account, secret string) error {
-	return keyring.Set(service, account, secret)
+// KeyringWedged reports whether k still waits on a call that keyringCall
+// abandoned (an unanswered keyring prompt); every call fails fast until then.
+func KeyringWedged(k Keyring) bool {
+	g, ok := k.(keyringGate)
+	return ok && g.stuck()
 }
 
-func (SystemKeyring) Delete(service, account string) error {
-	return notFound(keyring.Delete(service, account))
-}
-
+// notFound maps go-keyring's missing item to ErrNoSession.
 func notFound(err error) error {
 	if errors.Is(err, keyring.ErrNotFound) {
 		return ErrNoSession
@@ -52,7 +58,7 @@ func notFound(err error) error {
 	return err
 }
 
-// OAuthState is the Keychain item of one connection. Access tokens never
+// OAuthState is the keyring item of one connection. Access tokens never
 // appear here; ClientSecret is only a DCR-issued one.
 type OAuthState struct {
 	Version      int           `json:"v"`
@@ -78,7 +84,17 @@ func (OAuthState) String() string   { return "OAuthState{redacted}" }
 func (OAuthState) GoString() string { return "OAuthState{redacted}" }
 
 func LoadOAuth(ctx context.Context, k Keyring, account string) (OAuthState, error) {
-	raw, err := keyringCall(ctx, k, func() (string, error) { return k.Get(KeyringService, account) })
+	return loadOAuth(ctx, k, account, keyringTimeout)
+}
+
+// LoadOAuthInteractive is LoadOAuth for a sign-in the user is waiting on: it
+// gives a keyring unlock prompt keyringInteractiveTimeout to be answered.
+func LoadOAuthInteractive(ctx context.Context, k Keyring, account string) (OAuthState, error) {
+	return loadOAuth(ctx, k, account, keyringInteractiveTimeout)
+}
+
+func loadOAuth(ctx context.Context, k Keyring, account string, timeout time.Duration) (OAuthState, error) {
+	raw, err := keyringCall(ctx, k, timeout, func() (string, error) { return k.Get(KeyringService, account) })
 	if err != nil {
 		return OAuthState{}, err
 	}
@@ -98,16 +114,16 @@ func SaveOAuth(ctx context.Context, k Keyring, account string, s OAuthState) err
 	}
 	if keychainCommandLen(account, data) > 4096 {
 		e := output.NewError("keychain_unavailable", nil)
-		e.Message = "The sign-in is too large for one Keychain item."
+		e.Message = "The sign-in is too large for one keyring item."
 		return e
 	}
-	_, err = keyringCall(ctx, k, func() (struct{}, error) { return struct{}{}, k.Set(KeyringService, account, string(data)) })
+	_, err = keyringCall(ctx, k, keyringTimeout, func() (struct{}, error) { return struct{}{}, k.Set(KeyringService, account, string(data)) })
 	return err
 }
 
 // DeleteOAuth removes the item; a missing item is (false, nil).
 func DeleteOAuth(ctx context.Context, k Keyring, account string) (bool, error) {
-	_, err := keyringCall(ctx, k, func() (struct{}, error) { return struct{}{}, k.Delete(KeyringService, account) })
+	_, err := keyringCall(ctx, k, keyringTimeout, func() (struct{}, error) { return struct{}{}, k.Delete(KeyringService, account) })
 	if errors.Is(err, ErrNoSession) {
 		return false, nil
 	}
@@ -123,34 +139,58 @@ func keychainCommandLen(account string, data []byte) int {
 		len(" -w ") + 2 + len("go-keyring-base64:") + base64.StdEncoding.EncodedLen(len(data)) + 1
 }
 
-// keyringCall runs one keyring call bounded by ctx and keyringTimeout. Any
-// failure other than ErrNoSession becomes keychain_unavailable; the
-// underlying error text is never passed on.
-func keyringCall[T any](ctx context.Context, k Keyring, f func() (T, error)) (T, error) {
+// keyringCall runs one keyring call bounded by ctx and timeout. A gated
+// keyring (keyringGate) runs one call at a time: a call that cannot take the
+// slot, or that times out while the keyring still works on it, gives
+// KeyringPromptPendingError, and the abandoned call wedges the keyring until
+// it returns. Any other failure except ErrNoSession becomes
+// keychain_unavailable; the underlying error text is never passed on.
+func keyringCall[T any](ctx context.Context, k Keyring, timeout time.Duration, f func() (T, error)) (T, error) {
 	var zero T
 	if k == nil {
 		return zero, output.NewError("keychain_unavailable", nil)
 	}
-	ctx, cancel := context.WithTimeout(ctx, keyringTimeout)
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+	release, wedge := func() {}, func() {}
+	gate, gated := k.(keyringGate)
+	if gated {
+		var err error
+		if release, wedge, err = gate.acquire(ctx); err != nil {
+			return zero, output.KeyringPromptPendingError()
+		}
+	}
 	type result struct {
 		v   T
 		err error
 	}
 	done := make(chan result, 1)
 	go func() {
-		v, err := f()
+		v, err := func() (T, error) {
+			defer release()
+			return f()
+		}()
 		done <- result{v, err}
 	}()
+	var r result
 	select {
-	case r := <-done:
-		if r.err == nil {
-			return r.v, nil
-		}
-		if errors.Is(r.err, ErrNoSession) {
-			return zero, ErrNoSession
-		}
+	case r = <-done:
 	case <-ctx.Done():
+		select {
+		case r = <-done:
+		default:
+			if gated {
+				wedge()
+				return zero, output.KeyringPromptPendingError()
+			}
+			return zero, output.NewError("keychain_unavailable", nil)
+		}
+	}
+	switch {
+	case r.err == nil:
+		return r.v, nil
+	case errors.Is(r.err, ErrNoSession):
+		return zero, ErrNoSession
 	}
 	return zero, output.NewError("keychain_unavailable", nil)
 }

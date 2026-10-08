@@ -20,7 +20,8 @@ npm launcher -> native CLI -> config + local catalog metadata
 ```
 
 Recommend Go, Kong, the official MCP Go SDK, the official 1Password Go SDK,
-zalando/go-keyring v0.2.8 for the macOS Keychain, and Bubble Tea v2
+zalando/go-keyring v0.2.8 for the macOS Keychain and the Linux Secret Service,
+and Bubble Tea v2
 (`charm.land/bubbletea/v2`), without Lip Gloss or Bubbles, for setup. Use SDK transport/auth primitives behind small adapters;
 no custom MCP protocol implementation and no dependency on mcporter at runtime.
 The 1Password desktop build must have CGO enabled where the SDK requires it.
@@ -99,7 +100,10 @@ bindings. An `env:NAME` reference (personal definitions, stdio env and HTTP head
 resolves at connect time from that captured environment, else from the Keychain
 generic password with service NAME and the login user as account
 (`/usr/bin/security find-generic-password`, argv, 5s limit). Neither present gives
-`config_required` naming the variable, with both fixes. Values are never logged or
+`config_required` naming the variable, with both fixes. The Keychain fallback is
+macOS only: on Linux a variable missing from the captured environment is
+`config_required` ("Environment variable NAME is not set in the daemon's login
+environment."), and the next action names the login files bash and zsh read. Values are never logged or
 persisted. A pooled session keeps its value until it reconnects; `runtime restart`
 recaptures the environment and is how a key is rotated. `auth_required` on a
 connection whose only credentials are `env:` references names those variables
@@ -471,7 +475,8 @@ checks is a different deployment and explicitly deferred.
 
 Keep distributed API keys and OAuth client secrets in 1Password. Store each user's
 OAuth refresh token, registration credentials and issuer/resource binding in macOS
-Keychain; access tokens stay in memory. Storage uses `zalando/go-keyring` v0.2.8, which
+Keychain (on Linux, the Secret Service; see "Linux desktop mode" below); access
+tokens stay in memory. Storage uses `zalando/go-keyring` v0.2.8, which
 reads and writes through Apple's `/usr/bin/security` tool: no Developer ID
 signature is required and an upgrade causes no Keychain prompt. Accepted cost: any
 process running as the user can read these items the same way. This is a proposed exception for personal
@@ -512,7 +517,7 @@ its stored tokens: the next interactive call starts a fresh browser authorizatio
 deliberately independent of whether Keychain would permit a silent read.
 `auth logout <mcp>` removes local OAuth tokens/registration; provider-side revocation
 is a separate capability, reported accurately (`providerRevoked` is always false
-for now). `auth status` reads the Keychain item locally, never starts the runtime
+for now). `auth status` reads the Keychain (or Secret Service) item locally, never starts the runtime
 and prints no token. `auth lock` as built: see "1Password sessions as built
 (stage 6)" below.
 
@@ -521,11 +526,17 @@ and prints no token. `auth lock` as built: see "1Password sessions as built
 - Daemon only. `auth login` sends IPC `login`; the daemon connects with an OAuth
   handler in login mode, streams the authorization URL to the CLI (`auth_url`
   frame), and the CLI prints it on stderr and runs `/usr/bin/open` (argv, https or
-  loopback http only). 10-minute deadline; a pending login holds the connection's
+  loopback http only; on Linux `xdg-open`, see "Linux desktop mode"). 10-minute deadline; a pending login holds the connection's
   gate, so its calls queue; Ctrl-C cancels. `--no-input` returns `auth_required`
   after the connection check (unknown: `connection_unavailable`; not sign-in
   capable: `invalid_arguments`). A login the server never challenges stores
   nothing and does not keep its session.
+- Keyring preflight, on every platform: before the daemon listens for the
+  callback or the CLI opens a browser, a login reads the connection's stored
+  item, waiting up to 2 minutes for a keyring unlock prompt to be answered.
+  Any failure other than a missing item refuses the login with
+  `keychain_unavailable`, so a sign-in the keyring could not store never
+  starts. A save that fails after consent is still `keychain_unavailable`.
 - Flow: SDK v1.8.0 `AuthorizationCodeHandler`. PRM + AS discovery, preconfigured
   client (`clientId`/`clientSecret`, env refs allowed) else DCR, PKCE S256, state,
   RFC 9207 `iss`, issuer/resource binding. Loopback listener on 127.0.0.1 (random
@@ -802,7 +813,10 @@ use starts the daemon again. No launchd agent is installed.
   `runtime status` reports `stayAlive` (`Stay-alive: on|off`).
 - Locked login Keychain: a background Keychain read while the login keychain
   is locked could make macOS show an unlock dialog. Tests cannot exercise
-  this; it is accepted and confirmed by observation.
+  this; it is accepted and confirmed by observation. On Linux a keep-alive
+  tick is skipped, without calling the token endpoint, while a keyring prompt
+  is still open, so it never fetches a rotated refresh token it could not
+  store (see "Linux desktop mode").
 
 `runtime.approvalDialog: true` in `config.json` (default `false`) lets a call
 without a terminal (or with `--json`, never with `--no-input`) show a server's
@@ -907,18 +921,100 @@ of an item's identity (`TestOAuthKeyringIdentityIsStable`,
 `TestKeychainReadArgvIsFixed`). The 1Password desktop app may ask once to approve
 a new binary. Both are still to be confirmed by hand on a clean macOS account.
 
+## Linux desktop mode
+
+Desktop mode runs on Linux from the static binary (`make build-linux`,
+`CGO_ENABLED=0`, amd64 and arm64), with the same daemon, login-shell
+capture, retained binary (a byte copy) and socket rules as on macOS; the
+default shell is `/bin/sh` when `SHELL` is unset. What differs:
+
+- When it runs: runtime commands (`tools`, `call`, `auth`, `runtime`,
+  `runtime serve`) in desktop mode fail `runtime_unsupported` ("No MCParcel
+  configuration was found and there is no desktop session.") only when there
+  is no desktop session (no `DISPLAY`, no `WAYLAND_DISPLAY`, no usable session
+  bus) and no `config.json` in the configuration directory either. That is
+  most likely a container or service whose `XDG_CONFIG_HOME` misses its
+  headless configuration, so it fails at once instead of running desktop
+  mode by accident. With a `config.json`, desktop mode runs without a desktop
+  session, for example in a devcontainer or over SSH without a user bus:
+  service-account profiles and `env:` references work, and `auth login` is
+  refused (see below). The daemon a CLI starts does not check again. Doctor's
+  `runtime.mode` row applies the same rule. Offline commands always work.
+- 1Password: only `service-account` profiles. The 1Password desktop app
+  integration is macOS only, so the daemon never wires it; a connection bound
+  to a `desktop` or `desktop-service-account` profile fails `config_required`
+  ("Profile ID uses the 1Password desktop app, which MCParcel supports on
+  macOS only."), and doctor's `credentials.profile` row fails with the same
+  text. `prereq.onepassword` is not emitted.
+- `env:` references: no Keychain fallback (see "Connection ownership and
+  concurrency" above).
+- OAuth sign-ins live in the Secret Service (GNOME Keyring, KWallet or
+  another provider) through go-keyring, with the macOS item identity: service
+  `mcparcel-oauth`, account = canonical connection ID, the same 4096-byte
+  limit. There is no file fallback. A failure is `keychain_unavailable` ("No
+  usable Secret Service keyring could store or read the sign-in.").
+- Session bus: before every keyring call MCParcel picks the bus itself and
+  points the D-Bus library at it. It accepts only one `unix:path=` socket
+  owned by the user, in a directory owned by the user that no one else can
+  write: `DBUS_SESSION_BUS_ADDRESS` when it is exactly such an address, else
+  `/run/user/<uid>/bus`. Abstract, TCP, `autolaunch:` and `launchd:`
+  addresses and sockets in `/tmp` are never used, and `dbus-launch` never
+  runs. A CLI that starts the daemon passes `DBUS_SESSION_BUS_ADDRESS` on only
+  when it passes the same check, and never `DISPLAY`, `WAYLAND_DISPLAY` or
+  `XDG_RUNTIME_DIR`. A daemon started from SSH keeps that bus until
+  `runtime restart`.
+- `auth login` without a keyring: when no runtime runs and this session has
+  no usable bus, the CLI refuses before starting one (`keychain_unavailable`,
+  "No Secret Service keyring is reachable from this session (no usable D-Bus
+  session bus), so MCParcel cannot store a sign-in."). A running daemon has
+  its own bus; its keyring preflight (see "OAuth as built") refuses instead,
+  before any browser opens. Over SSH with a systemd user bus, the offline
+  check passes and a refusal comes from the preflight, which can wait up to
+  2 minutes.
+- Prompts: Secret Service calls run one at a time. A locked keyring shows
+  the provider's unlock dialog during the login preflight; unlocked within 2
+  minutes, the sign-in goes on, otherwise the login exits 3 before any
+  browser opens. Other keyring reads wait at most 10 seconds. While a dialog
+  from an earlier request is still open, every keyring call fails at once
+  with `keychain_unavailable` ("A keyring prompt from an earlier MCParcel
+  request is still open."), until the dialog is answered or dismissed or the
+  runtime restarts, and keep-alive skips its refreshes. A store or delete
+  is read back, so a dismissed prompt is not taken for success.
+- Known limitation: go-keyring never removes a prompt's D-Bus signal
+  registration, so each prompt leaks one registration (and a few small
+  goroutines) on the daemon's connection until it exits.
+- Browser: the CLI opens the sign-in URL with `xdg-open`, found on `PATH` as
+  an absolute path, only when `DISPLAY` or `WAYLAND_DISPLAY` is set. The URL
+  must be https, or http on a loopback host, and made only of URL characters
+  (no spaces, quotes, `$`, backticks, parentheses, backslashes or non-ASCII).
+  xdg-open runs in its own session with stdio on `/dev/null` and without
+  protected variables such as `OP_*`. Otherwise the CLI prints only the URL.
+  Over SSH (`SSH_CONNECTION` set) it adds where the sign-in returns and the
+  forward to run where the browser is: `ssh -N -L <port>:127.0.0.1:<port>
+  <this host>` (`[::1]` for an IPv6 loopback redirect).
+- `auth status`: when listing (no `<mcp>`), a connection that is not marked
+  OAuth and whose item the keyring cannot read is left out. A marked
+  connection, or `auth status <mcp>`, still fails `keychain_unavailable`.
+- No approval dialog: with `runtime.approvalDialog` set, a request that
+  would show one is answered `cancel`.
+- Process hardening: the daemon and `runtime serve` mark themselves
+  non-dumpable (see "1Password sessions as built").
+- Runtime directory: `$TMPDIR/mcp-<uid>`, or `/tmp/mcp-<uid>` without
+  `TMPDIR`. On a shared host another user can create that path first; the
+  runtime then refuses it (`unsafe_local_path`) and the next action names
+  `MCPARCEL_RUNTIME_DIR` (for example `$XDG_RUNTIME_DIR/mcparcel`).
+
 ## Headless mode (stage 12)
 
 Headless mode runs the runtime without a desktop, for a server or a
 Kubernetes sidecar. The deployment guide is [headless.md](headless.md).
 
 - Switch: `config.json` → `runtime.mode: "headless"` (default `"desktop"`).
-  Never an environment variable or auto-detection. macOS supports both modes;
-  Linux supports headless only: in desktop mode `tools`, `call`, `auth`,
-  `runtime` and the daemon fail `runtime_unsupported` ("On Linux, MCParcel
-  runs in headless mode only."), while offline commands keep working. The CLI
-  and the daemon read the mode from the same `config.json`, so they agree on
-  their paths.
+  Never an environment variable or auto-detection. macOS and Linux support
+  both modes; on Linux, desktop mode without a desktop session and without a
+  `config.json` fails `runtime_unsupported` (see "Linux desktop mode"). The
+  CLI and the daemon read the mode from the same `config.json`, so they agree
+  on their paths.
 - State root: `runtime.stateRoot` (a clean absolute path, required in
   headless mode, rejected otherwise) replaces the state, data and cache
   directories and the runtime directory with `<root>/state`, `/data`,
@@ -1002,7 +1098,7 @@ Lifecycles:
   instead of starting its own, and fails `runtime_supervised` (exit 6) if it
   does not answer; `runtime restart` (with or without `--force`) is refused
   with `runtime_supervised`; `runtime stop` still works. Delete the file to
-  return to auto-start. On Linux, serve also requires headless mode.
+  return to auto-start.
   The file exists only once serve has taken the lock, and a fresh state root
   (an emptyDir on every pod start) has none, so a CLI that runs first would
   still auto-start a daemon. `runtime.supervised: true` in `config.json`

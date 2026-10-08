@@ -172,9 +172,10 @@ func forbiddenChildEnv(key string) bool {
 
 // envRefValues adds values for env: references from the captured login
 // environment, falling back to a Keychain generic password named after the
-// variable (temporary bridge). In headless mode login is the daemon's own
-// environment, the Keychain is never consulted and the error names every
-// missing variable. Values never enter errors or logs.
+// variable (temporary bridge; macOS only, keychain is nil elsewhere). In
+// headless mode login is the daemon's own environment, the Keychain is never
+// consulted and the error names every missing variable. Values never enter
+// errors or logs.
 func envRefValues(ctx context.Context, login map[string]string, keychain func(context.Context, string) (string, error), headless bool, c config.Connection, resolved map[string]string) (map[string]string, error) {
 	names := config.EnvRefs(c)
 	if len(names) == 0 {
@@ -200,6 +201,9 @@ func envRefValues(ctx context.Context, login map[string]string, keychain func(co
 				value = v
 			}
 		}
+		if value == "" && keychain == nil {
+			return nil, loginEnvMissing(name)
+		}
 		if value == "" {
 			err := output.NewError("config_required", nil)
 			err.Message = "Environment variable " + name + " is not set in the daemon's login environment and the Keychain has no generic password named " + name + "."
@@ -212,6 +216,15 @@ func envRefValues(ctx context.Context, login map[string]string, keychain func(co
 		return nil, headlessMissingEnv(missing)
 	}
 	return out, nil
+}
+
+// loginEnvMissing is config_required for an env: reference missing from the
+// login environment where no Keychain fallback exists (Linux desktop mode).
+func loginEnvMissing(name string) *output.Error {
+	err := output.NewError("config_required", nil)
+	err.Message = "Environment variable " + name + " is not set in the daemon's login environment."
+	err.NextAction = "Export " + name + " where your login shell reads it (bash: ~/.profile or ~/.bash_profile; zsh: ~/.zprofile), then run mcparcel runtime restart. If mcparcel runtime status shows Environment: caller fallback, the login-shell capture failed; fix that first."
+	return err
 }
 
 var errKeychain = errors.New("keychain lookup failed")

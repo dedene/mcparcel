@@ -63,7 +63,7 @@ func TestSaveOAuthBudget(t *testing.T) {
 	k.BeforeSet = func() { sets++ }
 	s.RefreshToken = strings.Repeat("r", 3000)
 	e := code(t, auth.SaveOAuth(context.Background(), k, account, s), "keychain_unavailable")
-	if e.Message != "The sign-in is too large for one Keychain item." || sets != 0 {
+	if e.Message != "The sign-in is too large for one keyring item." || sets != 0 {
 		t.Fatalf("message %q, sets %d", e.Message, sets)
 	}
 }
@@ -194,4 +194,22 @@ func TestOAuthKeyringIdentityIsStable(t *testing.T) {
 	if len(k.keys) != 1 || !k.keys["mcparcel-oauth|"+id] {
 		t.Fatal(k.keys)
 	}
+}
+
+// LoadOAuthInteractive reads the same item as LoadOAuth; only its keyring
+// timeout is longer.
+func TestLoadOAuthInteractive(t *testing.T) {
+	k := &testutil.MemKeyring{}
+	ctx := context.Background()
+	if _, err := auth.LoadOAuthInteractive(ctx, k, "local:linear"); !errors.Is(err, auth.ErrNoSession) {
+		t.Fatal(err)
+	}
+	if err := auth.SaveOAuth(ctx, k, "local:linear", sampleState()); err != nil {
+		t.Fatal(err)
+	}
+	if s, err := auth.LoadOAuthInteractive(ctx, k, "local:linear"); err != nil || s.RefreshToken != sampleState().RefreshToken {
+		t.Fatal(err)
+	}
+	_, err := auth.LoadOAuthInteractive(ctx, &testutil.MemKeyring{Err: errors.New("keyring-canary")}, "local:linear")
+	code(t, err, "keychain_unavailable")
 }

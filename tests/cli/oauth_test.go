@@ -342,4 +342,9 @@ func TestKeychainUnavailableBlackBox(t *testing.T) {
 	if after := files(); !slices.Equal(before, after) {
 		t.Fatalf("files changed: %v -> %v", before, after)
 	}
+	// The daemon's login preflight refuses before a callback listener or a
+	// browser: nothing reached the authorization server.
+	if r.page() != "" || r.as.Requests("/authorize") != 0 || r.as.Requests("/token") != 0 {
+		t.Fatal("sign-in started without a keyring", r.page(), r.as.Requests(""))
+	}
 }

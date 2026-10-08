@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -66,10 +67,28 @@ func applyRuntime(paths config.Paths, rt config.RuntimeDefaults) (config.Paths, 
 	return applied, nil
 }
 
+// desktopSessionCheck is desktopSession; tests replace it.
+var desktopSessionCheck = desktopSession
+
 // runtimePaths is commandPaths for a command that uses the runtime (tools,
-// call, auth, runtime, daemon): where desktop mode is unsupported (Linux), it
-// refuses desktop mode with runtime_unsupported.
+// call, auth, runtime): it refuses desktop mode with runtime_unsupported where
+// desktop mode is unsupported, and on Linux without a desktop session when
+// no config.json exists either, which most likely is a container or service
+// that misses its headless configuration.
 func runtimePaths() (config.Paths, error) {
+	paths, err := daemonPaths()
+	if err != nil {
+		return config.Paths{}, err
+	}
+	if !paths.Headless() && !desktopSessionCheck(paths) && !configPresent(paths) {
+		return config.Paths{}, output.LinuxNoSessionError()
+	}
+	return paths, nil
+}
+
+// daemonPaths is runtimePaths without the session check, for the daemon a
+// CLI started: that CLI already checked.
+func daemonPaths() (config.Paths, error) {
 	paths, rt, err := resolveCommandPaths()
 	if err != nil {
 		return config.Paths{}, err
@@ -78,6 +97,17 @@ func runtimePaths() (config.Paths, error) {
 		return config.Paths{}, err
 	}
 	return paths, nil
+}
+
+// configPresent reports whether config.json exists; ReadRuntime reads an
+// absent one as desktop mode.
+func configPresent(paths config.Paths) bool {
+	path := paths.ConfigFile
+	if path == "" {
+		path = filepath.Join(paths.ConfigDir, "config.json")
+	}
+	_, err := os.Stat(path)
+	return !errors.Is(err, os.ErrNotExist)
 }
 
 func newRuntimeClient(opts *CommandOptions) (*runtimeclient.Client, error) {

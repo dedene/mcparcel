@@ -4,34 +4,27 @@ package cmd
 
 import (
 	"context"
-	"errors"
-	"net/url"
 	"os/exec"
 	"time"
 
 	"github.com/dedene/mcparcel/internal/config"
 )
 
-// newBrowser opens an https URL, or an http URL on a loopback host, in the
-// default browser. The URL is one argv entry; no shell runs.
 // browserOpens reports whether newBrowser can open a browser at all; auth
-// login words its prompt by it.
-const browserOpens = true
+// login words its prompt by it. macOS always can.
+func browserOpens() bool { return true }
 
+// newBrowser opens a sign-in URL that validSignInURL accepts in the default
+// browser. The URL is one argv entry; no shell runs.
 func newBrowser(config.Paths) func(context.Context, string) error {
 	return func(ctx context.Context, raw string) error {
-		u, err := url.Parse(raw)
-		if err != nil || u.Host == "" || u.Scheme != "https" && (u.Scheme != "http" || !loopbackHost(u.Hostname())) {
-			return errors.New("unsupported sign-in URL")
+		if err := validSignInURL(raw); err != nil {
+			return err
 		}
 		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
 		return exec.CommandContext(ctx, "/usr/bin/open", raw).Run()
 	}
-}
-
-func loopbackHost(host string) bool {
-	return host == "127.0.0.1" || host == "::1" || host == "localhost"
 }
 
 // dialogScript shows argv as title, text, timeout in seconds and buttons;

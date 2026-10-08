@@ -523,7 +523,7 @@ func TestFixtureBinaryHasStandIns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, marker := range []string{"fixture-terminal", "fixture-dialog-answer", "fixture-keyring"} {
+	for _, marker := range []string{"fixture-terminal", "fixture-dialog-answer", "fixture-keyring", "fixture-no-desktop-app", "fixture-no-session-bus", "fixture-no-desktop-session"} {
 		if !bytes.Contains(b, []byte(marker)) {
 			t.Fatal("tagged binary lacks", marker)
 		}

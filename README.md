@@ -39,9 +39,10 @@ on your machine:
 - **Personal connections** (a local app such as Paper, a server only you use)
   live next to the catalogs and never touch them.
 - **Credentials** come from 1Password (`op://` references, through the
-  desktop app or a service-account token) or environment variables. OAuth sign-ins are stored in the macOS Keychain and refreshed for
-  you. One 1Password approval covers a work session, so you don't get a
-  biometric prompt on every call.
+  desktop app or a service-account token) or environment variables. OAuth
+  sign-ins are stored in the macOS Keychain or the Linux Secret Service and
+  refreshed for you. One 1Password approval covers a work session, so you
+  don't get a biometric prompt on every call.
 - A local **runtime** keeps server sessions open between calls, so an agent
   doesn't pay a cold start on each tool call.
 
@@ -49,12 +50,14 @@ on your machine:
 
 Release candidate `0.1.0-rc.1`. It is used daily, but it is early software:
 
-- The desktop build runs on **macOS with Apple Silicon** only. The binary is
+- The npm package runs on **macOS with Apple Silicon** only. Its binary is
   ad-hoc signed, not notarized.
-- On **Linux** it runs headless from a static binary, for example as a
-  Kubernetes sidecar. Secrets come from `env:` references or from a 1Password
-  service-account profile; there is no 1Password desktop app or Keychain
-  integration there. See [docs/headless.md](docs/headless.md).
+- On **Linux** it runs from the static binary that `make build-linux` writes
+  (amd64 and arm64), both interactively and headless. Interactively (desktop
+  mode), OAuth sign-ins are stored in the Secret Service (GNOME Keyring,
+  KWallet) and 1Password works through service-account profiles; the
+  1Password desktop app integration is macOS only. Headless mode runs it on a
+  server or as a Kubernetes sidecar; see [docs/headless.md](docs/headless.md).
 - It is not published to npm yet. You build and install it from source.
 
 ## Install
@@ -136,7 +139,8 @@ format, including HTTP servers, OAuth and inputs, is in
 
 - [docs/cli.md](docs/cli.md): commands, arguments, JSON output and exit codes.
 - [docs/catalog.md](docs/catalog.md): catalog format, local state and merging.
-- [docs/runtime.md](docs/runtime.md): the runtime, 1Password sessions and OAuth.
+- [docs/runtime.md](docs/runtime.md): the runtime, 1Password sessions, OAuth
+  and Linux desktop mode.
 - [docs/migration.md](docs/migration.md): installing, upgrading and moving over
   from mcporter.
 - [docs/headless.md](docs/headless.md): running headless on Linux.

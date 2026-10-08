@@ -16,7 +16,7 @@ func TestConfigReadOnlyError(t *testing.T) {
 
 func TestHeadlessOnlyError(t *testing.T) {
 	e := HeadlessOnlyError()
-	if e.Code != "runtime_unsupported" || e.Message != "On Linux, MCParcel runs in headless mode only." ||
+	if e.Code != "runtime_unsupported" || e.Message != "Desktop mode is not supported on this platform." ||
 		e.NextAction != `Set runtime.mode to "headless" and runtime.stateRoot in config.json.` || ExitCode(e) != 2 {
 		t.Fatal(e, ExitCode(e))
 	}

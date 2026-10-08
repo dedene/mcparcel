@@ -3,6 +3,9 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"os"
+	"strconv"
 	"strings"
 
 	"github.com/dedene/mcparcel/internal/config"
@@ -33,9 +36,14 @@ type (
 	}
 )
 
+// keyringReachableCheck is keyringReachable; tests replace it.
+var keyringReachableCheck = keyringReachable
+
 // Run sends the login to the runtime, which checks the connection before it
-// honors --no-input. A client_credentials connection, and any connection in
-// headless mode, is refused offline: no runtime starts.
+// honors --no-input. A client_credentials connection, any connection in
+// headless mode and, when no runtime runs, a session without a reachable
+// keyring (Linux without a session bus) are refused offline: no runtime
+// starts.
 func (c *AuthLoginCmd) Run(ctx context.Context, s *Streams, opts *CommandOptions) error {
 	paths, err := runtimePaths()
 	if err != nil {
@@ -49,14 +57,21 @@ func (c *AuthLoginCmd) Run(ctx context.Context, s *Streams, opts *CommandOptions
 	if paths.Headless() {
 		return runtimeclient.HeadlessSignIn()
 	}
+	if !keyringReachableCheck(paths) && !daemonRunning(ctx, paths) {
+		// The runtime this login would start inherits this session's bus,
+		// which reaches no keyring. A running runtime has its own, which its
+		// login preflight checks.
+		return output.KeyringUnreachableError()
+	}
 	client, err := newRuntimeClient(opts)
 	if err != nil {
 		return err
 	}
 	open := newBrowser(client.Paths)
 	client.OnAuthURL = func(u string) {
-		fmt.Fprint(s.Err, signInPrompt(c.MCP, u, browserOpens))
-		if browserOpens {
+		opens := browserOpens()
+		fmt.Fprint(s.Err, signInPrompt(c.MCP, u, opens))
+		if opens {
 			_ = open(ctx, u)
 		}
 	}
@@ -106,6 +121,14 @@ func (c *AuthLogoutCmd) Run(ctx context.Context, s *Streams, opts *CommandOption
 		return writeSuccess(s, opts, "No stored sign-in for "+c.MCP+".\n")
 	}
 	return writeSuccess(s, opts, "Removed the stored sign-in for "+c.MCP+". The provider was not asked to revoke it.\n")
+}
+
+// daemonRunning reports whether a compatible runtime runs; it never starts
+// one.
+func daemonRunning(ctx context.Context, paths config.Paths) bool {
+	client := runtimeclient.Client{Paths: paths, Version: version}
+	status, err := client.Status(ctx)
+	return err == nil && status.Running && status.Compatible
 }
 
 // canonicalConnection resolves a name or alias to its canonical ID; a
@@ -202,10 +225,41 @@ func nothingToSignIn(name string) *output.Error {
 }
 
 // signInPrompt tells the user where to sign in: the browser that is about to
-// open, or, where none can open, the URL to open themselves.
+// open, or, where none can open, the URL to open themselves. Over SSH it adds
+// how a browser on another machine reaches the loopback callback.
 func signInPrompt(name, u string, opens bool) string {
 	if opens {
 		return fmt.Sprintf("Opening your browser to sign in to %s.\nIf it does not open, visit:\n%s\n", name, u)
 	}
-	return fmt.Sprintf("To sign in to %s, open this URL in a browser:\n%s\n", name, u)
+	prompt := fmt.Sprintf("To sign in to %s, open this URL in a browser:\n%s\n", name, u)
+	if os.Getenv("SSH_CONNECTION") != "" {
+		if host, port, ok := callbackAddress(u); ok {
+			prompt += fmt.Sprintf("The sign-in returns to http://%s:%s on this machine. If your browser runs elsewhere, first run there: ssh -N -L %s:%s:%s <this host>\n", host, port, port, host, port)
+		}
+	}
+	return prompt
+}
+
+// callbackAddress is the loopback host and port of the sign-in URL's
+// redirect_uri: 127.0.0.1 (also for localhost) or [::1].
+func callbackAddress(u string) (host, port string, ok bool) {
+	parsed, err := url.Parse(u)
+	if err != nil {
+		return "", "", false
+	}
+	redirect, err := url.Parse(parsed.Query().Get("redirect_uri"))
+	if err != nil {
+		return "", "", false
+	}
+	port = redirect.Port()
+	if _, err = strconv.ParseUint(port, 10, 16); err != nil {
+		return "", "", false
+	}
+	switch redirect.Hostname() {
+	case "127.0.0.1", "localhost":
+		return "127.0.0.1", port, true
+	case "::1":
+		return "[::1]", port, true
+	}
+	return "", "", false
 }

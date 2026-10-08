@@ -35,7 +35,6 @@ func TestEnvRefValues(t *testing.T) {
 		t.Fatal(env, e)
 	}
 	missing := []func(context.Context, string) (string, error){
-		nil,
 		func(context.Context, string) (string, error) { return "", nil },
 		func(context.Context, string) (string, error) {
 			return "", errors.New("security: SecKeychainSearchCopyNext: stderr-canary value-canary")
@@ -54,6 +53,25 @@ func TestEnvRefValues(t *testing.T) {
 				t.Fatal(i, "error leaked lookup detail", string(b))
 			}
 		}
+	}
+}
+
+// Without a Keychain (Linux desktop mode) the error names the login shell
+// only.
+func TestEnvRefValuesNoKeychain(t *testing.T) {
+	c := config.Connection{Transport: config.Transport{Stdio: &config.Stdio{Env: map[string]config.Value{"EXA_API_KEY": {Secret: &config.SecretRef{Secret: "env:EXA_API_KEY"}}}}}}
+	for _, login := range []map[string]string{{}, {"EXA_API_KEY": ""}} {
+		_, e := envRefValues(t.Context(), login, nil, false, c, nil)
+		var out *output.Error
+		if !errors.As(e, &out) || out.Code != "config_required" || out.Details != nil ||
+			out.Message != "Environment variable EXA_API_KEY is not set in the daemon's login environment." ||
+			out.NextAction != "Export EXA_API_KEY where your login shell reads it (bash: ~/.profile or ~/.bash_profile; zsh: ~/.zprofile), then run mcparcel runtime restart. If mcparcel runtime status shows Environment: caller fallback, the login-shell capture failed; fix that first." {
+			t.Fatal(e)
+		}
+	}
+	got, e := envRefValues(t.Context(), map[string]string{"EXA_API_KEY": "value-canary"}, nil, false, c, nil)
+	if e != nil || got["env:EXA_API_KEY"] != "value-canary" {
+		t.Fatal(got, e)
 	}
 }
 
@@ -177,6 +195,22 @@ func TestPoolEnvRefAuthRequiredNextAction(t *testing.T) {
 	}
 	if b, _ := json.Marshal(res.Error); strings.Contains(string(b), "stale-canary") {
 		t.Fatal("error leaked value")
+	}
+	// Without a Keychain (Linux) the hint names the login shell only.
+	if !strings.Contains(res.Error.NextAction, "(login-shell environment)") {
+		t.Fatal(res.Error.NextAction)
+	}
+	r = newRig(t)
+	r.opts.Keychain = func(context.Context, string) (string, error) { return "", errors.New("not found") }
+	r.opts.LoginEnv["FIXTURE_TOKEN"] = "stale-canary"
+	r.personal.Connections["h"] = config.Connection{Transport: config.Transport{HTTP: &config.HTTP{URL: config.Literal("https://fixture.invalid/mcp"), Headers: map[string]config.Value{"Authorization": {Secret: &config.SecretRef{Secret: "env:FIXTURE_TOKEN", Prefix: "Bearer "}}}}}}
+	r.opts.Connect = func(context.Context, mcpclient.ConnectOptions) (mcpclient.Session, error) {
+		return nil, output.NewError("auth_required", nil)
+	}
+	r.start()
+	res = r.call(testCtx(t), "h", "counter")
+	if res.Error == nil || !strings.Contains(res.Error.NextAction, "(login-shell environment, else the Keychain generic password of the same name)") {
+		t.Fatal(res.Error)
 	}
 }
 
