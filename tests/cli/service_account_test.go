@@ -174,7 +174,8 @@ func TestServiceAccountTokenFileBlackBox(t *testing.T) {
 	if !strings.Contains(unsafe.stdout, "is unsafe") || !strings.Contains(unsafe.stdout, "chmod 600") {
 		t.Fatal(unsafe.stdout)
 	}
-	// A wrong token is rejected, and an immediate retry does not bootstrap.
+	// A wrong token is rejected, and an immediate retry is answered from the
+	// rejected-token backoff without asking 1Password again (D22).
 	if err := os.Chmod(token, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -183,9 +184,12 @@ func TestServiceAccountTokenFileBlackBox(t *testing.T) {
 	if !strings.Contains(rejected.stdout, "did not accept the service-account token") || !strings.Contains(rejected.stdout, "token from file") {
 		t.Fatal(rejected.stdout)
 	}
+	if r.countEvents("bootstrap-token-rejected") != 1 {
+		t.Fatal("the wrong token was not sent once", r.countEvents("bootstrap-token-rejected"))
+	}
 	again := r.check(r.run("call", "a.counter", "--json"), 3, "auth_failed")
-	if r.countEvents("bootstrap-token") != 1 {
-		t.Fatal("a rejected token bootstrapped", r.countEvents("bootstrap-token"))
+	if r.countEvents("bootstrap-token") != 1 || r.countEvents("bootstrap-token-rejected") != 1 {
+		t.Fatal("a rejected token was sent again", r.countEvents("bootstrap-token"), r.countEvents("bootstrap-token-rejected"))
 	}
 	// The file is read again on the next bootstrap: no restart needed.
 	r.write(token, saToken+"\n", 0o600)

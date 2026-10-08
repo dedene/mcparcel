@@ -209,12 +209,12 @@ func (r *resolver) Resolve(ctx context.Context, id string, profile config.Profil
 		r.mu.Lock()
 		if r.closed {
 			r.mu.Unlock()
-			return Lease{}, ErrProvider
+			return Lease{}, ErrProviderBusy
 		}
 		for _, other := range r.states {
 			if other.id == id && other.op != nil && other.op.quarantined {
 				r.mu.Unlock()
-				return Lease{}, ErrProvider
+				return Lease{}, ErrProviderBusy
 			}
 		}
 		state := r.state(key, id, profile.Mode)

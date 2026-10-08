@@ -14,6 +14,10 @@ var (
 	ErrRequired        = errors.New("credential authorization required")
 	ErrExpired         = errors.New("credential session expired")
 	ErrProvider        = errors.New("credential provider failed")
+	// ErrProviderBusy is ErrProvider for a profile whose earlier operation is
+	// still winding down (quarantined) or a closed resolver: the provider was
+	// not asked, so it says nothing about the profile's credentials.
+	ErrProviderBusy = fmt.Errorf("credential provider busy: %w", ErrProvider)
 	// ErrRateLimited keeps the session: the provider refused this request only.
 	ErrRateLimited = errors.New("credential provider rate limited")
 	// ErrLocked is the cause of work canceled by Lock.

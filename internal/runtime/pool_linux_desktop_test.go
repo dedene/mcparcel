@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"errors"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -116,6 +117,9 @@ func TestUnsafeRuntimeDirAction(t *testing.T) {
 		t.Fatal(err)
 	}
 	err := unsafeRuntimeDir(desktop, config.ErrUnsafePath)
+	if !errors.Is(err, config.ErrUnsafePath) {
+		t.Fatal("cause lost", err)
+	}
 	if runtimeDirAction == "" {
 		if err != config.ErrUnsafePath {
 			t.Fatal(err)
@@ -125,5 +129,35 @@ func TestUnsafeRuntimeDirAction(t *testing.T) {
 	var e *output.Error
 	if !errors.As(err, &e) || e.Code != "unsafe_local_path" || !strings.Contains(e.NextAction, "MCPARCEL_RUNTIME_DIR") || output.ExitCode(e) != 2 {
 		t.Fatal(err)
+	}
+}
+
+// Every client path that meets an unsafe desktop runtime directory carries
+// the MCPARCEL_RUNTIME_DIR next action on Linux, not only the auto-start dial:
+// runtime status, runtime stop and the start under the daemon lock. Each still
+// matches config.ErrUnsafePath.
+func TestUnsafeRuntimeDirActionEverywhere(t *testing.T) {
+	p, _ := testutil.IsolatedPaths(t)
+	if err := os.MkdirAll(p.RuntimeDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// Another user's directory fails the same owner/mode check.
+	if err := os.Chmod(p.RuntimeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(p.RuntimeDir, 0o700) })
+	c := &Client{Paths: p, Version: "dev", Executable: "/nonexistent"}
+	_, status := c.Status(testCtx(t))
+	_, stop := c.Stop(testCtx(t), false)
+	_, _, lock := acquireDaemonLock(testCtx(t), p, config.OpenPrivateFile)
+	for name, err := range map[string]error{"status": status, "stop": stop, "lock": lock} {
+		if !errors.Is(err, config.ErrUnsafePath) {
+			t.Fatal(name, err)
+		}
+		var e *output.Error
+		hinted := errors.As(err, &e) && e.Code == "unsafe_local_path" && strings.Contains(e.NextAction, "MCPARCEL_RUNTIME_DIR")
+		if hinted != (runtimeDirAction != "") {
+			t.Fatal(name, err)
+		}
 	}
 }

@@ -119,6 +119,9 @@ func (c *Client) Ensure(ctx context.Context) (err error) {
 			return output.NewError("runtime_start_failed", nil)
 		}
 		supervised, e := Supervised(c.Paths)
+		if errors.Is(e, config.ErrUnsafePath) {
+			return unsafeRuntimeDir(c.Paths, e)
+		}
 		if e != nil {
 			return e
 		}
@@ -151,15 +154,26 @@ func (c *Client) Ensure(ctx context.Context) (err error) {
 }
 
 // unsafeRuntimeDir is err, an unsafe runtime directory or socket. On Linux
-// in desktop mode it becomes unsafe_local_path naming MCPARCEL_RUNTIME_DIR.
+// in desktop mode it becomes unsafe_local_path naming MCPARCEL_RUNTIME_DIR;
+// it still matches err, so config.ErrUnsafePath checks keep working.
 func unsafeRuntimeDir(p config.Paths, err error) error {
 	if runtimeDirAction == "" || p.Headless() {
 		return err
 	}
 	e := output.NewError("unsafe_local_path", nil)
 	e.NextAction = runtimeDirAction
-	return e
+	return &runtimeDirError{safe: e, cause: err}
 }
+
+// runtimeDirError is the safe unsafe_local_path error of an unsafe runtime
+// directory together with its cause.
+type runtimeDirError struct {
+	safe  *output.Error
+	cause error
+}
+
+func (e *runtimeDirError) Error() string   { return e.safe.Error() }
+func (e *runtimeDirError) Unwrap() []error { return []error{e.safe, e.cause} }
 
 func (c *Client) exchange(ctx context.Context, intent string, r Request, ensure bool) (Response, string, error) {
 	return c.exchangeAck(ctx, intent, r, ensure, nil)
@@ -189,8 +203,11 @@ func (c *Client) exchangeAck(ctx context.Context, intent string, r Request, ensu
 	}
 	conn, e := dialSocket(ctx, c.Paths)
 	if e != nil {
-		if ctx.Err() != nil {
+		switch {
+		case ctx.Err() != nil:
 			e = callerError(ctx)
+		case errors.Is(e, config.ErrUnsafePath):
+			e = unsafeRuntimeDir(c.Paths, e)
 		}
 		return out, id, e
 	}

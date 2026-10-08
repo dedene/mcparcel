@@ -67,7 +67,9 @@ func TestE2EServiceAccountProfiles(t *testing.T) {
 		if r.elapsed > 30*time.Second || !strings.Contains(r.stdout, "token from file /etc/mcparcel-secrets/op-token") || strings.Contains(r.stderr, "panic") {
 			t.Fatalf("took %v: %s %s", r.elapsed, r.stdout, r.stderr)
 		}
-		// The unchanged rejected token is answered without a new attempt.
+		// The unchanged rejected token is answered quickly again. Offline, a
+		// first attempt fails fast too, so this does not prove the backoff;
+		// the CLI black-box and unit tests do.
 		again := check(t, call("sa-file"), 3, "auth_failed")
 		if again.elapsed > 10*time.Second {
 			t.Fatalf("retry took %v", again.elapsed)

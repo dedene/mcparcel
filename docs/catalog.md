@@ -118,8 +118,8 @@ Personal definitions may also use `{secret: "env:NAME", prefix?, suffix?}`: the
 daemon resolves NAME at connect time from its captured login environment, falling
 back to the Keychain generic password with service NAME and the login user as
 account (macOS only; Linux has no such fallback). In headless mode it resolves NAME from the daemon's own environment
-only, without a Keychain fallback (runtime.md "Headless mode"); `env:` is then
-the only secret source, since `op://` references are refused. Temporary bridge until 1Password profiles (stage 6). Allowed in stdio env,
+only, without a Keychain fallback (runtime.md "Headless mode"); `op://`
+references work there only through a service-account profile. Temporary bridge until 1Password profiles (stage 6). Allowed in stdio env,
 HTTP headers and the OAuth `clientId`/`clientSecret` fields; protected variable names are
 rejected. A GitHub catalog containing one fails `add`/`sync` with `invalid_catalog`.
 `config validate` checks format only; it does not apply the personal-only rule.
@@ -283,7 +283,9 @@ app, for headless mode, CI and Linux. It takes exactly one of `tokenEnv` and
 - `tokenEnv` names an environment variable that starts with `OP_`, other than
   `OP_CONNECT_TOKEN`; there is no default name. Every `OP_` name is protected:
   no `env:` reference or `inheritEnv` can name it, so the token is never passed
-  to a child process. The runtime reads the variable from its own environment
+  to a child process. Any process that has the variable in its environment
+  still exposes it to its own user (runtime.md "Same uid"); on desktop,
+  `tokenFile` keeps it out of the login session. The runtime reads the variable from its own environment
   map: the login-shell capture in desktop mode, the daemon's environment in
   headless mode ([runtime.md](runtime.md)).
 - `tokenFile` is a clean absolute path of printable ASCII (no `~`). It is not

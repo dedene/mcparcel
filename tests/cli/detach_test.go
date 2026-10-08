@@ -51,8 +51,8 @@ func assertDetached(t *testing.T, daemon, callerSession, callerGroup int) {
 	targets, err := stdioTargets(daemon)
 	if goruntime.GOOS == "linux" {
 		// The daemon cleared PR_SET_DUMPABLE (D20), so /proc hides its
-		// descriptors from this uid too; the callers' pipe and hangup checks
-		// cover the detached stdio.
+		// descriptors from this uid too; TestDaemonSurvivesCallerGroupKill's
+		// stdin, stdout and stderr pipe checks cover the detached stdio.
 		if !errors.Is(err, errNotDumpable) {
 			t.Fatalf("daemon %d descriptors readable (%v): PR_SET_DUMPABLE not cleared", daemon, err)
 		}
@@ -69,8 +69,8 @@ func assertDetached(t *testing.T, daemon, callerSession, callerGroup int) {
 }
 
 // TestDaemonSurvivesCallerGroupKill mimics claw-wrap pipe mode: the CLI runs
-// in its own process group with piped stdout and stderr, and the wrapper
-// kills that group after every run.
+// in its own process group with piped stdin, stdout and stderr, and the
+// wrapper kills that group after every run.
 func TestDaemonSurvivesCallerGroupKill(t *testing.T) {
 	r := newRig(t)
 	r.stdio("fixture", "op://Fixture/api/key")
@@ -87,10 +87,16 @@ func TestDaemonSurvivesCallerGroupKill(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cli.Stdout, cli.Stderr = outW, errW
+	inR, inW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer inW.Close()
+	cli.Stdin, cli.Stdout, cli.Stderr = inR, outW, errW
 	if err = cli.Start(); err != nil {
 		t.Fatal(err)
 	}
+	_ = inR.Close()
 	_ = outW.Close()
 	_ = errW.Close()
 	stdout, stderr := drainPipe(outR), drainPipe(errR)
@@ -106,6 +112,12 @@ func TestDaemonSurvivesCallerGroupKill(t *testing.T) {
 		if lag := ends[i].at.Sub(exited); lag > 2*time.Second {
 			t.Fatalf("pipe %d reached EOF %v after exit", i+1, lag)
 		}
+	}
+	// Nothing holds the read end of the caller's stdin once the CLI is gone:
+	// the daemon took /dev/null, so a write finds no reader. This also holds
+	// on Linux, where /proc hides the daemon's descriptors.
+	if _, err = inW.Write([]byte("x")); !errors.Is(err, syscall.EPIPE) {
+		t.Fatalf("caller stdin still has a reader after the CLI exited (%v)", err)
 	}
 	code := 0
 	if waitErr != nil {

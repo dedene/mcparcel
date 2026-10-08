@@ -43,7 +43,17 @@ func AcquireDaemonLock(ctx context.Context, paths config.Paths) (*os.File, bool,
 	return acquireDaemonLock(ctx, paths, config.OpenPrivateFile)
 }
 
+// acquireDaemonLock's unsafe paths are all in the runtime directory, so they
+// carry its next action.
 func acquireDaemonLock(ctx context.Context, paths config.Paths, open func(*os.File, string, bool) (*os.File, error)) (*os.File, bool, error) {
+	lock, ok, err := acquireRuntimeLock(ctx, paths, open)
+	if errors.Is(err, config.ErrUnsafePath) {
+		err = unsafeRuntimeDir(paths, err)
+	}
+	return lock, ok, err
+}
+
+func acquireRuntimeLock(ctx context.Context, paths config.Paths, open func(*os.File, string, bool) (*os.File, error)) (*os.File, bool, error) {
 	dir, err := config.OpenPrivateDirUnder(paths.StateRoot, paths.RuntimeDir, true)
 	if err != nil {
 		return nil, false, err

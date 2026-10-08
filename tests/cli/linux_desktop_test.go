@@ -46,6 +46,22 @@ func TestKeyringUnreachableLoginBlackBox(t *testing.T) {
 	}
 }
 
+// With a runtime already running, auth login skips the offline keyring
+// pre-check (D14a): the runtime has its own bus, and the login reaches it.
+func TestKeyringUnreachableLoginRunningRuntimeBlackBox(t *testing.T) {
+	r := newOAuthRig(t, testutil.AuthServerOptions{Registration: true}, &config.OAuth{Type: "oauth"})
+	r.call("fixture.counter")
+	pid := r.status().PID
+	r.write(r.paths.StateDir+"/fixture-no-session-bus", "", 0o600)
+	v := r.login(0, "")
+	if strings.Contains(v.stdout, keyringUnreachableText) || !strings.Contains(r.page(), "n is connected") {
+		t.Fatal(v.stdout, r.page())
+	}
+	if r.status().PID != pid {
+		t.Fatal("the login did not use the running runtime")
+	}
+}
+
 func TestNoDesktopAppBlackBox(t *testing.T) {
 	r := newRig(t)
 	token := r.root + "/secrets/op-token"

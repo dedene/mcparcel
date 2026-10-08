@@ -74,9 +74,11 @@ is not supported: those binaries do not know the catalog `minVersion` field and 
 has it. If a saved catalog asks for a newer MCParcel than the one you rolled back
 to, it keeps working, and `doctor` reports it under `version.catalog`.
 
-`0.1.0-rc.1` and earlier do not know the `service-account` credential profile
-mode. If `config.json` has a `service-account` profile, an older MCParcel
-rejects the whole file: every command that reads the configuration fails with
+The `service-account` credential profile mode was added after the `0.1.0-rc.1`
+release candidate of 7 October 2026, before the next version number, so the
+version string does not mark the cut-off: a `0.1.0-rc.1+<commit>` build
+(`mcparcel --version`) may or may not know the mode. If `config.json` has a `service-account` profile, an MCParcel without
+the mode rejects the whole file: every command that reads the configuration fails with
 `invalid_config`. Before you install an older version, remove those profiles
 from `config.json` (and bind their connections to another profile), or keep a
 copy of `config.json` without them to switch to.

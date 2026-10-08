@@ -68,14 +68,14 @@ func NewOnePasswordProvider(version string, o OnePasswordOptions) Provider {
 	var desktop clientFactory
 	if o.DesktopApp {
 		desktop = func(ctx context.Context, account, version string) (SecretClient, error) {
-			return newSDKSecrets(ctx, func() (*onepassword.Client, error) {
+			return newSDKSecrets(ctx, desktopSDKGate, func() (*onepassword.Client, error) {
 				return onepassword.NewClient(ctx, onepassword.WithDesktopAppIntegration(account), onepassword.WithIntegrationInfo("MCParcel", version))
 			})
 		}
 	}
 	env := o.Env
 	p := newOnePasswordProvider(version, desktop, func(ctx context.Context, token, version string) (SecretClient, error) {
-		return newSDKSecrets(ctx, func() (*onepassword.Client, error) {
+		return newSDKSecrets(ctx, tokenSDKGate, func() (*onepassword.Client, error) {
 			return onepassword.NewClient(ctx, onepassword.WithServiceAccountToken(token), onepassword.WithIntegrationInfo("MCParcel", version))
 		})
 	}, func(profile config.Profile) (string, error) { return ServiceAccountToken(profile, env) })
@@ -85,8 +85,8 @@ func NewOnePasswordProvider(version string, o OnePasswordOptions) Provider {
 	return p
 }
 
-func newSDKSecrets(ctx context.Context, create func() (*onepassword.Client, error)) (SecretClient, error) {
-	c, err := constructSDKClient(create)
+func newSDKSecrets(ctx context.Context, gate sdkGate, create func() (*onepassword.Client, error)) (SecretClient, error) {
+	c, err := constructSDKClient(ctx, gate, create)
 	if err != nil {
 		return nil, safeProviderError(ctx, classifySDKError(err))
 	}
@@ -210,10 +210,24 @@ func (c sdkSecretClient) Resolve(ctx context.Context, ref string) (string, error
 	return value, nil
 }
 
-var sdkConstructionMu sync.Mutex
+// sdkGate serializes client construction on one SDK core: GetSharedLibCore
+// (desktop) and GetExtismCore (service-account token) each set their own
+// unsynchronized package global. One gate per core keeps a token bootstrap
+// from waiting behind a desktop authorization prompt, and a waiter gives up
+// when its ctx ends.
+type sdkGate chan struct{}
 
-func constructSDKClient(create func() (*onepassword.Client, error)) (*onepassword.Client, error) {
-	sdkConstructionMu.Lock()
-	defer sdkConstructionMu.Unlock()
+var (
+	desktopSDKGate = make(sdkGate, 1)
+	tokenSDKGate   = make(sdkGate, 1)
+)
+
+func constructSDKClient(ctx context.Context, gate sdkGate, create func() (*onepassword.Client, error)) (*onepassword.Client, error) {
+	select {
+	case gate <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	defer func() { <-gate }()
 	return create()
 }

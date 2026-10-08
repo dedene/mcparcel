@@ -253,3 +253,16 @@ func (s *spyResolver) Invalidate(string, []string)  { s.calls[1]++ }
 func (s *spyResolver) Lock()                        { s.calls[2]++ }
 func (s *spyResolver) Sessions() []auth.SessionInfo { s.calls[3]++; return nil }
 func (s *spyResolver) Close() error                 { s.calls[4]++; return nil }
+
+// A quarantined or closed resolver never sent the token, so its busy error is
+// not reported as a rejected service-account token.
+func TestServiceAccountBusyIsNotRejected(t *testing.T) {
+	p := &pool{}
+	profile := config.Profile{Mode: config.ProfileModeServiceAccount, TokenEnv: "OP_SERVICE_ACCOUNT_TOKEN"}
+	if e := p.serviceAccountError("shared", profile, auth.ErrProviderBusy); e != nil {
+		t.Fatal("busy resolver reported as rejected token:", e)
+	}
+	if e := p.serviceAccountError("shared", profile, auth.ErrProvider); e == nil {
+		t.Fatal("rejected token not named")
+	}
+}

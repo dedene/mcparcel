@@ -163,11 +163,11 @@ func TestOnePasswordRateLimitClassification(t *testing.T) {
 	if _, got := (safeSecretClient{client: inner}).Resolve(context.Background(), "r"); got != ErrRateLimited {
 		t.Fatal("secrets rate limit", got)
 	}
-	_, got := newSDKSecrets(context.Background(), func() (*onepassword.Client, error) { return nil, fmt.Errorf("init: %w", limited) })
+	_, got := newSDKSecrets(context.Background(), tokenSDKGate, func() (*onepassword.Client, error) { return nil, fmt.Errorf("init: %w", limited) })
 	if got != ErrRateLimited {
 		t.Fatal("construction rate limit", got)
 	}
-	_, got = newSDKSecrets(context.Background(), func() (*onepassword.Client, error) { return nil, errors.New("sensitive diagnostic") })
+	_, got = newSDKSecrets(context.Background(), tokenSDKGate, func() (*onepassword.Client, error) { return nil, errors.New("sensitive diagnostic") })
 	if got != ErrProvider {
 		t.Fatal("construction failure", got)
 	}

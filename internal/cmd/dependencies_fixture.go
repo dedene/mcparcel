@@ -78,28 +78,8 @@ func newCredentials(paths config.Paths, _ string, env map[string]string) auth.Re
 		_, err := os.Stat(filepath.Join(paths.StateDir, name))
 		return err == nil
 	}
-	// A desktop profile reads through the desktop client itself and never
-	// reads a bootstrap reference. A service-account profile reads its token
-	// as production does; only FIXTURE-SA-TOKEN is accepted.
-	provider := testutil.FakeProvider{BootstrapFunc: func(ctx context.Context, profile config.Profile) (auth.SecretClient, error) {
-		event := "bootstrap"
-		switch {
-		case profile.PromptFree():
-			token, err := auth.ServiceAccountToken(profile, env)
-			if err != nil {
-				return nil, err
-			}
-			if token != "FIXTURE-SA-TOKEN" {
-				return nil, auth.ErrProvider
-			}
-			event = "bootstrap-token"
-		case profile.Account != "Fixture account":
-			return nil, auth.ErrProvider
-		case profile.Mode == "desktop" && profile.BootstrapRef == "":
-			event = "bootstrap-desktop"
-		case profile.BootstrapRef != "op://Private/fixture/token":
-			return nil, auth.ErrProvider
-		}
+	// boot records a successful bootstrap and returns the fixture client.
+	boot := func(ctx context.Context, event string) (auth.SecretClient, error) {
 		if err := record(event); err != nil {
 			return nil, err
 		}
@@ -150,6 +130,34 @@ func newCredentials(paths config.Paths, _ string, env map[string]string) auth.Re
 			}
 			return value, nil
 		}}, nil
+	}
+	// A service-account profile goes through the real provider, so its token
+	// read and rejected-token backoff are the production ones; only
+	// FIXTURE-SA-TOKEN is accepted, and a refusal is recorded.
+	tokens := auth.NewFixtureTokenProvider(env, func(ctx context.Context, token string) (auth.SecretClient, error) {
+		if token != "FIXTURE-SA-TOKEN" {
+			if err := record("bootstrap-token-rejected"); err != nil {
+				return nil, err
+			}
+			return nil, auth.ErrProvider
+		}
+		return boot(ctx, "bootstrap-token")
+	})
+	// A desktop profile reads through the desktop client itself and never
+	// reads a bootstrap reference.
+	provider := testutil.FakeProvider{BootstrapFunc: func(ctx context.Context, profile config.Profile) (auth.SecretClient, error) {
+		event := "bootstrap"
+		switch {
+		case profile.PromptFree():
+			return tokens.Bootstrap(ctx, profile)
+		case profile.Account != "Fixture account":
+			return nil, auth.ErrProvider
+		case profile.Mode == "desktop" && profile.BootstrapRef == "":
+			event = "bootstrap-desktop"
+		case profile.BootstrapRef != "op://Private/fixture/token":
+			return nil, auth.ErrProvider
+		}
+		return boot(ctx, event)
 	}}
 	return auth.NewResolver(auth.ResolverOptions{Provider: provider})
 }

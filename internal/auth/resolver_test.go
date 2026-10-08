@@ -314,7 +314,7 @@ func TestProviderWatchdog(t *testing.T) {
 			}
 			for range 20 {
 				_, e = r.Resolve(testContext(t), "p", profile, []string{"a"}, false)
-				if !errors.Is(e, auth.ErrProvider) {
+				if !errors.Is(e, auth.ErrProviderBusy) {
 					t.Fatal("not quarantined")
 				}
 			}
@@ -325,7 +325,7 @@ func TestProviderWatchdog(t *testing.T) {
 				t.Fatal(e)
 			}
 			_, e = r.Resolve(testContext(t), "p", profile, nil, false)
-			if !errors.Is(e, auth.ErrProvider) {
+			if !errors.Is(e, auth.ErrProviderBusy) {
 				t.Fatal("closed resolver restarted")
 			}
 		})

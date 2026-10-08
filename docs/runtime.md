@@ -395,7 +395,7 @@ checks is a different deployment and explicitly deferred.
   | Token source | New token takes effect |
   |---|---|
   | `tokenFile` | At the next bootstrap: after the session expires, after a failure (a revoked old token fails, the session ends and the next call reads the new file), after `auth lock`, or after `runtime restart`. |
-  | `tokenEnv` | After `mcparcel runtime restart` (desktop: from a login shell that exports the new value) or, in headless mode, a restart of the process or pod with the new value. `auth lock` alone keeps the old value. |
+  | `tokenEnv` | Desktop: after you change the value where your login shell reads it (for example `~/.profile` or `~/.zprofile`), run `mcparcel runtime restart`; the daemon reads its own login-shell capture, not the caller's environment. Headless: after a restart of the process or pod with the new value. `auth lock` alone keeps the old value. |
 
   Changing `tokenEnv` or `tokenFile` in `config.json` changes the profile, so
   its session ends and its protected processes restart. A token 1Password
@@ -406,14 +406,19 @@ checks is a different deployment and explicitly deferred.
   keyed by an HMAC of the token under a per-process key, not by the token. A missing or empty variable is `config_required` with
   `details.variables`; a missing, unreadable or malformed file
   `config_required`; an unsafe file `unsafe_local_path`. Each stops the
-  connection's process. On Linux the daemon and `runtime serve` mark
-  themselves non-dumpable (`PR_SET_DUMPABLE` 0) before reading any credential,
-  so a same-uid child cannot read the daemon's `/proc/<pid>/environ` or, where
-  Yama allows ptrace, its memory. The flag resets on `execve`, so it does not
-  apply to children.
+  connection's process. On Linux every mcparcel process, the CLI included,
+  marks itself non-dumpable (`PR_SET_DUMPABLE` 0) at start, before reading any
+  credential, so a same-uid child cannot read the `/proc/<pid>/environ` of the
+  daemon or of a CLI waiting on a call or, where Yama allows ptrace, their
+  memory. The flag resets on `execve`, so it does not apply to children.
 - Same uid: stdio MCP servers run as the same user as the daemon and are not
-  isolated from it. They never get the token through their environment, but
-  any of them can read a `tokenFile` that the daemon can read. Give the
+  isolated from it. They never get the token through their environment, and
+  they cannot read it from an mcparcel process. Outside mcparcel the token is
+  as exposed as its source: any of them can read a `tokenFile` that the daemon
+  can read, and a `tokenEnv` value from the environment of any other process
+  of that user that carries it. On desktop that means every process started
+  from a login shell that exports it, the agent included. Prefer `tokenFile`
+  there: it keeps the token out of every program the session starts. Give the
   service account access to the fewest vaults that work, and run stdio servers
   you do not trust under another uid or in their own container.
 - One bootstrap per profile at a time, shared by concurrent callers; only the
@@ -997,7 +1002,7 @@ default shell is `/bin/sh` when `SHELL` is unset. What differs:
   connection, or `auth status <mcp>`, still fails `keychain_unavailable`.
 - No approval dialog: with `runtime.approvalDialog` set, a request that
   would show one is answered `cancel`.
-- Process hardening: the daemon and `runtime serve` mark themselves
+- Process hardening: every mcparcel process, the CLI included, marks itself
   non-dumpable (see "1Password sessions as built").
 - Runtime directory: `$TMPDIR/mcp-<uid>`, or `/tmp/mcp-<uid>` without
   `TMPDIR`. On a shared host another user can create that path first; the

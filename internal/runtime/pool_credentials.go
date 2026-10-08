@@ -80,6 +80,9 @@ func (p *pool) serviceAccountError(id string, profile config.Profile, e error) *
 		return output.ServiceAccountTokenFileError(id, profile.TokenFile)
 	case errors.Is(e, auth.ErrTokenUnsafe):
 		return output.ServiceAccountTokenUnsafeError(id, profile.TokenFile)
+	case errors.Is(e, auth.ErrProviderBusy):
+		// The token was never sent; the generic auth_failed applies.
+		return nil
 	case errors.Is(e, auth.ErrProvider):
 		return output.ServiceAccountRejectedError(id, profile.TokenEnv, profile.TokenFile, p.opts.Headless)
 	}

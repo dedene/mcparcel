@@ -80,8 +80,9 @@ Two setups reap:
   for every container and reaps. It also lets the agent container see the
   sidecar's processes. If both containers run as the same UID, the agent can
   then read `/proc/<pid>/environ` of the MCParcel CLI that claw-wrap runs,
-  which holds `FRONT_CLIENT_SECRET` while it runs. The MCParcel daemon marks
-  itself non-dumpable, which blocks this for the daemon only. claw-wrap's
+  which holds `FRONT_CLIENT_SECRET` while it runs. Every MCParcel process,
+  the CLI included, marks itself non-dumpable, which blocks that read; it
+  does not cover other processes of that UID that carry a secret. claw-wrap's
   guide keeps `shareProcessNamespace: false` for that reason; use this only
   with separate UIDs.
 
@@ -524,11 +525,15 @@ backoff.
 ### Same UID
 
 Stdio MCP servers run as the daemon's user. They never get the token in their
-environment, and on Linux the daemon marks itself non-dumpable, so they
-cannot read it from `/proc/<daemon>/environ` or the daemon's memory either.
-They can read a `tokenFile` that the daemon can read, though. Keep the
-service account's vault access to the minimum, and run stdio servers you do
-not trust under another UID or in their own container.
+environment, and on Linux every MCParcel process, the CLI included, marks
+itself non-dumpable, so they cannot read it from the `/proc/<pid>/environ`
+or memory of the daemon or of a CLI waiting on a call. Outside MCParcel the
+token is as exposed as its source. They can read a `tokenFile` that the
+daemon can read, and a `tokenEnv` value from the environment of any other
+process of that UID that carries it: the process that set it, such as a
+container entrypoint, a shell or a wrapper. Keep the service account's vault
+access to the minimum, and run stdio servers you do not trust under another
+UID or in their own container.
 
 ### Doctor
 
