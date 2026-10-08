@@ -17,9 +17,12 @@ func TestServeParentCancelReportsUnknown(t *testing.T) {
 	h := &daemonHandler{started: make(chan struct{}, 1), release: make(chan struct{})}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	// Take the lock before waitStatus probes it: a probe holds the flock for
+	// a moment, and lockFile's non-blocking attempt would then fail.
+	lock := lockFile(t, p)
 	stopped := make(chan error, 1)
 	go func() {
-		stopped <- Serve(ctx, DaemonOptions{Paths: p, Version: "dev", Lock: lockFile(t, p), LoginEnv: map[string]string{"PATH": "/fixture"}, Handler: h, ShutdownTimeout: time.Second, NoIdleExit: true})
+		stopped <- Serve(ctx, DaemonOptions{Paths: p, Version: "dev", Lock: lock, LoginEnv: map[string]string{"PATH": "/fixture"}, Handler: h, ShutdownTimeout: time.Second, NoIdleExit: true})
 	}()
 	c := &Client{Paths: p, Version: "dev"}
 	waitStatus(t, c)
