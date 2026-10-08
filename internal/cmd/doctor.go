@@ -81,6 +81,7 @@ func doctorInput(ctx context.Context, target string) (doctor.Input, error) {
 		LookupEnv:        func(name string) bool { _, ok := os.LookupEnv(name); return ok },
 		PATH:             os.Getenv("PATH"),
 		Stat:             os.Stat,
+		TokenFile:        config.CheckTokenFile,
 	}
 	paths, err := config.ResolvePaths(os.Getenv, os.Getenv("HOME"), config.DefaultTempDir(), os.Getuid())
 	if err != nil {

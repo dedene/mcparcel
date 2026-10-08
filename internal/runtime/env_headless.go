@@ -85,19 +85,28 @@ func forwardable(name string) bool {
 	return !strings.HasPrefix(name, "XDG_") && !strings.HasPrefix(name, "MCPARCEL_")
 }
 
-// forwardedNamesFor reads the configuration the daemon will serve; when it
-// cannot be read, only the base names are forwarded and the daemon reports
-// the configuration error itself.
-func forwardedNamesFor(p config.Paths) []string {
+// daemonEnvNames are the names a headless daemon keeps from its own
+// environment: ForwardedNames plus the tokenEnv of every service-account
+// profile, which the daemon reads itself and never forwards to a child. It
+// reads the configuration the daemon will serve; when that cannot be read,
+// only the base names are kept and the daemon reports the configuration
+// error itself.
+func daemonEnvNames(p config.Paths) []string {
 	snap, err := config.Load(p)
 	if err != nil {
 		return ForwardedNames(config.Snapshot{})
 	}
-	return ForwardedNames(snap)
+	return daemonEnvNamesOf(snap)
+}
+
+func daemonEnvNamesOf(snap config.Snapshot) []string {
+	names := append(ForwardedNames(snap), config.ProfileTokenNames(snap.Local)...)
+	slices.Sort(names)
+	return slices.Compact(names)
 }
 
 // headlessDaemonEnvironment is the environment the CLI gives a headless
-// daemon it starts: the forwarded names from environ, then HOME and
+// daemon it starts: the daemonEnvNames from environ, then HOME and
 // XDG_CONFIG_HOME, which locate the configuration and always win.
 func headlessDaemonEnvironment(p config.Paths, environ []string, names []string) []string {
 	env := HeadlessEnv(environ, names)
@@ -110,10 +119,11 @@ func headlessDaemonEnvironment(p config.Paths, environ []string, names []string)
 }
 
 // HeadlessDaemonEnv is the headless runtime's environment source: its own
-// environment restricted to the forwarded names of the configuration it
-// serves. It never runs a login shell.
+// environment restricted to daemonEnvNames of the configuration it serves.
+// The auto-started daemon and runtime serve both read it. It never runs a
+// login shell.
 func HeadlessDaemonEnv(p config.Paths) map[string]string {
-	return HeadlessEnv(os.Environ(), forwardedNamesFor(p))
+	return HeadlessEnv(os.Environ(), daemonEnvNames(p))
 }
 
 // headlessMissingEnv is config_required for env: references a headless
@@ -154,8 +164,8 @@ func headlessSignIn(names []string) *output.Error {
 	return err
 }
 
-// headlessResolver stands in for the 1Password resolver in headless mode: it
-// refuses every reference without contacting 1Password.
+// headlessResolver stands in for the 1Password resolver in a headless pool
+// given none: it refuses every reference without contacting 1Password.
 type headlessResolver struct{}
 
 func (headlessResolver) Resolve(context.Context, string, config.Profile, []string, bool) (auth.Lease, error) {

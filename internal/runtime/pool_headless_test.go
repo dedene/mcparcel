@@ -122,7 +122,7 @@ func TestHeadlessOnePasswordRefused(t *testing.T) {
 			r.start()
 			res := r.call(testCtx(t), "front", "counter")
 			responseCode(t, res, "config_required", false)
-			if res.Error.Message != "1Password references need the desktop app and are not available in headless mode." {
+			if res.Error.Message != "This connection's 1Password profile uses the desktop app, which headless mode does not use." {
 				t.Fatal(res.Error.Message)
 			}
 			if r.connects.Load() != 0 {

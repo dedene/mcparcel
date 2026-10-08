@@ -150,11 +150,24 @@ func (s Snapshot) RuntimeConnection(id string) (string, Connection, error) {
 	if c.Transport.HTTP != nil && c.Transport.HTTP.Mode == "sse" || c.Lifecycle != nil && c.Lifecycle.IdleTimeout != "" && c.Lifecycle.IdleTimeout != "session" {
 		return "", Connection{}, ErrRuntimeUnsupported
 	}
-	// Headless mode never contacts 1Password (D10).
-	if s.Local.Headless() && len(SecretRefs(c)) > 0 {
+	// Headless mode reaches 1Password only through a service-account profile,
+	// which never needs the desktop app (D10).
+	if s.Local.Headless() && len(SecretRefs(c)) > 0 && !s.Local.CredentialProfiles[c.CredentialProfile].PromptFree() {
 		return "", Connection{}, ErrHeadlessOnePassword
 	}
 	return canonical, c, nil
+}
+
+// ProfileTokenNames returns the sorted, deduplicated tokenEnv names of l's
+// service-account profiles: the variables a headless daemon must receive.
+func ProfileTokenNames(l Local) []string {
+	set := make(map[string]bool)
+	for _, p := range l.CredentialProfiles {
+		if p.Mode == ProfileModeServiceAccount && p.TokenEnv != "" {
+			set[p.TokenEnv] = true
+		}
+	}
+	return sortedKeys(set)
 }
 
 // SecretRefs returns 1Password references; EnvRefs returns the variable names

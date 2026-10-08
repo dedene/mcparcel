@@ -16,6 +16,9 @@ import (
 type RuntimeServeCmd struct{}
 
 func (c *RuntimeServeCmd) Run(ctx context.Context, s *Streams, opts *CommandOptions) error {
+	// A supervisor's environment may hold a service-account token: no
+	// same-uid child may read it from /proc (D20). runDaemon repeats this.
+	runtimeclient.HardenProcess()
 	paths, err := runtimePaths()
 	if err != nil {
 		return err

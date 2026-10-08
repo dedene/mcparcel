@@ -2132,5 +2132,246 @@
     "syntaxValid": true,
     "schemaValid": true,
     "goValid": true
+  },
+  {
+    "name": "sa-token-env",
+    "document": "config",
+    "raw": "{\"schemaVersion\":1,\"credentialProfiles\":{\"agent\":{\"mode\":\"service-account\",\"tokenEnv\":\"OP_SERVICE_ACCOUNT_TOKEN\",\"sessionDuration\":\"8h\"}}}",
+    "syntaxValid": true,
+    "schemaValid": true,
+    "goValid": true
+  },
+  {
+    "name": "sa-token-file",
+    "document": "config",
+    "raw": "{\"schemaVersion\":1,\"credentialProfiles\":{\"agent\":{\"mode\":\"service-account\",\"tokenFile\":\"/var/run/secrets/mcparcel/op-token\"}}}",
+    "syntaxValid": true,
+    "schemaValid": true,
+    "goValid": true
+  },
+  {
+    "name": "sa-both-sources",
+    "document": "config",
+    "raw": "{\"schemaVersion\":1,\"credentialProfiles\":{\"agent\":{\"mode\":\"service-account\",\"tokenEnv\":\"OP_SERVICE_ACCOUNT_TOKEN\",\"tokenFile\":\"/var/run/secrets/mcparcel/op-token\"}}}",
+    "syntaxValid": true,
+    "schemaValid": false,
+    "goValid": false,
+    "path": "credentialProfiles.agent"
+  },
+  {
+    "name": "sa-no-source",
+    "document": "config",
+    "raw": "{\"schemaVersion\":1,\"credentialProfiles\":{\"agent\":{\"mode\":\"service-account\"}}}",
+    "syntaxValid": true,
+    "schemaValid": false,
+    "goValid": false,
+    "path": "credentialProfiles.agent"
+  },
+  {
+    "name": "sa-account",
+    "document": "config",
+    "raw": "{\"schemaVersion\":1,\"credentialProfiles\":{\"agent\":{\"mode\":\"service-account\",\"account\":\"Fixture\",\"tokenEnv\":\"OP_SERVICE_ACCOUNT_TOKEN\"}}}",
+    "syntaxValid": true,
+    "schemaValid": false,
+    "goValid": false,
+    "path": "credentialProfiles.agent.account"
+  },
+  {
+    "name": "sa-account-empty",
+    "document": "config",
+    "raw": "{\"schemaVersion\":1,\"credentialProfiles\":{\"agent\":{\"mode\":\"service-account\",\"account\":\"\",\"tokenEnv\":\"OP_SERVICE_ACCOUNT_TOKEN\"}}}",
+    "syntaxValid": true,
+    "schemaValid": false,
+    "goValid": false,
+    "path": "credentialProfiles.agent.account"
+  },
+  {
+    "name": "sa-bootstrap-ref",
+    "document": "config",
+    "raw": "{\"schemaVersion\":1,\"credentialProfiles\":{\"agent\":{\"mode\":\"service-account\",\"bootstrapRef\":\"op://fixture/bootstrap/token\",\"tokenFile\":\"/var/run/secrets/mcparcel/op-token\"}}}",
+    "syntaxValid": true,
+    "schemaValid": false,
+    "goValid": false,
+    "path": "credentialProfiles.agent.bootstrapRef"
+  },
+  {
+    "name": "sa-bootstrap-ref-empty",
+    "document": "config",
+    "raw": "{\"schemaVersion\":1,\"credentialProfiles\":{\"agent\":{\"mode\":\"service-account\",\"bootstrapRef\":\"\",\"tokenFile\":\"/var/run/secrets/mcparcel/op-token\"}}}",
+    "syntaxValid": true,
+    "schemaValid": false,
+    "goValid": false,
+    "path": "credentialProfiles.agent.bootstrapRef"
+  },
+  {
+    "name": "sa-env-not-op",
+    "document": "config",
+    "raw": "{\"schemaVersion\":1,\"credentialProfiles\":{\"agent\":{\"mode\":\"service-account\",\"tokenEnv\":\"MY_TOKEN\"}}}",
+    "syntaxValid": true,
+    "schemaValid": false,
+    "goValid": false,
+    "path": "credentialProfiles.agent.tokenEnv"
+  },
+  {
+    "name": "sa-env-prefix-only",
+    "document": "config",
+    "raw": "{\"schemaVersion\":1,\"credentialProfiles\":{\"agent\":{\"mode\":\"service-account\",\"tokenEnv\":\"OP_\"}}}",
+    "syntaxValid": true,
+    "schemaValid": false,
+    "goValid": false,
+    "path": "credentialProfiles.agent.tokenEnv"
+  },
+  {
+    "name": "sa-env-connect",
+    "document": "config",
+    "raw": "{\"schemaVersion\":1,\"credentialProfiles\":{\"agent\":{\"mode\":\"service-account\",\"tokenEnv\":\"OP_CONNECT_TOKEN\"}}}",
+    "syntaxValid": true,
+    "schemaValid": false,
+    "goValid": false,
+    "path": "credentialProfiles.agent.tokenEnv"
+  },
+  {
+    "name": "sa-env-lowercase",
+    "document": "config",
+    "raw": "{\"schemaVersion\":1,\"credentialProfiles\":{\"agent\":{\"mode\":\"service-account\",\"tokenEnv\":\"op_x\"}}}",
+    "syntaxValid": true,
+    "schemaValid": false,
+    "goValid": false,
+    "path": "credentialProfiles.agent.tokenEnv"
+  },
+  {
+    "name": "sa-env-ops",
+    "document": "config",
+    "raw": "{\"schemaVersion\":1,\"credentialProfiles\":{\"agent\":{\"mode\":\"service-account\",\"tokenEnv\":\"ops_SECRET_TOKEN\"}}}",
+    "syntaxValid": true,
+    "schemaValid": false,
+    "goValid": false,
+    "path": "credentialProfiles.agent.tokenEnv"
+  },
+  {
+    "name": "sa-env-dash",
+    "document": "config",
+    "raw": "{\"schemaVersion\":1,\"credentialProfiles\":{\"agent\":{\"mode\":\"service-account\",\"tokenEnv\":\"OP_SA-TOKEN\"}}}",
+    "syntaxValid": true,
+    "schemaValid": false,
+    "goValid": false,
+    "path": "credentialProfiles.agent.tokenEnv"
+  },
+  {
+    "name": "sa-env-empty-with-file",
+    "document": "config",
+    "raw": "{\"schemaVersion\":1,\"credentialProfiles\":{\"agent\":{\"mode\":\"service-account\",\"tokenEnv\":\"\",\"tokenFile\":\"/var/run/secrets/mcparcel/op-token\"}}}",
+    "syntaxValid": true,
+    "schemaValid": false,
+    "goValid": false,
+    "path": "credentialProfiles.agent.tokenEnv"
+  },
+  {
+    "name": "sa-file-empty-with-env",
+    "document": "config",
+    "raw": "{\"schemaVersion\":1,\"credentialProfiles\":{\"agent\":{\"mode\":\"service-account\",\"tokenEnv\":\"OP_SERVICE_ACCOUNT_TOKEN\",\"tokenFile\":\"\"}}}",
+    "syntaxValid": true,
+    "schemaValid": false,
+    "goValid": false,
+    "path": "credentialProfiles.agent.tokenFile"
+  },
+  {
+    "name": "desktop-token-file-empty",
+    "document": "config",
+    "raw": "{\"schemaVersion\":1,\"credentialProfiles\":{\"desk\":{\"mode\":\"desktop\",\"account\":\"Fixture\",\"tokenFile\":\"\"}}}",
+    "syntaxValid": true,
+    "schemaValid": false,
+    "goValid": false,
+    "path": "credentialProfiles.desk.tokenFile"
+  },
+  {
+    "name": "desktop-token-env",
+    "document": "config",
+    "raw": "{\"schemaVersion\":1,\"credentialProfiles\":{\"desk\":{\"mode\":\"desktop\",\"account\":\"Fixture\",\"tokenEnv\":\"OP_SERVICE_ACCOUNT_TOKEN\"}}}",
+    "syntaxValid": true,
+    "schemaValid": false,
+    "goValid": false,
+    "path": "credentialProfiles.desk.tokenEnv"
+  },
+  {
+    "name": "desktop-sa-token-file",
+    "document": "config",
+    "raw": "{\"schemaVersion\":1,\"credentialProfiles\":{\"desk\":{\"mode\":\"desktop-service-account\",\"account\":\"Fixture\",\"bootstrapRef\":\"op://fixture/bootstrap/token\",\"tokenFile\":\"/var/run/secrets/mcparcel/op-token\"}}}",
+    "syntaxValid": true,
+    "schemaValid": false,
+    "goValid": false,
+    "path": "credentialProfiles.desk.tokenFile"
+  },
+  {
+    "name": "sa-file-relative",
+    "document": "config",
+    "raw": "{\"schemaVersion\":1,\"credentialProfiles\":{\"agent\":{\"mode\":\"service-account\",\"tokenFile\":\"op-token\"}}}",
+    "syntaxValid": true,
+    "schemaValid": false,
+    "goValid": false,
+    "path": "credentialProfiles.agent.tokenFile"
+  },
+  {
+    "name": "sa-file-tilde",
+    "document": "config",
+    "raw": "{\"schemaVersion\":1,\"credentialProfiles\":{\"agent\":{\"mode\":\"service-account\",\"tokenFile\":\"~/x\"}}}",
+    "syntaxValid": true,
+    "schemaValid": false,
+    "goValid": false,
+    "path": "credentialProfiles.agent.tokenFile"
+  },
+  {
+    "name": "sa-file-newline",
+    "document": "config",
+    "raw": "{\"schemaVersion\":1,\"credentialProfiles\":{\"agent\":{\"mode\":\"service-account\",\"tokenFile\":\"/run/op\\ntoken\"}}}",
+    "syntaxValid": true,
+    "schemaValid": false,
+    "goValid": false,
+    "path": "credentialProfiles.agent.tokenFile"
+  },
+  {
+    "name": "sa-file-escape",
+    "document": "config",
+    "raw": "{\"schemaVersion\":1,\"credentialProfiles\":{\"agent\":{\"mode\":\"service-account\",\"tokenFile\":\"/run/op\\u001btoken\"}}}",
+    "syntaxValid": true,
+    "schemaValid": false,
+    "goValid": false,
+    "path": "credentialProfiles.agent.tokenFile"
+  },
+  {
+    "name": "sa-file-root",
+    "document": "config",
+    "raw": "{\"schemaVersion\":1,\"credentialProfiles\":{\"agent\":{\"mode\":\"service-account\",\"tokenFile\":\"/\"}}}",
+    "syntaxValid": true,
+    "schemaValid": false,
+    "goValid": false,
+    "path": "credentialProfiles.agent.tokenFile"
+  },
+  {
+    "name": "sa-file-unclean-parent",
+    "document": "config",
+    "raw": "{\"schemaVersion\":1,\"credentialProfiles\":{\"agent\":{\"mode\":\"service-account\",\"tokenFile\":\"/a/../b\"}}}",
+    "syntaxValid": true,
+    "schemaValid": true,
+    "goValid": false,
+    "path": "credentialProfiles.agent.tokenFile"
+  },
+  {
+    "name": "sa-file-unclean-trailing",
+    "document": "config",
+    "raw": "{\"schemaVersion\":1,\"credentialProfiles\":{\"agent\":{\"mode\":\"service-account\",\"tokenFile\":\"/a/\"}}}",
+    "syntaxValid": true,
+    "schemaValid": true,
+    "goValid": false,
+    "path": "credentialProfiles.agent.tokenFile"
+  },
+  {
+    "name": "sa-file-unclean-double",
+    "document": "config",
+    "raw": "{\"schemaVersion\":1,\"credentialProfiles\":{\"agent\":{\"mode\":\"service-account\",\"tokenFile\":\"//a\"}}}",
+    "syntaxValid": true,
+    "schemaValid": true,
+    "goValid": false,
+    "path": "credentialProfiles.agent.tokenFile"
   }
 ]

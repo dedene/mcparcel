@@ -238,7 +238,7 @@ func TestSchemaRejectsUnknownAndDuplicate(t *testing.T) {
 }
 
 func TestSchemaSemanticBoundary(t *testing.T) {
-	remaining := map[string]bool{"undeclared-input": true, "invalid-duration": true, "http-consent": true}
+	remaining := map[string]bool{"undeclared-input": true, "invalid-duration": true, "http-consent": true, "sa-file-unclean-parent": true}
 	for _, c := range schemaCases(t) {
 		if remaining[c.Name] {
 			if !c.SyntaxValid || !c.SchemaValid || c.GoValid || c.Path == "" {
@@ -331,8 +331,9 @@ func TestSchemaFieldCoverage(t *testing.T) {
 		{reflect.TypeFor[SecretRef](), catalog.Defs["HeaderSecretRef"], nil, nil},
 		{reflect.TypeFor[Stdio](), catalog.Defs["Stdio"], []string{"type"}, nil},
 		{reflect.TypeFor[HTTP](), catalog.Defs["HTTP"], []string{"type"}, nil},
-		{reflect.TypeFor[Profile](), local.Defs["ProfileServiceAccount"], nil, nil},
-		{reflect.TypeFor[Profile](), local.Defs["ProfileDesktop"], nil, []string{"bootstrapRef"}},
+		{reflect.TypeFor[Profile](), local.Defs["ProfileServiceAccount"], nil, []string{"tokenEnv", "tokenFile"}},
+		{reflect.TypeFor[Profile](), local.Defs["ProfileDesktop"], nil, []string{"bootstrapRef", "tokenEnv", "tokenFile"}},
+		{reflect.TypeFor[Profile](), local.Defs["ProfileTokenServiceAccount"], nil, []string{"account", "bootstrapRef"}},
 		{reflect.TypeFor[Source](), local.Defs["Source"], nil, nil},
 		{reflect.TypeFor[RuntimeDefaults](), local.Defs["RuntimeDefaults"], nil, nil},
 		{reflect.TypeFor[Selection](), selections.Defs["Selection"], nil, nil},

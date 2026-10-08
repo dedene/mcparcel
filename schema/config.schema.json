@@ -99,6 +99,49 @@
       ],
       "additionalProperties": false
     },
+    "ProfileTokenServiceAccount": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "const": "service-account"
+        },
+        "tokenEnv": {
+          "type": "string",
+          "pattern": "^OP_[A-Za-z0-9_]+$",
+          "not": {
+            "const": "OP_CONNECT_TOKEN"
+          }
+        },
+        "tokenFile": {
+          "type": "string",
+          "pattern": "^/[\\x20-\\x7E]*$",
+          "minLength": 2,
+          "$comment": "MCParcel also validates semantic URL/path/duration/reference rules."
+        },
+        "sessionDuration": {
+          "type": "string",
+          "pattern": "^[^\\x00]*$",
+          "$comment": "MCParcel also validates semantic URL/path/duration/reference rules.",
+          "default": "24h"
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "oneOf": [
+        {
+          "required": [
+            "tokenEnv"
+          ]
+        },
+        {
+          "required": [
+            "tokenFile"
+          ]
+        }
+      ],
+      "additionalProperties": false
+    },
     "Profile": {
       "oneOf": [
         {
@@ -106,6 +149,9 @@
         },
         {
           "$ref": "#/$defs/ProfileDesktop"
+        },
+        {
+          "$ref": "#/$defs/ProfileTokenServiceAccount"
         }
       ]
     },

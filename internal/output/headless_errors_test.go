@@ -24,3 +24,11 @@ func TestHeadlessOnlyError(t *testing.T) {
 		t.Fatal("HeadlessOnlyError changed the registry entry")
 	}
 }
+
+func TestHeadlessOnePasswordError(t *testing.T) {
+	e := HeadlessOnePasswordError()
+	if e.Code != "config_required" || e.Message != "This connection's 1Password profile uses the desktop app, which headless mode does not use." ||
+		e.NextAction != "Bind the connection to a service-account profile (tokenEnv or tokenFile), or use an env: reference." || ExitCode(e) != 2 {
+		t.Fatal(e, ExitCode(e))
+	}
+}

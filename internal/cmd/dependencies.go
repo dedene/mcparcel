@@ -22,8 +22,11 @@ import (
 // headless mode only.
 func desktopSupported() bool { return config.DesktopSupported(runtime.GOOS) }
 
-func newCredentials(_ config.Paths, version string) auth.Resolver {
-	return auth.NewResolver(auth.ResolverOptions{Provider: auth.NewOnePasswordProvider(version)})
+// newCredentials is the 1Password resolver. env is the daemon's login
+// environment, which a service-account profile's tokenEnv is read from;
+// headless mode never wires the desktop app.
+func newCredentials(paths config.Paths, version string, env map[string]string) auth.Resolver {
+	return auth.NewResolver(auth.ResolverOptions{Provider: auth.NewOnePasswordProvider(version, auth.OnePasswordOptions{DesktopApp: !paths.Headless(), Env: env})})
 }
 
 func newKeychain(config.Paths) func(context.Context, string) (string, error) {

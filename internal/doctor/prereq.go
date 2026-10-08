@@ -84,16 +84,20 @@ func installHint(command string, desktop bool) string {
 }
 
 // onePasswordAppCheck is prereq.onepassword: on desktop, when an enabled
-// connection or its bound profile uses an op:// reference, 1Password.app must
-// exist in one of the app directories. It only stats; it never calls the SDK
-// or runs op.
+// connection with an op:// reference is bound to a profile that uses the
+// desktop app, 1Password.app must exist in one of the app directories. A
+// service-account profile needs no app. It only stats; it never calls the
+// SDK or runs op.
 func onePasswordAppCheck(in Input) []output.DoctorCheck {
 	if Mode(in) != config.ModeDesktop || in.Snapshot == nil || in.Snapshot.Effective == nil {
 		return nil
 	}
 	needed := false
 	for _, row := range in.Snapshot.Effective.Connections {
-		if row.Enabled && row.Available && row.Connection != nil && len(onePasswordRefs(in, row.Connection)) > 0 {
+		if !row.Enabled || !row.Available || row.Connection == nil || len(onePasswordRefs(in, row.Connection)) == 0 {
+			continue
+		}
+		if _, p, ok := boundProfile(in, row.Connection); ok && p.UsesDesktopApp() {
 			needed = true
 			break
 		}

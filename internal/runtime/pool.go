@@ -36,9 +36,10 @@ type PoolOptions struct {
 	// ExpiryCheck is how often a protected session's deadline is checked
 	// without a call (default one minute), so a wake from sleep is noticed.
 	ExpiryCheck time.Duration
-	// Headless runs without Keychain, keyring or 1Password: NewPool drops
-	// Keychain and Keyring and refuses every 1Password reference. LoginEnv
-	// is then the daemon's own environment (D11).
+	// Headless runs without Keychain, keyring or the 1Password desktop app:
+	// NewPool drops Keychain and Keyring and refuses every 1Password
+	// reference except through a service-account profile. LoginEnv is then
+	// the daemon's own environment (D11).
 	Headless bool
 }
 type pool struct {
@@ -96,7 +97,7 @@ func NewPool(opts PoolOptions) Handler {
 		opts.ExpiryCheck = time.Minute
 	}
 	if opts.Headless {
-		opts.Keychain, opts.Keyring, opts.Credentials = nil, nil, headlessResolver{}
+		opts.Keychain, opts.Keyring, opts.Credentials = nil, nil, headlessCredentials(opts.Credentials)
 	}
 	login := make(map[string]string, len(opts.LoginEnv))
 	for k, v := range opts.LoginEnv {

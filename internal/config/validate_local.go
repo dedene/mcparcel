@@ -40,17 +40,8 @@ func DecodeLocal(data []byte) (Local, error) {
 		if !identifier.MatchString(id) {
 			return Local{}, fieldError("credentialProfiles", "invalid identifier")
 		}
-		if p.Mode != "desktop-service-account" && p.Mode != "desktop" {
-			return Local{}, fieldError(path+".mode", "invalid profile mode")
-		}
-		if p.Account == "" || strings.ContainsRune(p.Account, 0) {
-			return Local{}, fieldError(path+".account", "nonempty account required")
-		}
-		if p.Mode == "desktop-service-account" && !validRef(p.BootstrapRef) {
-			return Local{}, fieldError(path+".bootstrapRef", "invalid secret reference")
-		}
-		if p.Mode == "desktop" && p.BootstrapRef != "" {
-			return Local{}, fieldError(path+".bootstrapRef", "desktop forbids bootstrapRef")
+		if err := validateProfile(p, path); err != nil {
+			return Local{}, err
 		}
 		if p.SessionDuration == "" {
 			p.SessionDuration = "24h"
@@ -101,6 +92,63 @@ func DecodeLocal(data []byte) (Local, error) {
 		}
 	}
 	return l, nil
+}
+
+// validateProfile applies the value rules of one credential profile at path;
+// the strict decoder already checked which fields are present for its mode.
+func validateProfile(p Profile, path string) error {
+	switch p.Mode {
+	case ProfileModeServiceAccount:
+		if (p.TokenEnv == "") == (p.TokenFile == "") {
+			return fieldError(path, "set exactly one of tokenEnv and tokenFile")
+		}
+		if p.Account != "" {
+			return fieldError(path+".account", "forbidden for service-account")
+		}
+		if p.BootstrapRef != "" {
+			return fieldError(path+".bootstrapRef", "forbidden for service-account")
+		}
+		if p.TokenEnv != "" && !validTokenEnv(p.TokenEnv) {
+			return fieldError(path+".tokenEnv", "must name an OP_ variable such as OP_SERVICE_ACCOUNT_TOKEN")
+		}
+		if p.TokenFile != "" && !validTokenFile(p.TokenFile) {
+			return fieldError(path+".tokenFile", "clean absolute path of printable characters required (no ~)")
+		}
+		return nil
+	case ProfileModeDesktopServiceAccount, ProfileModeDesktop:
+	default:
+		return fieldError(path+".mode", "invalid profile mode (desktop-service-account, desktop or service-account)")
+	}
+	if p.Account == "" || strings.ContainsRune(p.Account, 0) {
+		return fieldError(path+".account", "nonempty account required")
+	}
+	if p.Mode == ProfileModeDesktopServiceAccount && !validRef(p.BootstrapRef) {
+		return fieldError(path+".bootstrapRef", "invalid secret reference")
+	}
+	if p.Mode == ProfileModeDesktop && p.BootstrapRef != "" {
+		return fieldError(path+".bootstrapRef", "desktop forbids bootstrapRef")
+	}
+	if p.TokenEnv != "" {
+		return fieldError(path+".tokenEnv", "forbidden for "+p.Mode)
+	}
+	if p.TokenFile != "" {
+		return fieldError(path+".tokenFile", "forbidden for "+p.Mode)
+	}
+	return nil
+}
+
+// validTokenFile accepts a clean absolute path of printable ASCII, so the path
+// is safe to show in messages; it is never stat'ed while decoding.
+func validTokenFile(path string) bool {
+	if !cleanAbsolute(path) {
+		return false
+	}
+	for i := 0; i < len(path); i++ {
+		if path[i] < 0x20 || path[i] > 0x7e {
+			return false
+		}
+	}
+	return true
 }
 
 func validSourcePath(path string) bool {

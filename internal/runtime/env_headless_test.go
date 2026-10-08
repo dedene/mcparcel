@@ -128,3 +128,62 @@ func TestEnvRefValuesHeadlessMessage(t *testing.T) {
 		t.Fatal(got, e)
 	}
 }
+
+// A service-account profile's tokenEnv reaches the headless daemon, which
+// reads it itself, but is never a forwarded (child-visible) name and never
+// reaches a child.
+func TestHeadlessDaemonKeepsTokenEnv(t *testing.T) {
+	p := headlessPaths(t)
+	writeHeadlessConfig(t, p)
+	local, err := json.Marshal(map[string]any{
+		"schemaVersion": 1, "runtime": map[string]any{"mode": "headless", "stateRoot": p.StateRoot},
+		"credentialProfiles": map[string]any{
+			"ops":  map[string]any{"mode": "service-account", "tokenEnv": "OP_SERVICE_ACCOUNT_TOKEN"},
+			"ops2": map[string]any{"mode": "service-account", "tokenEnv": "OP_SERVICE_ACCOUNT_TOKEN"},
+			"file": map[string]any{"mode": "service-account", "tokenFile": "/run/secrets/op"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(p.ConfigFile, local, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OP_SERVICE_ACCOUNT_TOKEN", "token-canary")
+	t.Setenv("OP_OTHER", "other-canary")
+	snap, err := config.Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := daemonEnvNames(p)
+	if !slices.Contains(names, "OP_SERVICE_ACCOUNT_TOKEN") || !slices.IsSorted(names) || len(slices.Compact(slices.Clone(names))) != len(names) {
+		t.Fatal(names)
+	}
+	if slices.Contains(ForwardedNames(snap), "OP_SERVICE_ACCOUNT_TOKEN") {
+		t.Fatal("token variable is a forwarded name")
+	}
+	daemon := envMap(DaemonEnvironment(p))
+	own := HeadlessDaemonEnv(p)
+	for _, env := range []map[string]string{daemon, own} {
+		if env["OP_SERVICE_ACCOUNT_TOKEN"] != "token-canary" {
+			t.Fatal(env)
+		}
+		if _, ok := env["OP_OTHER"]; ok {
+			t.Fatal("unreferenced OP_ variable kept")
+		}
+	}
+	child, err := BuildChildEnv(own, config.Connection{Transport: config.Transport{Stdio: &config.Stdio{Command: config.Literal("/bin/tool")}}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for k, v := range child {
+		if k == "OP_SERVICE_ACCOUNT_TOKEN" || strings.Contains(v, "token-canary") {
+			t.Fatal("token reached the child environment")
+		}
+	}
+	_, err = BuildChildEnv(own, config.Connection{Transport: config.Transport{Stdio: &config.Stdio{Command: config.Literal("/bin/tool"), InheritEnv: []string{"OP_SERVICE_ACCOUNT_TOKEN"}}}}, nil)
+	var e *output.Error
+	if !errors.As(err, &e) || e.Code != "invalid_config" {
+		t.Fatal("inheritEnv of the token variable:", err)
+	}
+}

@@ -1,6 +1,7 @@
 package doctor
 
 import (
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -66,14 +67,21 @@ func credentialChecks(in Input, row config.EffectiveConnection) []output.DoctorC
 			checks = append(checks, output.DoctorCheck{ID: "credentials.profile", Subject: id, Status: OK, Message: "Bound to profile " + show(name) + " (" + show(p.Mode) + ")."})
 		}
 	}
-	switch Mode(in) {
-	case config.ModeDesktop:
-		if refs := onePasswordRefs(in, c); len(refs) > 0 {
-			checks = append(checks, referenceCheck(id, refs))
-		}
+	mode := Mode(in)
+	if mode != config.ModeDesktop && mode != config.ModeHeadless {
 		return checks
-	case config.ModeHeadless:
-	default:
+	}
+	// Headless mode reaches 1Password only through a service-account
+	// profile; config.connection reports any other.
+	name, p, bound := boundProfile(in, c)
+	serviceAccount := bound && p.PromptFree()
+	if refs := onePasswordRefs(in, c); len(refs) > 0 && (mode == config.ModeDesktop || serviceAccount) {
+		if serviceAccount {
+			checks = append(checks, tokenCheck(in, id, name, p))
+		}
+		checks = append(checks, referenceCheck(id, refs))
+	}
+	if mode == config.ModeDesktop {
 		return checks
 	}
 	if names := config.EnvRefs(*c); len(names) > 0 {
@@ -114,5 +122,44 @@ func envCheck(in Input, id string, names []string) output.DoctorCheck {
 	c.Status = Warn
 	c.Message = fmt.Sprintf("Environment %s %s not set in this shell; the runtime reads its own environment.", plural(len(missing), "variable", "variables"), strings.Join(missing, ", ")+plural(len(missing), " is", " are"))
 	c.NextAction = "Check the env: map of the wrapper that runs mcparcel (headless.md)."
+	return c
+}
+
+// tokenCheck is credentials.token for a connection bound to a service-account
+// profile. It checks the token's presence (tokenEnv) or the file's safety and
+// size (tokenFile), and never reads the token.
+func tokenCheck(in Input, id, name string, p config.Profile) output.DoctorCheck {
+	c := output.DoctorCheck{ID: "credentials.token", Subject: id, Status: OK}
+	if p.TokenEnv != "" {
+		reads := "your login-shell environment"
+		if headless(in) {
+			reads = "its own environment"
+		}
+		set := in.LookupEnv != nil && in.LookupEnv(p.TokenEnv)
+		if set {
+			c.Message = show(p.TokenEnv) + " is set in this shell; the runtime reads " + reads + "."
+			return c
+		}
+		c.Status = Warn
+		c.Message = show(p.TokenEnv) + " is not set in this shell; the runtime reads " + reads + "."
+		c.NextAction = output.ServiceAccountTokenEnvError(name, p.TokenEnv, headless(in)).NextAction
+		return c
+	}
+	check := in.TokenFile
+	if check == nil {
+		check = config.CheckTokenFile
+	}
+	var failure *output.Error
+	switch err := check(p.TokenFile); {
+	case err == nil:
+		c.Message = "Token file " + show(p.TokenFile) + " exists and is private."
+		return c
+	case errors.Is(err, config.ErrUnsafePath):
+		failure = output.ServiceAccountTokenUnsafeError(name, p.TokenFile)
+	default:
+		// Missing, unreadable or empty.
+		failure = output.ServiceAccountTokenFileError(name, p.TokenFile)
+	}
+	c.Status, c.Code, c.Message, c.NextAction = Fail, failure.Code, failure.Message, failure.NextAction
 	return c
 }

@@ -138,15 +138,45 @@ func privateFileStat(st *unix.Stat_t, uid int) error {
 	return nil
 }
 
+// errDanglingLink and errNoAccess say why openResolvedFile could not open a
+// path: a symbolic link without a target, or a component the user may not
+// search or read. OpenConfigFile reports both as ErrUnsafePath.
+var (
+	errDanglingLink = errors.New("dangling symbolic link")
+	errNoAccess     = errors.New("permission denied")
+)
+
 func OpenConfigFile(path string) (*os.File, error) {
+	f, err := openResolvedFile(path, configFileOK)
+	if errors.Is(err, errDanglingLink) || errors.Is(err, errNoAccess) {
+		return nil, ErrUnsafePath
+	}
+	return f, err
+}
+
+// openResolvedFile resolves path's symbolic links once (a Kubernetes volume's
+// ..data layout), walks the resolved directory with openConfigDir's checks and
+// opens the file without following links or blocking; ok decides on its
+// stat. An absent path is os.ErrNotExist, any other failure ErrUnsafePath,
+// errDanglingLink or errNoAccess.
+func openResolvedFile(path string, ok func(st *unix.Stat_t, uid int, readOnly func() bool) bool) (*os.File, error) {
 	_, err := os.Lstat(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, os.ErrNotExist
+	}
+	if errors.Is(err, os.ErrPermission) {
+		return nil, errNoAccess
 	}
 	if err != nil {
 		return nil, ErrUnsafePath
 	}
 	resolved, err := filepath.EvalSymlinks(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, errDanglingLink
+	}
+	if errors.Is(err, os.ErrPermission) {
+		return nil, errNoAccess
+	}
 	if err != nil {
 		return nil, ErrUnsafePath
 	}
@@ -162,11 +192,14 @@ func OpenConfigFile(path string) (*os.File, error) {
 	parts := strings.Split(resolved, "/")
 	next, e := unix.Openat(fd, parts[len(parts)-1], unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
 	_ = dir.Close()
+	if errors.Is(e, unix.EACCES) {
+		return nil, errNoAccess
+	}
 	if e != nil {
 		return nil, ErrUnsafePath
 	}
 	var st unix.Stat_t
-	if unix.Fstat(next, &st) != nil || !configFileOK(&st, os.Getuid(), func() bool { return isReadOnlyMount(next) }) {
+	if unix.Fstat(next, &st) != nil || !ok(&st, os.Getuid(), func() bool { return isReadOnlyMount(next) }) {
 		_ = unix.Close(next)
 		return nil, ErrUnsafePath
 	}

@@ -242,7 +242,8 @@ state and runtime then live under `<stateRoot>/data`, `/cache`, `/state` and
 `/run` (`XDG_DATA_HOME`, `XDG_CACHE_HOME`, `XDG_STATE_HOME` and
 `MCPARCEL_RUNTIME_DIR` no longer apply); the configuration stays at
 `$XDG_CONFIG_HOME/mcparcel` and is read-only (`config_read_only` for every
-write). Linux supports headless mode only. `runtime.supervised: true`
+write). Linux supports headless mode only; there, 1Password works through
+service-account profiles. `runtime.supervised: true`
 (headless only, default `false`) declares that `mcparcel runtime serve` owns
 the runtime, so no CLI auto-starts one ([runtime.md](runtime.md)).
 
@@ -264,11 +265,48 @@ Profile tagged union:
 it reads through the 1Password app itself, which may ask again after the app
 locks, so there is no 24-hour promise and `--no-input` is served only from
 the 5-minute cache (`auth_required` after it).
-An `environment` profile for CI (token from a named env variable) is deferred
-from v1; the union leaves room for it. Both may specify
+`service-account` reads a 1Password service-account token without the desktop
+app, for headless mode, CI and Linux. It takes exactly one of `tokenEnv` and
+`tokenFile`:
+
+```json
+{"mode": "service-account", "tokenEnv": "OP_SERVICE_ACCOUNT_TOKEN", "sessionDuration": "8h"}
+```
+
+```json
+{"mode": "service-account", "tokenFile": "/var/run/secrets/mcparcel/op-token"}
+```
+
+- `account` and `bootstrapRef` are forbidden, even empty: the token alone
+  selects the 1Password account. The desktop modes in turn forbid `tokenEnv`
+  and `tokenFile`.
+- `tokenEnv` names an environment variable that starts with `OP_`, other than
+  `OP_CONNECT_TOKEN`; there is no default name. Every `OP_` name is protected:
+  no `env:` reference or `inheritEnv` can name it, so the token is never passed
+  to a child process. The runtime reads the variable from its own environment
+  map: the login-shell capture in desktop mode, the daemon's environment in
+  headless mode ([runtime.md](runtime.md)).
+- `tokenFile` is a clean absolute path of printable ASCII (no `~`). It is not
+  checked when the configuration is read; the runtime opens it on every
+  bootstrap with the configuration file walk (symbolic links resolved once,
+  so a Kubernetes Secret volume's `..data` layout works). The file must be a
+  regular file owned by the user or by root, at most 16 KiB, holding one token
+  of printable ASCII without inner spaces (surrounding whitespace, such as a
+  trailing newline, is dropped). It is never readable or writable by others,
+  on any mount. Group read or write is accepted only on a read-only mount (a
+  Kubernetes Secret with `defaultMode: 0440` and `fsGroup`); a read-only
+  mount proves the file cannot change, not that the token is private.
+  Anything else is `unsafe_local_path`.
+
+A service-account profile bootstraps without a prompt, so it also works under
+`--no-input` ([runtime.md](runtime.md)). Profiles of every mode may specify
 `sessionDuration` (default `24h`, positive and at most `24h` in v1). Credential
 cache/lease maximum is `5m`; shortening a lease never extends a session. Only local
 config can define profiles. Validate an `op://` bootstrap reference without resolving it.
+
+A `config.json` with a `service-account` profile needs an MCParcel that knows
+the mode. An older MCParcel rejects the file, so every command that reads the
+configuration fails with `invalid_config` ([migration.md](migration.md)).
 
 Selections bind a catalog's `team` requirement to that local profile ID. Different
 catalogs can use different profiles/accounts without trusting a catalog to choose

@@ -209,6 +209,13 @@ func envRefName(ref string) (string, bool) {
 	return name, ok && envName.MatchString(name) && !ProtectedEnv(name)
 }
 
+// validTokenEnv accepts the variable a service-account profile reads its token
+// from: an OP_ name, which ProtectedEnv keeps from every child, other than the
+// Connect token.
+func validTokenEnv(name string) bool {
+	return envName.MatchString(name) && strings.HasPrefix(name, "OP_") && len(name) > 3 && name != "OP_CONNECT_TOKEN"
+}
+
 func validValueRef(ref string) bool { _, ok := envRefName(ref); return ok || validRef(ref) }
 
 func validRef(ref string) bool {
@@ -393,12 +400,27 @@ func checkRequired(v any, typ reflect.Type, path string) error {
 			required = []string{"secret"}
 		case reflect.TypeFor[Profile]():
 			required = []string{"mode", "account"}
-			if obj["mode"] == "desktop-service-account" {
+			// Presence rules per mode, so that "" never slips past the schema.
+			var mode string
+			var forbidden []string
+			switch obj["mode"] {
+			case ProfileModeDesktopServiceAccount:
 				required = append(required, "bootstrapRef")
+				mode, forbidden = ProfileModeDesktopServiceAccount, []string{"tokenEnv", "tokenFile"}
+			case ProfileModeDesktop:
+				mode, forbidden = ProfileModeDesktop, []string{"bootstrapRef", "tokenEnv", "tokenFile"}
+			case ProfileModeServiceAccount:
+				required = []string{"mode"}
+				mode, forbidden = ProfileModeServiceAccount, []string{"account", "bootstrapRef"}
+				for _, key := range []string{"tokenEnv", "tokenFile"} {
+					if text, ok := obj[key].(string); ok && text == "" {
+						return fieldError(path+"."+key, "nonempty value required")
+					}
+				}
 			}
-			if obj["mode"] == "desktop" {
-				if _, ok := obj["bootstrapRef"]; ok {
-					return fieldError(path+".bootstrapRef", "forbidden for desktop")
+			for _, key := range forbidden {
+				if _, ok := obj[key]; ok {
+					return fieldError(path+"."+key, "forbidden for "+mode)
 				}
 			}
 		case reflect.TypeFor[Selection]():

@@ -50,7 +50,8 @@ whose directory differs from the daemon's gets `runtime_config_mismatch` (exit 6
 next action `mcparcel runtime restart`); `restart` and `stop` intents are exempt
 so they always work. One daemon serves one 1Password desktop account for its
 lifetime: a profile naming another account fails with `auth_account_conflict`
-(exit 3) until the runtime restarts.
+(exit 3) until the runtime restarts. Service-account profiles do not count: their
+token selects the account.
 
 Daemon exits after 24 hours with no requests and no active calls, unless
 `runtime.keepAlive` is set and an OAuth session is stored (see OAuth session
@@ -102,7 +103,9 @@ generic password with service NAME and the login user as account
 persisted. A pooled session keeps its value until it reconnects; `runtime restart`
 recaptures the environment and is how a key is rotated. `auth_required` on a
 connection whose only credentials are `env:` references names those variables
-instead of 1Password. Never forward `OP_SERVICE_ACCOUNT_TOKEN`, GitHub credentials
+instead of 1Password. `OP_SERVICE_ACCOUNT_TOKEN` and every other `OP_` variable
+is never passed to a child; in headless mode the daemon receives one only when a
+service-account profile names it in `tokenEnv`. Never forward GitHub credentials
 or other unrelated parent variables. `inheritEnv` cannot override protected credential names.
 Known auth dependencies such as octocode's GitHub access need explicit bindings or
 supported server-owned auth, demonstrated in the 32-server acceptance matrix.
@@ -313,10 +316,13 @@ The bootstrap reference can live in a private vault, but service accounts cannot
 read built-in Personal/Private/Employee vaults. API keys for service-account access
 must live in a suitable explicitly accessible vault. Personal integrations can
 use their own profile/vault. A `desktop` profile is an explicit fallback for keys
-that cannot move, with no promise of 24-hour prompt-free access. An `environment`
-profile for CI is deferred from v1; when added it explicitly names a token env
-variable and is never inferred automatically.
+that cannot move, with no promise of 24-hour prompt-free access. A
+`service-account` profile, for CI, headless mode and Linux, skips the desktop app:
+it reads the token from the `OP_` variable its `tokenEnv` names or from its
+`tokenFile` ([catalog.md](catalog.md#local-state)), and is never inferred from the
+environment.
 `--no-input` forbids both desktop prompts and browser login, returning `auth_required`.
+A service-account bootstrap never prompts, so `--no-input` does not block it.
 
 Expiry uses elapsed time plus a wall deadline; clock rollback cannot extend a
 session. Check before every admission and after sleep/resume. On expiry or
@@ -355,9 +361,12 @@ checks is a different deployment and explicitly deferred.
 ### 1Password sessions as built (stage 6)
 
 - Access goes through the official 1Password Go SDK (`onepassword-sdk-go`
-  v0.4.1) with desktop app integration ("Integrate with other apps" on). No `op`
-  CLI, no subprocess. `OP_SERVICE_ACCOUNT_TOKEN` is never read and never passed
-  to a child.
+  v0.4.1): the desktop modes through desktop app integration ("Integrate with
+  other apps" on), `service-account` through a service-account token, which
+  needs no desktop app and works in the static Linux builds. No `op` CLI, no
+  subprocess. The desktop modes never read `OP_SERVICE_ACCOUNT_TOKEN`; a
+  `service-account` profile reads only the variable its `tokenEnv` names. No
+  `OP_` variable is ever passed to a child.
 - `desktop-service-account`: each bootstrap reads `bootstrapRef` through the
   desktop client (the app may prompt once) and builds the service-account
   client from it. The token is held only inside that SDK client in daemon
@@ -370,11 +379,45 @@ checks is a different deployment and explicitly deferred.
   can prompt, so there is no 24-hour promise and `--no-input` is answered from
   the 5-minute cache only: on a miss it returns `auth_required` without calling
   1Password.
+- `service-account`: each bootstrap reads the token and builds the
+  service-account client from it, without the desktop app and without a
+  prompt, so `--no-input` does not block it. `tokenEnv` is read from the
+  daemon's environment map, the one `env:` references use: the login-shell
+  capture in desktop mode, the daemon's own environment in headless mode.
+  `tokenFile` is opened and read again on every bootstrap, so a replaced file
+  applies to the next session without a restart. The token lives only inside
+  the SDK client, as for `desktop-service-account`. Rotation:
+
+  | Token source | New token takes effect |
+  |---|---|
+  | `tokenFile` | At the next bootstrap: after the session expires, after a failure (a revoked old token fails, the session ends and the next call reads the new file), after `auth lock`, or after `runtime restart`. |
+  | `tokenEnv` | After `mcparcel runtime restart` (desktop: from a login shell that exports the new value) or, in headless mode, a restart of the process or pod with the new value. `auth lock` alone keeps the old value. |
+
+  Changing `tokenEnv` or `tokenFile` in `config.json` changes the profile, so
+  its session ends and its protected processes restart. A token 1Password
+  refuses is not sent again while it is unchanged: the next calls fail
+  `auth_failed` at once for 30 seconds, doubling on each further refusal up to
+  10 minutes. A changed token is tried at once, a success clears the backoff,
+  a rate limit never starts one, and a restart forgets it. The backoff is
+  keyed by an HMAC of the token under a per-process key, not by the token. A missing or empty variable is `config_required` with
+  `details.variables`; a missing, unreadable or malformed file
+  `config_required`; an unsafe file `unsafe_local_path`. Each stops the
+  connection's process. On Linux the daemon and `runtime serve` mark
+  themselves non-dumpable (`PR_SET_DUMPABLE` 0) before reading any credential,
+  so a same-uid child cannot read the daemon's `/proc/<pid>/environ` or, where
+  Yama allows ptrace, its memory. The flag resets on `execve`, so it does not
+  apply to children.
+- Same uid: stdio MCP servers run as the same user as the daemon and are not
+  isolated from it. They never get the token through their environment, but
+  any of them can read a `tokenFile` that the daemon can read. Give the
+  service account access to the fewest vaults that work, and run stdio servers
+  you do not trust under another uid or in their own container.
 - One bootstrap per profile at a time, shared by concurrent callers; only the
   connection's references are read; values are cached for at most 5 minutes;
   the session lasts `sessionDuration` (default and maximum 24 hours) and a
   re-read never extends it. `--no-input` without a session returns
-  `auth_required` (`auth_expired` after an expiry) and calls nothing.
+  `auth_required` (`auth_expired` after an expiry) and calls nothing, except
+  for a `service-account` profile, which bootstraps.
 - Reconnects: each reference has its own version, which goes up when its value
   changes (compared by an HMAC digest under a random per-session key; no value
   is kept past the cache). A lease's identity is the session plus the summed
@@ -388,9 +431,10 @@ checks is a different deployment and explicitly deferred.
 - A rate limit returns `auth_rate_limited` (exit 6) and keeps the session,
   cache and process; nothing is retried within the call. A revoked service
   account or any other provider failure ends the session and stops the
-  connection's process; the next interactive call makes one bootstrap attempt.
-  No retry loop, no identity switch, no stale value. Provider text never
-  reaches an error or the log.
+  connection's process; the next interactive call makes one bootstrap attempt
+  (for a `service-account` profile, any call, after the rejected-token backoff
+  above). No retry loop, no identity switch, no stale value. Provider text
+  never reaches an error or the log.
 - `auth lock` ends every 1Password session and cancels protected work (on
   connections with `op://` references or OAuth): a dispatched call reports
   `outcome_unknown`; a call admitted before the lock that had not reached its
@@ -404,14 +448,21 @@ checks is a different deployment and explicitly deferred.
   entry, and only one admitted after the lock: a sign-in that finishes while
   the lock runs gets `auth_required` and clears nothing. An unreadable file
   counts as all locked. Work admitted after the lock never sees a pre-lock
-  1Password session; it bootstraps again. A 1Password prompt still open
+  1Password session; it bootstraps again. That includes `service-account`
+  profiles: `auth lock` ends their sessions but does not block them, and the
+  next call, also with `--no-input`, bootstraps again from the token without a
+  prompt. To stop a service-account profile, remove it from `config.json`,
+  bind its connections to another profile (`config profile bind`) or disable
+  them, or revoke its token in 1Password. A 1Password prompt still open
   at lock time keeps its call quarantined: the profile's next interactive call
   gets `auth_failed`, not a second prompt, until that call returns.
 - `auth refresh <mcp>` drops the connection's cached values without a provider
   call; the next call reads them through the existing session, without a
   prompt. A read already in flight may still cache what it read.
 - `runtime status` lists `credentialSessions` and `auth status` lists profile
-  rows; neither shows an account, a reference or a value.
+  rows; neither shows an account, a reference or a value. A service-account
+  row in `auth status` shows where its token comes from (`tokenEnv` or
+  `tokenFile`), never the token.
 - Log events: `auth_failed`, `auth_rate_limited`, `auth_locked`,
   `credential_invalidated` and `credential_rotated`, without profile, reference
   or value.
@@ -888,24 +939,33 @@ Kubernetes sidecar. The deployment guide is [headless.md](headless.md).
 - Environment source: no login shell runs. The daemon's own environment is
   the source for `env:` references and `inheritEnv`, restricted to the names
   enabled connections reference plus `PATH`, `HOME`, `TMPDIR`, `LANG`,
-  `LC_ALL` and `USER` (`XDG_*` and `MCPARCEL_*` names are never forwarded). A
-  CLI that starts a headless daemon passes it exactly those variables from its
-  own environment, with `HOME` and `XDG_CONFIG_HOME` pointing at the
-  configuration. There is no Keychain fallback: a missing variable is
+  `LC_ALL` and `USER` (`XDG_*` and `MCPARCEL_*` names are never forwarded).
+  The daemon also keeps the `tokenEnv` variable of every service-account
+  profile, which it reads itself and never passes to a child. A CLI that
+  starts a headless daemon passes it exactly those variables from its own
+  environment, with `HOME` and `XDG_CONFIG_HOME` pointing at the
+  configuration; `runtime serve` keeps the same names from its own
+  environment. There is no Keychain fallback: a missing variable is
   `config_required` with `details.variables` (message "Environment variable
   NAME is not set.", next action to set it and run `mcparcel runtime
   restart`); the error is not cached. `runtime restart` from a caller with new
   values rotates a secret. `runtime status` shows `Environment: daemon
   environment`.
-- No desktop credential source: the daemon constructs no 1Password resolver,
-  no Keychain lookup and no OAuth keyring. An `op://` reference fails
-  `config_required` ("1Password references need the desktop app and are not
-  available in headless mode."). A connection that needs browser sign-in
-  fails `auth_required` ("This server needs sign-in, which headless mode cannot
-  do."), or, when its credentials are `env:` references, names those
-  variables; nothing is written to a Keychain. `auth login` is refused before
-  the runtime starts, `auth status` lists nothing, keep-alive and stay-alive
-  are off. Only `grant: "client_credentials"` gets OAuth tokens (see "OAuth as
+- No desktop credential source: the daemon constructs no Keychain lookup and
+  no OAuth keyring, and its 1Password resolver never uses the desktop app.
+  `op://` references work only through a service-account profile
+  ([headless.md](headless.md#1password-in-headless-mode)); through a desktop
+  profile they fail `config_required` ("This connection's 1Password profile
+  uses the desktop app, which headless mode does not use."), offline in `call`
+  and doctor as well as in the runtime. A connection that needs browser
+  sign-in fails `auth_required` ("This server needs sign-in, which headless
+  mode cannot do."), or, when its credentials are `env:` references, names
+  those variables; nothing is written to a Keychain. `auth login` is refused
+  before the runtime starts. `auth status` lists no sign-ins (`items` is
+  empty), but lists the credential profiles of enabled connections, with
+  their session state from a running daemon. `auth lock` ends service-account
+  sessions, and the next call bootstraps again from the token. Keep-alive and
+  stay-alive are off. Only `grant: "client_credentials"` gets OAuth tokens (see "OAuth as
   built", including the 401 resend of decision D7).
 - No prompts: headless behaves as if `--no-input` were given, with a terminal
   attached and with `runtime.approvalDialog` set: no terminal prompt, no

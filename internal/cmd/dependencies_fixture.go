@@ -26,7 +26,7 @@ import (
 // scenarios also run on Linux; production Linux builds run headless only.
 func desktopSupported() bool { return true }
 
-func newCredentials(paths config.Paths, _ string) auth.Resolver {
+func newCredentials(paths config.Paths, _ string, env map[string]string) auth.Resolver {
 	var mu sync.Mutex
 	record := func(event string) error {
 		mu.Lock()
@@ -54,10 +54,20 @@ func newCredentials(paths config.Paths, _ string) auth.Resolver {
 		return err == nil
 	}
 	// A desktop profile reads through the desktop client itself and never
-	// reads a bootstrap reference.
+	// reads a bootstrap reference. A service-account profile reads its token
+	// as production does; only FIXTURE-SA-TOKEN is accepted.
 	provider := testutil.FakeProvider{BootstrapFunc: func(ctx context.Context, profile config.Profile) (auth.SecretClient, error) {
 		event := "bootstrap"
 		switch {
+		case profile.PromptFree():
+			token, err := auth.ServiceAccountToken(profile, env)
+			if err != nil {
+				return nil, err
+			}
+			if token != "FIXTURE-SA-TOKEN" {
+				return nil, auth.ErrProvider
+			}
+			event = "bootstrap-token"
 		case profile.Account != "Fixture account":
 			return nil, auth.ErrProvider
 		case profile.Mode == "desktop" && profile.BootstrapRef == "":

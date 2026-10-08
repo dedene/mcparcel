@@ -85,35 +85,91 @@ func spyFactories(t *testing.T) *[3]int {
 		return func(context.Context, string) (string, error) { return "", auth.ErrProvider }
 	}
 	keyringFactory = func(config.Paths) auth.Keyring { calls[1]++; return nil }
-	credentialsFactory = func(config.Paths, string) auth.Resolver {
+	credentialsFactory = func(config.Paths, string, map[string]string) auth.Resolver {
 		calls[2]++
 		return auth.NewResolver(auth.ResolverOptions{})
 	}
 	return calls
 }
 
+// Headless mode builds the 1Password resolver, for service-account profiles,
+// but neither the Keychain nor the keyring.
 func TestHeadlessNoKeyringConstructed(t *testing.T) {
 	paths := headlessFront(t)
 	calls := spyFactories(t)
 	opts := daemonPoolOptions(paths, map[string]string{}, io.Discard)
-	if *calls != [3]int{} || !opts.Headless || opts.Keyring != nil || opts.Keychain != nil || opts.Credentials != nil {
+	if *calls != [3]int{0, 0, 1} || !opts.Headless || opts.Keyring != nil || opts.Keychain != nil || opts.Credentials == nil {
 		t.Fatalf("calls %v, options %+v", *calls, opts)
 	}
 	code, stdout, stderr := run(t, "auth", "status", "--json")
-	if code != 0 || stderr != "" || !strings.Contains(stdout, `"items":[]`) {
+	if code != 0 || stderr != "" || !strings.Contains(stdout, `"items":[]`) || !strings.Contains(stdout, `"profiles":[]`) {
 		t.Fatal(code, stdout, stderr)
 	}
 	code, stdout, _ = run(t, "auth", "status")
-	if code != 0 || stdout != "No sign-ins in headless mode.\n" {
+	if code != 0 || !strings.HasPrefix(stdout, "No sign-ins in headless mode.\n") {
 		t.Fatal(code, stdout)
 	}
-	if *calls != [3]int{} {
-		t.Fatal("factory used in headless mode", *calls)
+	if *calls != [3]int{0, 0, 1} {
+		t.Fatal("factory used by auth status", *calls)
 	}
 	desktop := paths
 	desktop.StateRoot = ""
-	if opts = daemonPoolOptions(desktop, map[string]string{}, io.Discard); *calls != [3]int{1, 1, 1} || opts.Headless || opts.Credentials == nil {
+	if opts = daemonPoolOptions(desktop, map[string]string{}, io.Discard); *calls != [3]int{1, 1, 2} || opts.Headless || opts.Credentials == nil {
 		t.Fatal("desktop factories", *calls)
+	}
+}
+
+// The resolver reads service-account tokens from the daemon's environment,
+// in both modes.
+func TestDaemonCredentialsGetLoginEnv(t *testing.T) {
+	paths := headlessFront(t)
+	saved := credentialsFactory
+	t.Cleanup(func() { credentialsFactory = saved })
+	var got []map[string]string
+	credentialsFactory = func(_ config.Paths, _ string, env map[string]string) auth.Resolver {
+		got = append(got, env)
+		return auth.NewResolver(auth.ResolverOptions{})
+	}
+	login := map[string]string{"OP_SERVICE_ACCOUNT_TOKEN": "token-canary"}
+	daemonPoolOptions(paths, login, io.Discard)
+	desktop := paths
+	desktop.StateRoot = ""
+	daemonPoolOptions(desktop, login, io.Discard)
+	if len(got) != 2 || got[0]["OP_SERVICE_ACCOUNT_TOKEN"] != "token-canary" || got[1]["OP_SERVICE_ACCOUNT_TOKEN"] != "token-canary" {
+		t.Fatal(got)
+	}
+}
+
+// Headless auth status lists a bound service-account profile, with where its
+// token comes from and never the token; profiles stays an array.
+func TestHeadlessAuthStatusProfiles(t *testing.T) {
+	paths, _ := headlessEnv(t)
+	personal := `{"schemaVersion":1,"credentialProfiles":{"team":{}},"connections":{
+		"op":{"credentialProfile":"team","transport":{"type":"stdio","command":"/bin/sh","env":{"K":{"secret":"op://v/i/f"}}}}}}`
+	selections := `{"schemaVersion":1,"revision":1,"connections":{"local:op":{"enabled":true,"credentialProfile":"ops"}}}`
+	raw, err := os.ReadFile(paths.ConfigFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	local := strings.Replace(string(raw), `{"runtime"`, `{"credentialProfiles":{"ops":{"mode":"service-account","tokenEnv":"OP_SERVICE_ACCOUNT_TOKEN"}},"runtime"`, 1)
+	if local == string(raw) {
+		t.Fatal("config.json shape changed:", string(raw))
+	}
+	for path, body := range map[string]string{paths.PersonalFile: personal, paths.ConfigFile: local, paths.SelectionsFile: selections} {
+		if err = os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("OP_SERVICE_ACCOUNT_TOKEN", "token-canary")
+	code, stdout, stderr := run(t, "auth", "status", "--json")
+	if code != 0 || stderr != "" || !strings.Contains(stdout, `"items":[]`) ||
+		!strings.Contains(stdout, `"profiles":[{"profile":"ops","mode":"service-account","session":"none","tokenEnv":"OP_SERVICE_ACCOUNT_TOKEN","connections":["local:op"]}]`) ||
+		strings.Contains(stdout, "token-canary") {
+		t.Fatal(code, stdout, stderr)
+	}
+	code, stdout, _ = run(t, "auth", "status")
+	if code != 0 || stdout != "No sign-ins in headless mode.\nprofile ops  service-account  none  token from OP_SERVICE_ACCOUNT_TOKEN\n" {
+		t.Fatal(code, stdout)
 	}
 }
 

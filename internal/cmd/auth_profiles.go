@@ -13,12 +13,15 @@ import (
 )
 
 // authProfileItem is one local credential profile in auth status. It never
-// shows the account, a reference or the bootstrap reference.
+// shows the account, a reference, the bootstrap reference or a token; a
+// service-account profile shows where its token comes from.
 type authProfileItem struct {
 	Profile          string   `json:"profile"`
 	Mode             string   `json:"mode"`
 	Session          string   `json:"session"` // active | expired | none | unknown
 	SessionExpiresAt string   `json:"sessionExpiresAt,omitempty"`
+	TokenEnv         string   `json:"tokenEnv,omitempty"`
+	TokenFile        string   `json:"tokenFile,omitempty"`
 	Connections      []string `json:"connections"`
 }
 
@@ -48,7 +51,11 @@ func profileRows(ctx context.Context, paths config.Paths, snapshot config.Snapsh
 	for _, name := range names {
 		ids := bound[name]
 		slices.Sort(ids)
-		row := authProfileItem{Profile: name, Mode: snapshot.Local.CredentialProfiles[name].Mode, Session: "unknown", Connections: append([]string{}, ids...)}
+		p := snapshot.Local.CredentialProfiles[name]
+		row := authProfileItem{Profile: name, Mode: p.Mode, Session: "unknown", Connections: append([]string{}, ids...)}
+		if p.PromptFree() {
+			row.TokenEnv, row.TokenFile = p.TokenEnv, p.TokenFile
+		}
 		if known {
 			row.Session = "none"
 			if s, ok := sessions[name]; ok {
@@ -81,6 +88,12 @@ func writeProfileRows(b *strings.Builder, rows []authProfileItem) {
 		fmt.Fprintf(b, "profile %s  %s  %s", output.DisplayMetadata(row.Profile), output.DisplayMetadata(row.Mode), row.Session)
 		if row.SessionExpiresAt != "" {
 			fmt.Fprintf(b, "  until %s", row.SessionExpiresAt)
+		}
+		switch {
+		case row.TokenEnv != "":
+			fmt.Fprintf(b, "  token from %s", output.DisplayMetadata(row.TokenEnv))
+		case row.TokenFile != "":
+			fmt.Fprintf(b, "  token from file %s", output.DisplayMetadata(row.TokenFile))
 		}
 		b.WriteString("\n")
 	}

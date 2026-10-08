@@ -186,12 +186,13 @@ func safeSocketStat(st *unix.Stat_t) error {
 }
 
 // DaemonEnvironment is the environment the CLI starts a daemon with. A
-// headless daemon gets the D11 names only (base names and what enabled
-// connections reference) and derives its state directories from
-// config.json's state root, exactly as the CLI did.
+// headless daemon gets the D11 names only (base names, what enabled
+// connections reference and the service-account token variables) and derives
+// its state directories from config.json's state root, exactly as the CLI
+// did.
 func DaemonEnvironment(p config.Paths) []string {
 	if p.Headless() {
-		return headlessDaemonEnvironment(p, os.Environ(), forwardedNamesFor(p))
+		return headlessDaemonEnvironment(p, os.Environ(), daemonEnvNames(p))
 	}
 	env := map[string]string{"HOME": p.Home, "XDG_CONFIG_HOME": filepath.Dir(p.ConfigDir)}
 	env["XDG_DATA_HOME"], env["XDG_CACHE_HOME"], env["XDG_STATE_HOME"], env["MCPARCEL_RUNTIME_DIR"] = filepath.Dir(p.DataDir), filepath.Dir(p.CacheDir), filepath.Dir(p.StateDir), p.RuntimeDir

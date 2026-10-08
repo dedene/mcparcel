@@ -38,8 +38,8 @@ on your machine:
   `enable` and `disable` do the same from scripts.
 - **Personal connections** (a local app such as Paper, a server only you use)
   live next to the catalogs and never touch them.
-- **Credentials** come from 1Password (`op://` references) or environment
-  variables. OAuth sign-ins are stored in the macOS Keychain and refreshed for
+- **Credentials** come from 1Password (`op://` references, through the
+  desktop app or a service-account token) or environment variables. OAuth sign-ins are stored in the macOS Keychain and refreshed for
   you. One 1Password approval covers a work session, so you don't get a
   biometric prompt on every call.
 - A local **runtime** keeps server sessions open between calls, so an agent
@@ -52,8 +52,9 @@ Release candidate `0.1.0-rc.1`. It is used daily, but it is early software:
 - The desktop build runs on **macOS with Apple Silicon** only. The binary is
   ad-hoc signed, not notarized.
 - On **Linux** it runs headless from a static binary, for example as a
-  Kubernetes sidecar. There is no 1Password or Keychain integration there; see
-  [docs/headless.md](docs/headless.md).
+  Kubernetes sidecar. Secrets come from `env:` references or from a 1Password
+  service-account profile; there is no 1Password desktop app or Keychain
+  integration there. See [docs/headless.md](docs/headless.md).
 - It is not published to npm yet. You build and install it from source.
 
 ## Install

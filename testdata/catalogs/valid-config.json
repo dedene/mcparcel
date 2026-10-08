@@ -23,6 +23,15 @@
       "mode": "desktop",
       "account": "Fixture desktop",
       "sessionDuration": "1h"
+    },
+    "agent": {
+      "mode": "service-account",
+      "tokenEnv": "OP_SERVICE_ACCOUNT_TOKEN",
+      "sessionDuration": "8h"
+    },
+    "ci": {
+      "mode": "service-account",
+      "tokenFile": "/var/run/secrets/mcparcel/op-token"
     }
   },
   "aliases": {

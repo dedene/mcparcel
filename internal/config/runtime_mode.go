@@ -28,8 +28,9 @@ func (l Local) Headless() bool { return l.Runtime != nil && l.Runtime.Mode == Mo
 func (p Paths) Headless() bool { return p.StateRoot != "" }
 
 // ErrHeadlessOnePassword is config_required for a connection that needs a
-// 1Password reference in headless mode.
-var ErrHeadlessOnePassword = fmt.Errorf("%w: 1Password references are unavailable in headless mode", ErrConfigRequired)
+// 1Password reference in headless mode through a profile other than a
+// service-account one.
+var ErrHeadlessOnePassword = fmt.Errorf("%w: 1Password desktop-app profiles are unavailable in headless mode", ErrConfigRequired)
 
 // DesktopSupported reports whether desktop mode can run on goos.
 func DesktopSupported(goos string) bool { return goos == "darwin" }

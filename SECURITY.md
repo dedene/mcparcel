@@ -1,8 +1,9 @@
 # Security policy
 
-MCParcel handles credentials: it resolves 1Password references, stores OAuth
-tokens in the macOS Keychain and passes secrets to MCP servers. Reports about
-any of that are welcome.
+MCParcel handles credentials: it resolves 1Password references, reads
+1Password service-account tokens from environment variables and token files,
+stores OAuth tokens in the macOS Keychain and passes secrets to MCP servers.
+Reports about any of that are welcome.
 
 ## Reporting a vulnerability
 
@@ -27,6 +28,8 @@ For example:
 
 - a secret, token or `op://` reference showing up in output, logs, error
   messages or files on disk;
+- a service-account token reaching an MCP server's environment, or a token
+  file that MCParcel accepts although other users can read it;
 - another local user or process reaching the runtime socket, or reading
   MCParcel's state;
 - a catalog from a repository you registered making MCParcel run something

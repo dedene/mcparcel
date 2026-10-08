@@ -58,6 +58,9 @@ func daemonEnvSource(paths config.Paths) func(context.Context) (map[string]strin
 // serve share it, so both apply the same environment, credential, config,
 // peer and version checks.
 func runDaemon(ctx context.Context, paths config.Paths, lock *os.File, log io.Writer, supervised bool) error {
+	// Before any credential is read: no same-uid child may read this
+	// process's environment or memory (D20).
+	runtimeclient.HardenProcess()
 	login, captureErr := daemonEnvSource(paths)(ctx)
 	opts := daemonPoolOptions(paths, login, log)
 	if opts.Credentials != nil {
@@ -69,16 +72,18 @@ func runDaemon(ctx context.Context, paths config.Paths, lock *os.File, log io.Wr
 	return runtimeclient.Serve(ctx, runtimeclient.DaemonOptions{Paths: paths, Version: version, Executable: exe, Lock: lock, LoginEnv: login, EnvFallback: captureErr != nil, Handler: pool, Log: log, IdleTimeout: daemonIdleTimeout(paths), NoIdleExit: supervised, Supervised: supervised})
 }
 
-// The desktop credential sources: 1Password, the Keychain env: fallback and
-// the OAuth keyring. Tests replace them with spies.
+// The credential sources: 1Password, the Keychain env: fallback and the
+// OAuth keyring. Tests replace them with spies.
 var (
 	credentialsFactory = newCredentials
 	keychainFactory    = newKeychain
 	keyringFactory     = newKeyring
 )
 
-// daemonPoolOptions configures the runtime's pool. Headless mode constructs
-// none of the desktop credential sources (D10, D11).
+// daemonPoolOptions configures the runtime's pool. Both modes get the
+// 1Password resolver, which reads service-account tokens from login; headless
+// mode constructs neither the Keychain nor the keyring (D10, D11), and its
+// pool refuses every profile but a service-account one.
 func daemonPoolOptions(paths config.Paths, login map[string]string, log io.Writer) runtimeclient.PoolOptions {
 	opts := runtimeclient.PoolOptions{
 		Paths: paths, LoginEnv: login, Version: version, Health: auth.NewHealth(paths.StateDir, time.Now),
@@ -86,10 +91,11 @@ func daemonPoolOptions(paths config.Paths, login map[string]string, log io.Write
 		SignInFailure: func(stage, code string) { _ = runtimeclient.WriteSignInFailure(log, stage, code) },
 		TokenLog:      func(event string, fields map[string]any) { _ = runtimeclient.WriteTokenEvent(log, event, fields) },
 	}
+	opts.Credentials = credentialsFactory(paths, version, login)
 	if paths.Headless() {
 		opts.Headless = true
 		return opts
 	}
-	opts.Credentials, opts.Keychain, opts.Keyring = credentialsFactory(paths, version), keychainFactory(paths), keyringFactory(paths)
+	opts.Keychain, opts.Keyring = keychainFactory(paths), keyringFactory(paths)
 	return opts
 }

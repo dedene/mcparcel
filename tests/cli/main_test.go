@@ -108,6 +108,8 @@ type rig struct {
 	paths    config.Paths
 	env      []string
 	personal config.Personal
+	profile  config.Profile          // credential profile "shared" in config.json
+	runtime  *config.RuntimeDefaults // config.json runtime; nil is desktop mode
 	pids     map[int]bool
 	closers  []func()
 }
@@ -146,7 +148,7 @@ func newRig(t *testing.T) *rig {
 			t.Fatal(e)
 		}
 	}
-	r := &rig{t: t, root: root, bin: bin, pids: map[int]bool{}, personal: config.Personal{SchemaVersion: 1, Connections: map[string]config.Connection{}, CredentialProfiles: map[string]config.ProfileRequirement{}}}
+	r := &rig{t: t, root: root, bin: bin, pids: map[int]bool{}, profile: config.Profile{Mode: "desktop-service-account", Account: "Fixture account", BootstrapRef: "op://Private/fixture/token", SessionDuration: "24h"}, personal: config.Personal{SchemaVersion: 1, Connections: map[string]config.Connection{}, CredentialProfiles: map[string]config.ProfileRequirement{}}}
 	r.env = []string{"HOME=" + root + "/home", "TMPDIR=" + root + "/tmp", "SHELL=" + root + "/shell", "XDG_CONFIG_HOME=" + root + "/config", "XDG_DATA_HOME=" + root + "/data", "XDG_CACHE_HOME=" + root + "/cache", "XDG_STATE_HOME=" + root + "/state", "MCPARCEL_RUNTIME_DIR=" + root + "/run", "PATH=/usr/bin:/bin:/usr/sbin:/sbin", "LANG=C", "LC_ALL=C", "MCPARCEL_SENTINEL_HOME=" + root + "/sentinel", testutil.RaceExitEnv}
 	r.paths, err = config.ResolvePaths(func(k string) string { return envValue(r.env, k) }, root+"/home", testutil.TempRoot(), os.Getuid())
 	if err != nil {
@@ -275,7 +277,7 @@ func (r *rig) save() {
 		r.t.Fatal(e)
 	}
 	r.write(r.paths.PersonalFile, string(b), 0o600)
-	local := config.Local{SchemaVersion: 1, CredentialProfiles: map[string]config.Profile{"shared": {Mode: "desktop-service-account", Account: "Fixture account", BootstrapRef: "op://Private/fixture/token", SessionDuration: "24h"}}}
+	local := config.Local{SchemaVersion: 1, CredentialProfiles: map[string]config.Profile{"shared": r.profile}, Runtime: r.runtime}
 	b, e = json.Marshal(local)
 	if e != nil {
 		r.t.Fatal(e)

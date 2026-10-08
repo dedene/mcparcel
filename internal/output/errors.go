@@ -124,11 +124,12 @@ func HeadlessOnlyError() *Error {
 }
 
 // HeadlessOnePasswordError is config_required for a 1Password reference in
-// headless mode, which never contacts 1Password.
+// headless mode through a profile other than a service-account one: headless
+// mode never uses the 1Password desktop app.
 func HeadlessOnePasswordError() *Error {
 	err := NewError("config_required", nil)
-	err.Message = "1Password references need the desktop app and are not available in headless mode."
-	err.NextAction = "Use an env: reference for this value in headless mode."
+	err.Message = "This connection's 1Password profile uses the desktop app, which headless mode does not use."
+	err.NextAction = "Bind the connection to a service-account profile (tokenEnv or tokenFile), or use an env: reference."
 	return err
 }
 

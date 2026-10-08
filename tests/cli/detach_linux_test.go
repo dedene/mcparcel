@@ -2,6 +2,7 @@ package cli_test
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -46,11 +47,16 @@ func sessionAndGroup(pid int) (session, group int, err error) {
 	return session, group, err
 }
 
-// stdioTargets returns what pid's descriptors 0, 1 and 2 refer to.
+// stdioTargets returns what pid's descriptors 0, 1 and 2 refer to, or
+// errNotDumpable when /proc/<pid>/fd is not ours to read (PR_SET_DUMPABLE 0
+// makes it root-owned).
 func stdioTargets(pid int) ([]string, error) {
 	targets := make([]string, 3)
 	for fd := range targets {
 		target, err := os.Readlink(fmt.Sprintf("/proc/%d/fd/%d", pid, fd))
+		if errors.Is(err, os.ErrPermission) {
+			return nil, errNotDumpable
+		}
 		if err != nil {
 			return nil, err
 		}

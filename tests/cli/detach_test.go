@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	goruntime "runtime"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -14,6 +15,11 @@ import (
 
 	"golang.org/x/sys/unix"
 )
+
+// errNotDumpable is stdioTargets' answer for a process of this uid whose
+// descriptors the system does not show: on Linux, one that cleared
+// PR_SET_DUMPABLE.
+var errNotDumpable = errors.New("descriptors hidden: process is not dumpable")
 
 type pipeEnd struct {
 	data []byte
@@ -43,6 +49,15 @@ func assertDetached(t *testing.T, daemon, callerSession, callerGroup int) {
 		t.Fatalf("daemon %d session %d group %d; caller session %d group %d", daemon, session, group, callerSession, callerGroup)
 	}
 	targets, err := stdioTargets(daemon)
+	if goruntime.GOOS == "linux" {
+		// The daemon cleared PR_SET_DUMPABLE (D20), so /proc hides its
+		// descriptors from this uid too; the callers' pipe and hangup checks
+		// cover the detached stdio.
+		if !errors.Is(err, errNotDumpable) {
+			t.Fatalf("daemon %d descriptors readable (%v): PR_SET_DUMPABLE not cleared", daemon, err)
+		}
+		return
+	}
 	if err != nil {
 		t.Fatal(err)
 	}

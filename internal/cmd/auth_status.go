@@ -74,11 +74,21 @@ func (c *AuthStatusCmd) Run(ctx context.Context, s *Streams, opts *CommandOption
 		}
 	}
 	if paths.Headless() {
-		// Headless mode stores no sign-in and reads no Keychain (Ruling 3).
-		if opts.JSON {
-			return writeSuccess(s, opts, authStatusData{Items: []authStatusItem{}})
+		// Headless mode stores no sign-in and reads no Keychain (Ruling 3);
+		// its service-account profiles still have sessions.
+		data := authStatusData{Items: []authStatusItem{}, Profiles: []authProfileItem{}}
+		if c.MCP == "" || profile != "" {
+			if rows := profileRows(ctx, paths, snapshot, profile); rows != nil {
+				data.Profiles = rows
+			}
 		}
-		return writeSuccess(s, opts, "No sign-ins in headless mode.\n")
+		if opts.JSON {
+			return writeSuccess(s, opts, data)
+		}
+		var b strings.Builder
+		b.WriteString("No sign-ins in headless mode.\n")
+		writeProfileRows(&b, data.Profiles)
+		return writeSuccess(s, opts, b.String())
 	}
 	keyring := keyringFactory(paths)
 	// An unreadable health file means no history; status still answers.

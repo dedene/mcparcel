@@ -77,6 +77,10 @@ func poolError(err, cause error, id string, dispatched bool) *output.Error {
 			code = "auth_rate_limited"
 		case errors.Is(err, auth.ErrProvider):
 			code = "auth_failed"
+		case errors.Is(err, auth.ErrTokenUnavailable):
+			code = "config_required"
+		case errors.Is(err, auth.ErrTokenUnsafe):
+			code = "unsafe_local_path"
 		case errors.Is(err, context.Canceled):
 			code = "canceled"
 		case errors.Is(err, context.DeadlineExceeded):

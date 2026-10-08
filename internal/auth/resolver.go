@@ -224,10 +224,12 @@ func (r *resolver) Resolve(ctx context.Context, id string, profile config.Profil
 			r.mu.Unlock()
 			return lease, nil
 		}
-		// --no-input never reaches the provider without a session. In desktop
-		// mode the SDK may re-authorize (and prompt) on any read, so --no-input
-		// is served from the cache only.
-		if noInput && (state.client == nil || profile.Mode == "desktop") {
+		// --no-input never reaches the desktop app without a session. In
+		// desktop mode the SDK may re-authorize (and prompt) on any read, so
+		// --no-input is served from the cache only. A service-account token
+		// never prompts, so it bootstraps under --no-input too, also after
+		// Lock.
+		if noInput && !profile.PromptFree() && (state.client == nil || profile.Mode == config.ProfileModeDesktop) {
 			failure := ErrRequired
 			if state.expired {
 				failure = ErrExpired

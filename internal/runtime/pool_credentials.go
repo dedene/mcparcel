@@ -34,9 +34,10 @@ func (p *pool) admitProtected(w *poolWork) error {
 }
 
 // resolveLease resolves a protected connection's lease; the connection's gate
-// is held. A failed or expired session also stops the connection's pooled
-// process, so no old process outlives a failed revalidation. A rate limit
-// keeps it: the provider refused this request only.
+// is held. A failed or expired session, or a service-account token that can
+// no longer be read, also stops the connection's pooled process, so no old
+// process outlives a failed revalidation. A rate limit keeps it: the provider
+// refused this request only.
 func (p *pool) resolveLease(ctx context.Context, canonical string, c config.Connection, profile config.Profile, refs []string, noInput bool) (auth.Lease, error) {
 	authCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
@@ -52,7 +53,7 @@ func (p *pool) resolveLease(ctx context.Context, canonical string, c config.Conn
 		return lease, e
 	}
 	p.opts.Log("auth_failed")
-	if errors.Is(e, auth.ErrProvider) || errors.Is(e, auth.ErrExpired) {
+	if errors.Is(e, auth.ErrProvider) || errors.Is(e, auth.ErrExpired) || errors.Is(e, auth.ErrTokenUnavailable) || errors.Is(e, auth.ErrTokenUnsafe) {
 		p.mu.Lock()
 		entry := p.entries[canonical]
 		p.mu.Unlock()
@@ -60,7 +61,29 @@ func (p *pool) resolveLease(ctx context.Context, canonical string, c config.Conn
 			p.retire(canonical, entry)
 		}
 	}
+	if profile.PromptFree() {
+		if safe := p.serviceAccountError(c.CredentialProfile, profile, e); safe != nil {
+			return lease, safe
+		}
+	}
 	return lease, e
+}
+
+// serviceAccountError names a service-account profile's token source in the
+// errors of its bootstrap: the provider's sentinels carry no profile. It is
+// nil for any other error.
+func (p *pool) serviceAccountError(id string, profile config.Profile, e error) *output.Error {
+	switch {
+	case errors.Is(e, auth.ErrTokenUnavailable) && profile.TokenEnv != "":
+		return output.ServiceAccountTokenEnvError(id, profile.TokenEnv, p.opts.Headless)
+	case errors.Is(e, auth.ErrTokenUnavailable):
+		return output.ServiceAccountTokenFileError(id, profile.TokenFile)
+	case errors.Is(e, auth.ErrTokenUnsafe):
+		return output.ServiceAccountTokenUnsafeError(id, profile.TokenFile)
+	case errors.Is(e, auth.ErrProvider):
+		return output.ServiceAccountRejectedError(id, profile.TokenEnv, profile.TokenFile, p.opts.Headless)
+	}
+	return nil
 }
 
 // lock ends every credential session: protected work is canceled with cause

@@ -1,1 +1,10 @@
-{"schemaVersion": 1, "runtime": {"mode": "headless", "stateRoot": "/var/lib/mcparcel"}}
+{
+  "schemaVersion": 1,
+  "runtime": {"mode": "headless", "stateRoot": "/var/lib/mcparcel"},
+  "credentialProfiles": {
+    "sa-env": {"mode": "service-account", "tokenEnv": "OP_E2E_TOKEN"},
+    "sa-file": {"mode": "service-account", "tokenFile": "/etc/mcparcel-secrets/op-token"},
+    "sa-world": {"mode": "service-account", "tokenFile": "/etc/mcparcel-world/op-token"},
+    "desktop-sa": {"mode": "desktop-service-account", "account": "E2E account", "bootstrapRef": "op://Private/e2e-bootstrap/token"}
+  }
+}

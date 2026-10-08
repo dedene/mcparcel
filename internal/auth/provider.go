@@ -18,6 +18,12 @@ var (
 	ErrRateLimited = errors.New("credential provider rate limited")
 	// ErrLocked is the cause of work canceled by Lock.
 	ErrLocked = errors.New("credentials locked")
+	// ErrTokenUnavailable means a service-account profile's token is not set,
+	// or its token file is missing, unreadable, empty or not a single token.
+	ErrTokenUnavailable = errors.New("service-account token unavailable")
+	// ErrTokenUnsafe means a service-account profile's token file failed the
+	// ownership or permission check.
+	ErrTokenUnsafe = errors.New("service-account token file unsafe")
 )
 
 type SecretClient interface {
@@ -69,6 +75,12 @@ func safeProviderError(ctx context.Context, err error) error {
 	}
 	if errors.Is(err, ErrRateLimited) {
 		return ErrRateLimited
+	}
+	if errors.Is(err, ErrTokenUnavailable) {
+		return ErrTokenUnavailable
+	}
+	if errors.Is(err, ErrTokenUnsafe) {
+		return ErrTokenUnsafe
 	}
 	return ErrProvider
 }

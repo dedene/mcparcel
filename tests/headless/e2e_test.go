@@ -365,14 +365,15 @@ func TestE2EReadOnlyConfigUntouched(t *testing.T) {
 	t.Logf("%s:\n%s", configDir, after)
 }
 
-// TestE2ENoSecretAnywhere runs last: neither the client secret nor any token
-// the fake issued is in a captured output, the daemon log or any file below
-// the state root.
+// TestE2ENoSecretAnywhere runs last: neither the client secret, any token
+// the fake issued nor the garbage service-account token is in a captured
+// output, the daemon log or any file below the state root.
 func TestE2ENoSecretAnywhere(t *testing.T) {
-	secrets := append([]string{clientSecret}, front.issuedTokens()...)
-	if len(secrets) < 3 {
-		t.Fatalf("only %d tokens issued", len(secrets)-1)
+	issued := front.issuedTokens()
+	if len(issued) < 2 {
+		t.Fatalf("only %d tokens issued", len(issued))
 	}
+	secrets := append([]string{clientSecret, garbageToken}, issued...)
 	outputsMu.Lock()
 	texts := slices.Clone(outputs)
 	outputsMu.Unlock()

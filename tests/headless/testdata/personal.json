@@ -1,5 +1,11 @@
 {
   "schemaVersion": 1,
+  "credentialProfiles": {
+    "sa-env": {"description": "Service account, token from OP_E2E_TOKEN (never set)"},
+    "sa-file": {"description": "Service account, garbage token in a Secret-style file"},
+    "sa-world": {"description": "Service account, world-readable token file"},
+    "desktop-sa": {"description": "Desktop-app profile, refused in headless mode"}
+  },
   "connections": {
     "front": {
       "label": "Front",
@@ -16,6 +22,22 @@
         "deny": ["send_message"]
       },
       "callTimeout": "60s"
+    },
+    "sa-env": {
+      "credentialProfile": "sa-env",
+      "transport": {"type": "stdio", "command": "/bin/false", "env": {"API_KEY": {"secret": "op://E2E/api/key"}}}
+    },
+    "sa-file": {
+      "credentialProfile": "sa-file",
+      "transport": {"type": "stdio", "command": "/bin/false", "env": {"API_KEY": {"secret": "op://E2E/api/key"}}}
+    },
+    "sa-world": {
+      "credentialProfile": "sa-world",
+      "transport": {"type": "stdio", "command": "/bin/false", "env": {"API_KEY": {"secret": "op://E2E/api/key"}}}
+    },
+    "desktop-sa": {
+      "credentialProfile": "desktop-sa",
+      "transport": {"type": "stdio", "command": "/bin/false", "env": {"API_KEY": {"secret": "op://E2E/api/key"}}}
     }
   }
 }

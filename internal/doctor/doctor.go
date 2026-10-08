@@ -40,6 +40,9 @@ type Input struct {
 	PATH             string            // this process's PATH
 	Stat             func(string) (fs.FileInfo, error)
 	AppDirs          []string // where 1Password.app may live
+	// TokenFile checks a service-account token file without reading it
+	// (config.CheckTokenFile).
+	TokenFile func(string) error
 }
 
 // Offline returns the offline rows in contract order.
@@ -89,7 +92,7 @@ func Summarize(checks []output.DoctorCheck) output.DoctorSummary {
 // (sorted by subject first), then live.tools.
 var (
 	globalOrder     = []string{"runtime.mode", "runtime.version", "runtime.binary", "storage.dir", "config.file", "config.state", "version.catalog", "config.summary", "prereq.onepassword"}
-	connectionOrder = []string{"config.connection", "credentials.profile", "credentials.reference", "credentials.env", "credentials.oauth", "prereq.command"}
+	connectionOrder = []string{"config.connection", "credentials.profile", "credentials.token", "credentials.reference", "credentials.env", "credentials.oauth", "prereq.command"}
 )
 
 func order(checks []output.DoctorCheck) []output.DoctorCheck {

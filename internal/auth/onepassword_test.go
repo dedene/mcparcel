@@ -21,7 +21,7 @@ func (c localSecretClient) Resolve(ctx context.Context, ref string) (string, err
 }
 
 func TestRealProviderConstructionIsLazy(t *testing.T) {
-	if NewOnePasswordProvider("test") == nil {
+	if NewOnePasswordProvider("test", OnePasswordOptions{}) == nil {
 		t.Fatal("nil provider")
 	}
 }
@@ -54,7 +54,7 @@ func TestOnePasswordSequence(t *testing.T) {
 			return "value", nil
 		}}, nil
 	}
-	p := newOnePasswordProvider("test", desktop, service)
+	p := newOnePasswordProvider("test", desktop, service, nil)
 	c, e := p.Bootstrap(context.Background(), config.Profile{Account: "fixture", BootstrapRef: "bootstrap"})
 	if e != nil {
 		t.Fatal(e)
@@ -86,7 +86,7 @@ func TestOnePasswordBoundaryErrors(t *testing.T) {
 				}
 				return localSecretClient{resolve: func(context.Context, string) (string, error) { return "partial", failure }}, nil
 			}
-			c, e := newOnePasswordProvider("test", desktop, service).Bootstrap(context.Background(), config.Profile{})
+			c, e := newOnePasswordProvider("test", desktop, service, nil).Bootstrap(context.Background(), config.Profile{})
 			if phase == "resolve" {
 				v, err := c.Resolve(context.Background(), "r")
 				if v != "" {
@@ -108,7 +108,7 @@ func TestOnePasswordRejectsDifferentDesktopAccount(t *testing.T) {
 		return localSecretClient{resolve: func(context.Context, string) (string, error) { return "token", nil }}, nil
 	}, func(context.Context, string, string) (SecretClient, error) {
 		return localSecretClient{resolve: func(context.Context, string) (string, error) { return "value", nil }}, nil
-	})
+	}, nil)
 	for range 2 {
 		if _, err := p.Bootstrap(context.Background(), config.Profile{Account: "A"}); err != nil {
 			t.Fatal(err)
@@ -136,7 +136,7 @@ func TestDesktopProfileUsesDesktopClient(t *testing.T) {
 		steps = append(steps, "service-account")
 		return nil, errors.New("service client built")
 	}
-	p := newOnePasswordProvider("test", desktop, service)
+	p := newOnePasswordProvider("test", desktop, service, nil)
 	c, e := p.Bootstrap(context.Background(), config.Profile{Mode: "desktop", Account: "fixture", BootstrapRef: "op://never/read/token"})
 	if e != nil {
 		t.Fatal(e)

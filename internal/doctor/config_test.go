@@ -113,7 +113,8 @@ func TestConnectionRows(t *testing.T) {
 	if len(filterSubject(checks, "local:off")) != 1 {
 		t.Fatal(ids(checks))
 	}
-	// Headless: an op:// reference is a config.connection failure.
+	// Headless: an op:// reference through a desktop profile is a
+	// config.connection failure.
 	h := headlessInput(inputFor(t, docs{
 		personal:   `{"schemaVersion":1,"credentialProfiles":{"team":{}},"connections":{"op":{"credentialProfile":"team","transport":{"type":"stdio","command":"/bin/sh","env":{"K":{"secret":"op://v/i/f"}}}}}}`,
 		local:      `{"schemaVersion":1,"credentialProfiles":{"p":{"mode":"desktop","account":"a"}}}`,
@@ -121,7 +122,7 @@ func TestConnectionRows(t *testing.T) {
 	}))
 	c = find(t, Offline(h), "config.connection", "local:op")
 	want(t, c, Fail, "config_required")
-	if c.Message != "1Password references need the desktop app and are not available in headless mode." {
+	if c.Message != "This connection's 1Password profile uses the desktop app, which headless mode does not use." {
 		t.Fatal(c.Message)
 	}
 }

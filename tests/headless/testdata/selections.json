@@ -1,1 +1,7 @@
-{"schemaVersion": 1, "revision": 1, "connections": {"local:front": {"enabled": true}}}
+{"schemaVersion": 1, "revision": 1, "connections": {
+  "local:front": {"enabled": true},
+  "local:sa-env": {"enabled": true, "credentialProfile": "sa-env"},
+  "local:sa-file": {"enabled": true, "credentialProfile": "sa-file"},
+  "local:sa-world": {"enabled": true, "credentialProfile": "sa-world"},
+  "local:desktop-sa": {"enabled": true, "credentialProfile": "desktop-sa"}
+}}
