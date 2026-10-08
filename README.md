@@ -149,9 +149,11 @@ format, including HTTP servers, OAuth and inputs, is in
 ## Development
 
 ```sh
-make build   # bin/mcparcel
-make test    # unit and CLI tests
-make ci      # format, lint, vet, tests and packaging tests
+make build              # bin/mcparcel
+make test               # unit and CLI tests
+make ci                 # format, lint, vet, tests and packaging tests
+make test-linux         # the test suite in a Linux container (Docker)
+make test-headless-e2e  # headless end-to-end tests in a Linux container (Docker)
 ```
 
 ## License

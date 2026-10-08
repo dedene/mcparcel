@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  ci:
+  macos:
     # make ci builds the ad-hoc signed darwin/arm64 npm binary, so it needs
     # an Apple Silicon runner with codesign.
     runs-on: macos-latest
@@ -27,3 +27,26 @@ jobs:
         with:
           node-version: 24
       - run: make ci
+
+  linux:
+    # Lints and builds the static Linux binaries, then runs the full test
+    # suite in a Linux container as an unprivileged user (tests/linux).
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: make lint-linux
+      - run: make build-linux
+      - run: make test-linux
+
+  headless-e2e:
+    # The pod-shaped headless container (tests/headless). claw-wrap is not
+    # checked out, so TestE2EThroughClawWrap is skipped.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - run: make test-headless-e2e

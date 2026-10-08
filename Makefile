@@ -2,7 +2,7 @@ SHELL := /bin/bash
 
 .DEFAULT_GOAL := build
 
-.PHONY: build build-linux npm-binary npm-pack test test-linux test-headless-e2e test-packaging lint fmt-check vet-linux ci tools
+.PHONY: build build-linux npm-binary npm-pack test test-linux test-headless-e2e test-packaging lint lint-linux fmt-check vet-linux ci tools
 
 BIN := $(CURDIR)/bin/mcparcel
 NPM_BIN := $(CURDIR)/packaging/npm/dist/mcparcel
@@ -91,5 +91,10 @@ vet-linux:
 
 lint: tools
 	@$(GOLANGCI_LINT) run
+
+# The static Linux build, with and without the test fixtures.
+lint-linux: tools
+	@GOOS=linux CGO_ENABLED=0 $(GOLANGCI_LINT) run
+	@GOOS=linux CGO_ENABLED=0 $(GOLANGCI_LINT) run --build-tags mcparceltest
 
 ci: fmt-check lint vet-linux test test-packaging
