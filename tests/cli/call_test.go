@@ -148,7 +148,7 @@ func TestJSONUsageAndHelp(t *testing.T) {
 	r := newRig(t)
 	r.check(r.run("call", "--json"), 2, "invalid_arguments")
 	v := r.run("--help")
-	if v.code != 0 || v.stderr != "" || !strings.Contains(v.stdout, "tools") || !strings.Contains(v.stdout, "runtime") || strings.Contains(v.stdout, "daemon") || strings.Contains(v.stdout, "spike") {
+	if v.code != 0 || v.stderr != "" || !strings.Contains(v.stdout, "tools") || !strings.Contains(v.stdout, "runtime") || strings.Contains(v.stdout, "daemon") || strings.Contains(v.stdout, "signal-wait") {
 		t.Fatalf("help: %+v", v)
 	}
 	v = r.run("version")

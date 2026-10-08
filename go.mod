@@ -8,7 +8,6 @@ require (
 	charm.land/bubbletea/v2 v2.0.10
 	github.com/1password/onepassword-sdk-go v0.4.1
 	github.com/alecthomas/kong v1.16.1
-	github.com/keybase/go-keychain v0.0.1
 	github.com/zalando/go-keyring v0.2.8
 )
 

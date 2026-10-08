@@ -56,7 +56,7 @@ test('arguments containing spaces arrive as one argument', () => {
 });
 
 async function signalWait(signal) {
-  const child = spawn(launcher, ['spike', 'wait'], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(launcher, ['signal-wait'], { env, stdio: ['ignore', 'pipe', 'pipe'] });
   await new Promise((resolve, reject) => {
     child.stdout.once('data', resolve);
     child.once('error', reject);

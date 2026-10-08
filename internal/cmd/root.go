@@ -59,8 +59,8 @@ type CLI struct {
 	// VersionFlag is --version; it prints what the version command prints.
 	VersionFlag versionFlag `name:"version" help:"Print the mcparcel version and exit."`
 
-	// PlatformCommands adds the hidden macOS-only spike command.
-	PlatformCommands `embed:""`
+	// SignalWait is a hidden hook for the npm launcher's signal tests.
+	SignalWait SignalWaitCmd `cmd:"" name:"signal-wait" hidden:"" help:"Print 'ready' and block until interrupted."`
 }
 
 type CommandOptions struct {

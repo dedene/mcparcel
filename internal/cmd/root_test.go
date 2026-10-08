@@ -65,8 +65,8 @@ func TestHelpIsEnglishAndExitsZero(t *testing.T) {
 			t.Errorf("help output missing %q:\n%s", want, stdout)
 		}
 	}
-	if strings.Contains(stdout, "spike") {
-		t.Errorf("help output must not list the hidden spike command:\n%s", stdout)
+	if strings.Contains(stdout, "signal-wait") {
+		t.Errorf("help output must not list the hidden signal-wait command:\n%s", stdout)
 	}
 }
 
@@ -143,7 +143,7 @@ func TestProductHelp(t *testing.T) {
 			t.Errorf("help missing %s: %s", want, stdout)
 		}
 	}
-	if strings.Contains(stdout, "daemon") || strings.Contains(stdout, "spike") {
+	if strings.Contains(stdout, "daemon") || strings.Contains(stdout, "signal-wait") {
 		t.Errorf("hidden commands in help: %s", stdout)
 	}
 }
