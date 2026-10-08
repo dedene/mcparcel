@@ -291,7 +291,9 @@ func (r *rig) start(binary, input string, args ...string) *process {
 
 func (r *rig) startReader(binary string, input io.Reader, args ...string) *process {
 	r.t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
+	// A hang guard, not a speed check: a race-built 3 MiB call takes ~18s on
+	// a fast machine and twice that on a loaded CI runner.
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	r.t.Cleanup(cancel)
 	switch binary {
 	case binaryA:

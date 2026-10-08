@@ -4,6 +4,7 @@ import (
 	"context"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/dedene/mcparcel/internal/auth"
@@ -142,11 +143,29 @@ func TestAuthBothOrderOAuth(t *testing.T) {
 // config_changed, not a half-done renewal.
 func TestAuthConfigChangedBetweenPlanAndGate(t *testing.T) {
 	r, s := ccRig(t, false)
+	// The config may change only after the request planned: Active counts
+	// it before its first load.
+	var armed atomic.Bool
+	planned := make(chan struct{})
+	load := r.opts.Load
+	r.opts.Load = func(paths config.Paths) (config.Snapshot, error) {
+		snapshot, err := load(paths)
+		if armed.CompareAndSwap(true, false) {
+			close(planned)
+		}
+		return snapshot, err
+	}
 	r.start()
 	gate := r.h.(*pool).gate("local:a")
 	<-gate
+	armed.Store(true)
 	ch := make(chan Response, 1)
 	go func() { ch <- r.h.Handle(testCtx(t), testID, authReq("a", false), nil) }()
+	select {
+	case <-planned:
+	case <-testCtx(t).Done():
+		t.Fatal("auth did not load")
+	}
 	awaitActive(t, r.h, 1)
 	c := r.personal.Connections["a"]
 	c.Auth = nil

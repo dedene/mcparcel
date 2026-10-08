@@ -156,7 +156,9 @@ func TestTimeoutBeforeAndAfterDispatch(t *testing.T) {
 	responseCode(t, response(t, queued), "timeout", false)
 	cancel()
 	responseCode(t, response(t, first), "canceled", true)
-	req := Request{Method: "call", Connection: "a", Tool: "wait", Timeout: "50ms", Arguments: emptyArgs()}
+	// wait blocks until release, so the timeout always fires after dispatch;
+	// it only has to outlast the reconnect, which a loaded runner slows.
+	req := Request{Method: "call", Connection: "a", Tool: "wait", Timeout: "1s", Arguments: emptyArgs()}
 	responseCode(t, r.h.Handle(testCtx(t), testID, req, nil), "outcome_unknown", true)
 }
 
