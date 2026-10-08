@@ -10,6 +10,7 @@ import (
 	"github.com/dedene/mcparcel/internal/auth"
 	"github.com/dedene/mcparcel/internal/config"
 	"github.com/dedene/mcparcel/internal/output"
+	runtimeclient "github.com/dedene/mcparcel/internal/runtime"
 	"github.com/dedene/mcparcel/internal/testutil"
 )
 
@@ -93,16 +94,16 @@ func TestAuthStatusKeyringErrorListingOnly(t *testing.T) {
 	}
 }
 
-// Without a reachable keyring and with no runtime running, auth login is
-// refused offline: no runtime starts and nothing is written.
-func TestAuthLoginKeyringUnreachable(t *testing.T) {
+// Without a reachable keyring and with no runtime running, a sign-in through
+// auth <mcp> is refused offline: no runtime starts and nothing is written.
+func TestAuthSignInKeyringUnreachable(t *testing.T) {
 	paths := keyringEnv(t, openPersonal, nil)
 	saved := keyringReachableCheck
 	t.Cleanup(func() { keyringReachableCheck = saved })
 	keyringReachableCheck = func(config.Paths) bool { return false }
 	want := output.KeyringUnreachableError()
 	for _, name := range []string{"code", "open"} {
-		code, stdout, stderr := run(t, "auth", "login", name, "--json")
+		code, stdout, stderr := run(t, "auth", name, "--json")
 		if e := envelopeError(t, stdout); code != 3 || e.Code != "keychain_unavailable" || e.Message != want.Message || e.NextAction != want.NextAction || strings.Contains(stderr, "browser") {
 			t.Fatal(code, stdout, stderr)
 		}
@@ -110,5 +111,26 @@ func TestAuthLoginKeyringUnreachable(t *testing.T) {
 	noRuntime(t, paths)
 	if entries, err := os.ReadDir(paths.StateDir); err == nil && len(entries) > 0 {
 		t.Fatal("state written", entries)
+	}
+}
+
+// The keyring refusal applies to a sign-in only: a client_credentials
+// connection never needs a keyring and goes on to the runtime.
+func TestAuthClientCredentialsIgnoresKeyring(t *testing.T) {
+	ccEnv(t, false)
+	saved, savedClient := keyringReachableCheck, authRuntimeClient
+	t.Cleanup(func() { keyringReachableCheck, authRuntimeClient = saved, savedClient })
+	keyringReachableCheck = func(config.Paths) bool {
+		t.Error("keyring checked for a client_credentials connection")
+		return false
+	}
+	reached := false
+	authRuntimeClient = func(*CommandOptions) (*runtimeclient.Client, error) {
+		reached = true
+		return nil, output.NewError("runtime_start_failed", nil)
+	}
+	code, stdout, _ := run(t, "auth", "front", "--json")
+	if e := envelopeError(t, stdout); !reached || e.Code != "runtime_start_failed" || code == 0 {
+		t.Fatal(code, stdout)
 	}
 }

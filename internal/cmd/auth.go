@@ -8,21 +8,25 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/dedene/mcparcel/internal/auth"
 	"github.com/dedene/mcparcel/internal/config"
 	"github.com/dedene/mcparcel/internal/output"
 	runtimeclient "github.com/dedene/mcparcel/internal/runtime"
 )
 
 type AuthCmd struct {
-	Login   AuthLoginCmd   `cmd:"" help:"Sign in to an HTTP connection in the browser."`
-	Status  AuthStatusCmd  `cmd:"" help:"Show stored sign-in and 1Password session state without contacting servers."`
-	Logout  AuthLogoutCmd  `cmd:"" help:"Remove the stored sign-in for a connection."`
-	Lock    AuthLockCmd    `cmd:"" help:"End 1Password sessions and block stored sign-ins until the next auth login."`
-	Refresh AuthRefreshCmd `cmd:"" help:"Read a connection's 1Password secrets again on its next call."`
+	MCP    AuthMCPCmd    `arg:"" help:"Make a connection's credentials fresh: sign in again, read its 1Password secrets again or get a new client-credentials token."`
+	Status AuthStatusCmd `cmd:"" help:"Show stored sign-in and 1Password session state without contacting servers."`
+	Logout AuthLogoutCmd `cmd:"" help:"Remove the stored sign-in for a connection."`
+	Lock   AuthLockCmd   `cmd:"" help:"End 1Password sessions and block stored sign-ins until the next mcparcel auth <mcp>."`
 }
 type (
-	AuthLoginCmd struct {
-		MCP string `arg:"" required:"" help:"Connection to sign in to."`
+	// AuthMCPCmd is auth <mcp>, a branching argument: kong tries the
+	// subcommands first, so a connection named status, logout or lock is
+	// reached by its canonical ID. Its first positional must carry the
+	// parent field's name.
+	AuthMCPCmd struct {
+		MCP string `arg:"" help:"Connection whose credentials to make fresh."`
 	}
 	AuthStatusCmd struct {
 		MCP string `arg:"" optional:"" help:"Connection to show; when omitted, OAuth connections, signed-in ones and ones whose server asked for sign-in."`
@@ -30,40 +34,49 @@ type (
 	AuthLogoutCmd struct {
 		MCP string `arg:"" required:"" help:"Connection whose stored sign-in to remove."`
 	}
-	AuthLockCmd    struct{}
-	AuthRefreshCmd struct {
-		MCP string `arg:"" required:"" help:"Connection whose cached 1Password values to drop."`
-	}
+	AuthLockCmd struct{}
 )
 
-// keyringReachableCheck is keyringReachable; tests replace it.
-var keyringReachableCheck = keyringReachable
+// keyringReachableCheck is keyringReachable and authRuntimeClient is
+// newRuntimeClient; tests replace them.
+var (
+	keyringReachableCheck = keyringReachable
+	authRuntimeClient     = newRuntimeClient
+)
 
-// Run sends the login to the runtime, which checks the connection before it
-// honors --no-input. A client_credentials connection, any connection in
-// headless mode and, when no runtime runs, a session without a reachable
-// keyring (Linux without a session bus) are refused offline: no runtime
-// starts.
-func (c *AuthLoginCmd) Run(ctx context.Context, s *Streams, opts *CommandOptions) error {
+// Run makes the connection's credentials fresh through the runtime, which it
+// starts if needed: 1Password values are read again first, then a browser
+// sign-in or a new client_credentials token follows. Every deterministic
+// refusal comes first, offline: a connection with nothing to authenticate, a
+// sign-in in headless mode or under --no-input and, when no runtime runs, a
+// sign-in without a reachable keyring (Linux without a session bus).
+func (c *AuthMCPCmd) Run(ctx context.Context, s *Streams, opts *CommandOptions) error {
 	paths, err := runtimePaths()
 	if err != nil {
 		return err
 	}
-	if _, conn, err := authTarget(paths, c.MCP); err != nil {
+	snapshot, err := config.Load(paths)
+	if err != nil {
 		return err
-	} else if clientCredentialsConn(conn) {
-		return nothingToSignIn(c.MCP)
 	}
-	if paths.Headless() {
-		return runtimeclient.HeadlessSignIn()
+	plan, err := runtimeclient.PlanAuth(snapshot, c.MCP)
+	if err != nil {
+		return err
 	}
-	if !keyringReachableCheck(paths) && !daemonRunning(ctx, paths) {
-		// The runtime this login would start inherits this session's bus,
-		// which reaches no keyring. A running runtime has its own, which its
-		// login preflight checks.
-		return output.KeyringUnreachableError()
+	if plan.SignIn {
+		switch {
+		case paths.Headless():
+			return runtimeclient.HeadlessSignIn()
+		case opts.NoInput:
+			return auth.SignInNeedsInput(c.MCP, plan.Canonical)
+		case !keyringReachableCheck(paths) && !daemonRunning(ctx, paths):
+			// The runtime this sign-in would start inherits this session's
+			// bus, which reaches no keyring. A running runtime has its own,
+			// which its sign-in preflight checks.
+			return output.KeyringUnreachableError()
+		}
 	}
-	client, err := newRuntimeClient(opts)
+	client, err := authRuntimeClient(opts)
 	if err != nil {
 		return err
 	}
@@ -75,17 +88,33 @@ func (c *AuthLoginCmd) Run(ctx context.Context, s *Streams, opts *CommandOptions
 			_ = open(ctx, u)
 		}
 	}
-	data, err := client.Login(ctx, c.MCP)
+	data, err := client.Auth(ctx, c.MCP)
 	if err != nil {
 		return err
 	}
 	if opts.JSON {
 		return writeSuccess(s, opts, data)
 	}
-	if !data.SignedIn {
-		return writeSuccess(s, opts, c.MCP+" did not ask for sign-in. Nothing was stored.\n")
+	return writeSuccess(s, opts, authLines(c.MCP, data))
+}
+
+// authLines is auth <mcp>'s human output: one line per step, in step order.
+func authLines(name string, data runtimeclient.AuthData) string {
+	var b strings.Builder
+	if data.SecretsRefreshed != nil && *data.SecretsRefreshed {
+		b.WriteString("Read the 1Password secrets for " + name + " again.\n")
 	}
-	return writeSuccess(s, opts, "Signed in to "+c.MCP+".\n")
+	if data.SignedIn != nil {
+		if *data.SignedIn {
+			b.WriteString("Signed in to " + name + ".\n")
+		} else {
+			b.WriteString(name + " did not ask for sign-in. Nothing was stored.\n")
+		}
+	}
+	if data.TokenRenewed != nil && *data.TokenRenewed {
+		b.WriteString("Got a new access token for " + name + ".\n")
+	}
+	return b.String()
 }
 
 // Run removes the item through the runtime, which first stops the
@@ -131,16 +160,6 @@ func daemonRunning(ctx context.Context, paths config.Paths) bool {
 	return err == nil && status.Running && status.Compatible
 }
 
-// canonicalConnection resolves a name or alias to its canonical ID; a
-// canonical ID is taken as is, so a removed connection can still be named.
-func canonicalConnection(paths config.Paths, name string) (string, error) {
-	if strings.Contains(name, ":") && config.ValidateCanonicalID(name) == nil {
-		return name, nil
-	}
-	id, _, err := authTarget(paths, name)
-	return id, err
-}
-
 // Run ends every credential session through the runtime, which it starts if
 // needed: the daemon is the only writer of the OAuth lock.
 func (c *AuthLockCmd) Run(ctx context.Context, s *Streams, opts *CommandOptions) error {
@@ -155,43 +174,7 @@ func (c *AuthLockCmd) Run(ctx context.Context, s *Streams, opts *CommandOptions)
 	if opts.JSON {
 		return writeSuccess(s, opts, data)
 	}
-	return writeSuccess(s, opts, "Locked. 1Password sessions ended; signed-in connections need mcparcel auth login.\n")
-}
-
-// Run drops the connection's cached 1Password values; it never starts the
-// runtime. The connection is checked first, so a connection without op://
-// references fails whether or not the runtime runs.
-func (c *AuthRefreshCmd) Run(ctx context.Context, s *Streams, opts *CommandOptions) error {
-	paths, err := runtimePaths()
-	if err != nil {
-		return err
-	}
-	canonical, err := canonicalConnection(paths, c.MCP)
-	if err != nil {
-		return err
-	}
-	snapshot, err := config.Load(paths)
-	if err != nil {
-		return err
-	}
-	if _, _, _, err = runtimeclient.RefreshTarget(snapshot, canonical); err != nil {
-		return err
-	}
-	client, err := newRuntimeClient(opts)
-	if err != nil {
-		return err
-	}
-	data, err := client.Refresh(ctx, canonical)
-	if err != nil {
-		return err
-	}
-	if opts.JSON {
-		return writeSuccess(s, opts, data)
-	}
-	if !data.Invalidated {
-		return writeSuccess(s, opts, c.MCP+": nothing cached; the runtime is not running.\n")
-	}
-	return writeSuccess(s, opts, c.MCP+": the next call reads its 1Password secrets again.\n")
+	return writeSuccess(s, opts, "Locked. 1Password sessions ended; signed-in connections need mcparcel auth <mcp>.\n")
 }
 
 // authTarget resolves name offline to its canonical ID and connection, which

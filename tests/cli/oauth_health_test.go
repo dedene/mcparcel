@@ -49,7 +49,7 @@ func TestAuthStatusExplainsRevokedRefreshBlackBox(t *testing.T) {
 	r.check(r.run("call", "n.echo", "text=hi", "--json"), 3, "auth_required")
 	items := r.sessionStatus("n")
 	if len(items) != 1 || items[0].State != "sign-in required" || items[0].SignedIn || items[0].Cause == nil ||
-		items[0].Cause.Code != "refresh_expired_or_revoked" || items[0].NextAction != "mcparcel auth login n" || items[0].LastRefreshAt == "" {
+		items[0].Cause.Code != "refresh_expired_or_revoked" || items[0].NextAction != "mcparcel auth n" || items[0].LastRefreshAt == "" {
 		t.Fatalf("%+v", items)
 	}
 	events := items[0].Events
@@ -98,7 +98,7 @@ func TestAuthStatusOneWordStatesBlackBox(t *testing.T) {
 		t.Fatalf("%q", human.stdout)
 	}
 	r.login(0, "")
-	v := r.run("auth", "login", "o", "--json")
+	v := r.run("auth", "o", "--json")
 	v.stderr = "" // the authorization URL
 	r.check(v, 0, "")
 	items := r.sessionStatus()

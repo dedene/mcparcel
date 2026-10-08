@@ -3,6 +3,8 @@ package auth
 import (
 	"fmt"
 	"time"
+
+	"github.com/dedene/mcparcel/internal/output"
 )
 
 // SessionInput is what auth status knows about one connection: its Keychain
@@ -74,7 +76,7 @@ func ExplainSession(in SessionInput) SessionReport {
 	switch {
 	case !signedIn:
 		r.State = StateSignInRequired
-		r.NextAction = "mcparcel auth login " + in.Name
+		r.NextAction = output.AuthAction(in.Name, in.Connection)
 	case refreshExpiry != 0 && refreshExpiry-in.Now.Unix() < int64(expiringWithin/time.Second),
 		r.Cause != nil && r.Cause.Code == "refresh_failing":
 		r.State = StateExpiring

@@ -86,7 +86,7 @@ func (p *pool) oauthHandler(ctx context.Context, id, name string, c config.Conne
 		if e != nil && !errors.Is(e, auth.ErrNoSession) {
 			return nil, output.NewError("keychain_unavailable", nil)
 		}
-		return nil, auth.NotSignedIn(name)
+		return nil, auth.NotSignedIn(name, id)
 	}
 	opts.State = &state
 	return auth.NewOAuthHandler(opts), nil
@@ -126,19 +126,13 @@ func oauthClientValue(v *config.Value, values map[string]string) (string, error)
 	return "", config.ErrConfig
 }
 
-// loginOptions checks a login request before any effect.
-func loginOptions(ctx context.Context, req Request, c config.Connection) (*auth.LoginOptions, error) {
-	if !oauthCapable(c) {
-		e := output.NewError("invalid_arguments", nil)
-		e.Message = "Only HTTP connections without a configured credential header use sign-in."
-		return nil, e
-	}
-	if clientCredentials(c) {
-		return nil, clientCredentialsSignIn(req.Connection)
-	}
+// loginOptions checks a sign-in through auth <mcp> before any effect. The
+// plan already decided that the connection signs in; --no-input, or a
+// request without a way to show the URL, never opens a browser.
+func loginOptions(ctx context.Context, req Request, canonical string) (*auth.LoginOptions, error) {
 	send := authURLSender(ctx)
 	if req.NoInput || send == nil {
-		return nil, auth.NotSignedIn(req.Connection)
+		return nil, auth.SignInNeedsInput(req.Connection, canonical)
 	}
 	return &auth.LoginOptions{ShowURL: send}, nil
 }
@@ -147,8 +141,9 @@ func loginOptions(ctx context.Context, req Request, c config.Connection) (*auth.
 // keeps a signed-in session pooled. e is the session's connect error. A
 // session that was never asked to sign in is retired, so its login-mode
 // handler never serves an ordinary call. A sign-in an auth lock overtook
-// clears no lock and is retired.
-func (p *pool) finishLogin(ctx context.Context, name, canonical string, entry *poolEntry, handler *auth.OAuthHandler, e error, epoch uint64, fail func(error) Response) Response {
+// clears no lock and is retired. refreshed reports that the connection's
+// 1Password values were read again first.
+func (p *pool) finishLogin(ctx context.Context, name, canonical string, entry *poolEntry, handler *auth.OAuthHandler, e error, epoch uint64, refreshed bool, fail func(error) Response) Response {
 	if e == nil {
 		if _, e = entry.session.Tools(ctx); e != nil || handler == nil || !handler.SignedIn() {
 			p.retire(canonical, entry)
@@ -162,16 +157,12 @@ func (p *pool) finishLogin(ctx context.Context, name, canonical string, entry *p
 		r := fail(e)
 		// After a 401 the transport may report auth_required instead.
 		if r.Error.Code == "timeout" || r.Error.Code == "auth_required" && errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			r.Error = auth.NotSignedIn(name)
+			r.Error = auth.NotSignedIn(name, canonical)
 			r.Error.Message = "Sign-in was not completed in time."
 		}
 		return r
 	}
-	b, e := json.Marshal(LoginData{Connection: canonical, SignedIn: handler != nil && handler.SignedIn()})
-	if e != nil {
-		return fail(e)
-	}
-	return Response{Data: b}
+	return authResponse(AuthData{Connection: canonical, SecretsRefreshed: stepDone(refreshed), SignedIn: ptr(handler != nil && handler.SignedIn())}, fail)
 }
 
 // gate returns the connection's one-slot gate, which serializes its work.

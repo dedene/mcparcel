@@ -14,7 +14,7 @@ func TestKeyringErrors(t *testing.T) {
 		{
 			"unreachable", KeyringUnreachableError(),
 			"No Secret Service keyring is reachable from this session (no usable D-Bus session bus), so MCParcel cannot store a sign-in.",
-			"Run mcparcel auth login from your desktop session. Without one, use headless mode with OAuth client credentials, env: references or a service-account profile.",
+			"Run mcparcel auth <mcp> from your desktop session. Without one, use headless mode with OAuth client credentials, env: references or a service-account profile.",
 		},
 		{
 			"prompt pending", KeyringPromptPendingError(),

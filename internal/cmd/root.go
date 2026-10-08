@@ -51,7 +51,7 @@ type CLI struct {
 	Version VersionCmd `cmd:"" help:"Print the mcparcel version."`
 	Tools   ToolsCmd   `cmd:"" help:"List a connection's tools."`
 	Call    CallCmd    `cmd:"" help:"Call an MCP tool."`
-	Auth    AuthCmd    `cmd:"" help:"Sign in to, inspect or sign out of OAuth connections."`
+	Auth    AuthCmd    `cmd:"" help:"Make a connection's credentials fresh, or show, remove or lock stored credentials."`
 	Runtime RuntimeCmd `cmd:"" help:"Inspect, restart or stop the runtime."`
 	Doctor  DoctorCmd  `cmd:"" help:"Check prerequisites, credential mapping, runtime and stored configuration."`
 	Daemon  DaemonCmd  `cmd:"" hidden:""`

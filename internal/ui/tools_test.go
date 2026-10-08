@@ -99,7 +99,7 @@ func TestConnectAuthRequiredShowsLoginHint(t *testing.T) {
 	h.loads.err = output.NewError("auth_required", nil)
 	h.details("Other", "Excalidraw")
 	h.press("l")
-	h.contains("Credential authorization is required.", "Run mcparcel auth login local:excalidraw.")
+	h.contains("Credential authorization is required.", "Run mcparcel auth local:excalidraw.")
 	h.lacks("Could not connect.")
 }
 

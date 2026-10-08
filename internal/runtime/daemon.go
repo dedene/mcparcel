@@ -457,7 +457,7 @@ func (s *daemonService) serveSocket(conn *net.UnixConn) {
 	if prompter != nil {
 		handleCtx = mcpclient.WithPrompter(ctx, &mcpclient.Prompter{Ask: prompter.ask, Forms: req.Prompt == "terminal"})
 	}
-	if req.Method == "login" {
+	if req.Method == "auth" {
 		handleCtx = withAuthURLSender(ctx, func(u string) error {
 			return writeSocket(ctx, conn, g, requestFrame("auth_url", id, AuthURL{URL: u}))
 		})

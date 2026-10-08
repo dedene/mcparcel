@@ -65,7 +65,7 @@ func TestAuthLockBlackBox(t *testing.T) {
 		t.Fatal("no single new bootstrap", v.stdout, r.countEvents("bootstrap"))
 	}
 	human := r.run("auth", "lock")
-	if human.code != 0 || human.stdout != "Locked. 1Password sessions ended; signed-in connections need mcparcel auth login.\n" {
+	if human.code != 0 || human.stdout != "Locked. 1Password sessions ended; signed-in connections need mcparcel auth <mcp>.\n" {
 		t.Fatalf("%q", human.stdout)
 	}
 	if !logged(r, "auth_locked") {
@@ -74,48 +74,52 @@ func TestAuthLockBlackBox(t *testing.T) {
 	noCredentialLeaks(t, r, append(out, human)...)
 }
 
-func TestAuthRefreshBlackBox(t *testing.T) {
+func TestAuthSecretsBlackBox(t *testing.T) {
 	r := newRig(t)
 	r.stdio("a", "op://Fixture/api/key")
-	// Not running: nothing cached, and no daemon is started.
-	v := r.check(r.run("auth", "refresh", "a", "--json"), 0, "")
-	if string(v.envelope.Data) != `{"connection":"local:a","invalidated":false}` || len(r.daemonPIDs()) != 0 {
-		t.Fatal(v.stdout, r.daemonPIDs())
-	}
-	// Checked without a daemon too: a connection without op:// references,
-	// or one that does not exist.
-	free := r.check(r.run("auth", "refresh", "fixture", "--json"), 2, "invalid_arguments")
-	if !strings.Contains(free.stdout, "local:fixture uses no 1Password secrets.") {
+	// Checked offline: a connection with nothing to renew, or one that does
+	// not exist, starts no runtime.
+	free := r.check(r.run("auth", "fixture", "--json"), 2, "invalid_arguments")
+	if !strings.Contains(free.stdout, "fixture has no sign-in, client credentials or 1Password secrets to refresh.") {
 		t.Fatal(free.stdout)
 	}
-	r.check(r.run("auth", "refresh", "local:missing", "--json"), 4, "connection_unavailable")
+	r.check(r.run("auth", "local:missing", "--json"), 4, "connection_unavailable")
 	if len(r.daemonPIDs()) != 0 {
 		t.Fatal("started a daemon", r.daemonPIDs())
 	}
+	// Not running: auth starts the runtime and reads the secrets now.
+	v := r.check(r.run("auth", "a", "--json"), 0, "")
+	if string(v.envelope.Data) != `{"connection":"local:a","secretsRefreshed":true}` || r.countEvents("bootstrap") != 1 || r.countEvents("resolve-api") != 1 {
+		t.Fatal(v.stdout, r.countEvents("bootstrap"), r.countEvents("resolve-api"))
+	}
 	out := []result{v, free, r.call("a.counter")}
-	v = r.check(r.run("auth", "refresh", "a", "--json"), 0, "")
-	if string(v.envelope.Data) != `{"connection":"local:a","invalidated":true}` {
-		t.Fatal(v.stdout)
+	// After a call it reads again right away; an unchanged value keeps the
+	// process.
+	out = append(out, r.check(r.run("auth", "a", "--json"), 0, ""))
+	if r.countEvents("resolve-api") != 2 {
+		t.Fatal("not re-read now", r.countEvents("resolve-api"))
 	}
 	if v := r.check(r.run("call", "a.counter", "--no-input", "--json"), 0, ""); counterOf(t, v) != 2 || r.countEvents("resolve-api") != 2 || r.countEvents("bootstrap") != 1 {
-		t.Fatal("refresh did not re-read through the session", v.stdout, r.countEvents("resolve-api"))
+		t.Fatal("unchanged value replaced the process or was read again", v.stdout, r.countEvents("resolve-api"))
 	}
 	r.write(r.paths.StateDir+"/fixture-api-value", rotatedCanary, 0o600)
-	human := r.run("auth", "refresh", "a")
-	if human.code != 0 || human.stdout != "a: the next call reads its 1Password secrets again.\n" {
+	human := r.run("auth", "a")
+	if human.code != 0 || human.stdout != "Read the 1Password secrets for a again.\n" {
 		t.Fatalf("%q", human.stdout)
 	}
 	if v := r.check(r.run("call", "a.counter", "--no-input", "--json"), 0, ""); counterOf(t, v) != 1 || r.countEvents("bootstrap") != 1 {
 		t.Fatal("changed value did not replace the process", v.stdout)
 	}
 	if !logged(r, "credential_invalidated") || !logged(r, "credential_rotated") {
-		t.Fatal("refresh or rotation not logged")
+		t.Fatal("re-read or rotation not logged")
 	}
-	missing := r.check(r.run("auth", "refresh", "fixture", "--json"), 2, "invalid_arguments")
-	if !strings.Contains(missing.stdout, "local:fixture uses no 1Password secrets.") {
-		t.Fatal(missing.stdout)
+	// A desktop-service-account session reads again under --no-input
+	// without a new bootstrap.
+	quiet := r.check(r.run("auth", "a", "--no-input", "--json"), 0, "")
+	if r.countEvents("bootstrap") != 1 || r.countEvents("resolve-api") != 4 {
+		t.Fatal(quiet.stdout, r.countEvents("bootstrap"), r.countEvents("resolve-api"))
 	}
-	noCredentialLeaks(t, r, append(out, human, missing)...)
+	noCredentialLeaks(t, r, append(out, human, quiet)...)
 }
 
 type profileRow struct {
@@ -178,16 +182,21 @@ func TestDesktopProfileBlackBox(t *testing.T) {
 	if r.countEvents("bootstrap-desktop") != 1 || r.countEvents("bootstrap") != 0 || r.countEvents("resolve-api") != 1 {
 		t.Fatal("desktop profile did not use the desktop client once")
 	}
-	// Past the 5-minute cache (dropped here by refresh), --no-input never
-	// reaches the desktop app, which could prompt.
-	r.check(r.run("auth", "refresh", "a", "--json"), 0, "")
-	out = append(out, r.check(r.run("call", "a.counter", "--no-input", "--json"), 3, "auth_required"))
-	if r.countEvents("resolve-api") != 1 || r.countEvents("bootstrap-desktop") != 1 {
-		t.Fatal("--no-input reached the provider")
+	// auth reads again now, through the desktop app.
+	out = append(out, r.check(r.run("auth", "a", "--json"), 0, ""))
+	if r.countEvents("resolve-api") != 2 || r.countEvents("bootstrap-desktop") != 1 {
+		t.Fatal("auth did not re-read", r.countEvents("resolve-api"))
 	}
-	if v := r.call("a.counter"); counterOf(t, v) != 3 || r.countEvents("resolve-api") != 2 {
-		t.Fatal("interactive call did not re-read", v.stdout)
+	// A desktop profile may prompt on any read, so --no-input refuses before
+	// dropping anything; the next --no-input call still uses the cache.
+	refused := r.check(r.run("auth", "a", "--no-input", "--json"), 3, "auth_required")
+	if !strings.Contains(refused.stdout, "Reading a's 1Password secrets again may need approval in the 1Password app") || r.countEvents("resolve-api") != 2 {
+		t.Fatal(refused.stdout, r.countEvents("resolve-api"))
 	}
+	if v := r.check(r.run("call", "a.counter", "--no-input", "--json"), 0, ""); counterOf(t, v) != 3 || r.countEvents("resolve-api") != 2 {
+		t.Fatal("cache dropped", v.stdout)
+	}
+	out = append(out, refused)
 	noCredentialLeaks(t, r, out...)
 }
 
@@ -207,11 +216,10 @@ func TestRateLimitBlackBox(t *testing.T) {
 	if v := r.call("b.counter"); counterOf(t, v) != 1 || r.countEvents("bootstrap") != 1 {
 		t.Fatal("rate limit ended the session", v.stdout)
 	}
-	// A revoked service account ends the session: one bootstrap per
-	// interactive call, none with --no-input.
+	// A revoked service account ends the session: auth reads right away and
+	// fails, and --no-input never bootstraps again.
 	r.write(r.paths.StateDir+"/fixture-revoked", "on", 0o600)
-	r.check(r.run("auth", "refresh", "a", "--json"), 0, "")
-	revoked := r.check(r.run("call", "a.counter", "--json"), 3, "auth_failed")
+	revoked := r.check(r.run("auth", "a", "--json"), 3, "auth_failed")
 	out = append(out, limited, revoked, r.check(r.run("call", "a.counter", "--no-input", "--json"), 3, "auth_required"))
 	if r.countEvents("bootstrap") != 1 {
 		t.Fatal("bootstrapped again", r.countEvents("bootstrap"))
@@ -231,12 +239,12 @@ func TestAuthLockOAuthBlackBox(t *testing.T) {
 	r.call("n.echo", "text=hi")
 	r.check(r.run("auth", "lock", "--json"), 0, "")
 	human := r.run("auth", "status", "n")
-	if human.code != 0 || !strings.HasPrefix(human.stdout, "local:n  sign-in required  (locked)\n  Locked by mcparcel auth lock.\n") || !strings.Contains(human.stdout, "  Next: mcparcel auth login n\n") {
+	if human.code != 0 || !strings.HasPrefix(human.stdout, "local:n  sign-in required  (locked)\n  Locked by mcparcel auth lock.\n") || !strings.Contains(human.stdout, "  Next: mcparcel auth n\n") {
 		t.Fatalf("%q", human.stdout)
 	}
 	_, _, before := r.as.Counts()
 	denied := r.check(r.run("call", "n.echo", "text=hi", "--json"), 3, "auth_required")
-	if !strings.Contains(denied.stdout, "mcparcel auth login n") {
+	if !strings.Contains(denied.stdout, `"nextAction":"mcparcel auth n"`) {
 		t.Fatal(denied.stdout)
 	}
 	if _, _, after := r.as.Counts(); after != before {

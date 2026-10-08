@@ -80,10 +80,10 @@ func (r *oauthRig) checkLeaks() {
 	}
 }
 
-// login runs auth login n --json; the URL goes to stderr.
+// login runs auth n --json; the URL goes to stderr.
 func (r *oauthRig) login(exit int, code string, extra ...string) result {
 	r.t.Helper()
-	v := r.run(append([]string{"auth", "login", "n", "--json"}, extra...)...)
+	v := r.run(append([]string{"auth", "n", "--json"}, extra...)...)
 	stderr := v.stderr
 	v.stderr = ""
 	v = r.check(v, exit, code)
@@ -135,11 +135,7 @@ func (r *oauthRig) shell(exports string) {
 func TestOAuthLoginCallRefreshBlackBox(t *testing.T) {
 	r := newOAuthRig(t, testutil.AuthServerOptions{Registration: true, AccessTTL: 35 * time.Second, RotateRefresh: true}, &config.OAuth{Type: "oauth"})
 	v := r.login(0, "")
-	var d struct {
-		Connection string
-		SignedIn   bool
-	}
-	if e := json.Unmarshal(v.envelope.Data, &d); e != nil || d.Connection != "local:n" || !d.SignedIn {
+	if string(v.envelope.Data) != `{"connection":"local:n","signedIn":true}` {
 		t.Fatal(v.stdout)
 	}
 	if !strings.Contains(v.stderr, r.as.URL+"/authorize?") || !strings.Contains(v.stderr, "Opening your browser to sign in to n.") {
@@ -175,10 +171,15 @@ func TestOAuthLoginCallRefreshBlackBox(t *testing.T) {
 func TestOAuthNoInputBlackBox(t *testing.T) {
 	r := newOAuthRig(t, testutil.AuthServerOptions{Registration: true}, &config.OAuth{Type: "oauth"})
 	v := r.check(r.run("call", "n.echo", "text=hi", "--no-input", "--json"), 3, "auth_required")
-	if !strings.Contains(v.stdout, "mcparcel auth login n") {
+	if !strings.Contains(v.stdout, `"nextAction":"mcparcel auth n"`) {
 		t.Fatal(v.stdout)
 	}
-	r.login(3, "auth_required", "--no-input")
+	// Refused offline: no runtime is needed to know a browser cannot open.
+	r.check(r.run("runtime", "stop", "--json"), 0, "")
+	refused := r.login(3, "auth_required", "--no-input")
+	if _, err := os.Lstat(r.paths.SocketFile); !strings.Contains(refused.stdout, "Signing in to n opens a browser, which --no-input does not allow.") || !os.IsNotExist(err) {
+		t.Fatal(refused.stdout, err)
+	}
 	if n := r.as.Requests(""); n != 0 {
 		t.Fatalf("authorization server requests: %d", n)
 	}
@@ -187,9 +188,12 @@ func TestOAuthNoInputBlackBox(t *testing.T) {
 	}
 	// Under --no-input an unusable connection still gets its own error, not
 	// a next action that can never succeed.
-	r.check(r.run("auth", "login", "typo", "--no-input", "--json"), 4, "connection_unavailable")
+	r.check(r.run("auth", "typo", "--no-input", "--json"), 4, "connection_unavailable")
 	r.stdio("s", "")
-	r.check(r.run("auth", "login", "s", "--no-input", "--json"), 2, "invalid_arguments")
+	s := r.check(r.run("auth", "s", "--no-input", "--json"), 2, "invalid_arguments")
+	if !strings.Contains(s.stdout, "s has no sign-in, client credentials or 1Password secrets to refresh.") {
+		t.Fatal(s.stdout)
+	}
 }
 
 func TestOAuthRefreshFailureBlackBox(t *testing.T) {
@@ -197,7 +201,7 @@ func TestOAuthRefreshFailureBlackBox(t *testing.T) {
 	r.login(0, "")
 	r.as.Revoke()
 	v := r.check(r.run("call", "n.echo", "text=hi", "--json"), 3, "auth_required")
-	if !strings.Contains(v.stdout, "mcparcel auth login n") {
+	if !strings.Contains(v.stdout, `"nextAction":"mcparcel auth n"`) {
 		t.Fatal(v.stdout)
 	}
 	items := r.authStatus("n")
@@ -205,7 +209,7 @@ func TestOAuthRefreshFailureBlackBox(t *testing.T) {
 		t.Fatalf("%+v", items)
 	}
 	human := r.run("auth", "status", "n")
-	if human.code != 0 || !strings.HasPrefix(human.stdout, "local:n  sign-in required  (refresh_expired_or_revoked)\n") || !strings.Contains(human.stdout, "  Next: mcparcel auth login n\n") {
+	if human.code != 0 || !strings.HasPrefix(human.stdout, "local:n  sign-in required  (refresh_expired_or_revoked)\n") || !strings.Contains(human.stdout, "  Next: mcparcel auth n\n") {
 		t.Fatalf("%q", human.stdout)
 	}
 	_, _, before := r.as.Counts()
@@ -289,7 +293,7 @@ func TestUnmarkedHTTP401BlackBox(t *testing.T) {
 	}
 	started := time.Now()
 	v := r.check(r.run("call", "n.echo", "text=hi", "--json"), 3, "auth_required")
-	if time.Since(started) > 5*time.Second || !strings.Contains(v.stdout, "mcparcel auth login n") {
+	if time.Since(started) > 5*time.Second || !strings.Contains(v.stdout, `"nextAction":"mcparcel auth n"`) {
 		t.Fatal(time.Since(started), v.stdout)
 	}
 	// The server asked for sign-in, so the list now shows the connection.
@@ -313,7 +317,7 @@ func TestHeaderKey401BlackBox(t *testing.T) {
 	r.shell("export FIXTURE_KEY=wrong-key\n")
 	started := time.Now()
 	v := r.check(r.run("call", "n.echo", "text=hi", "--json"), 3, "auth_required")
-	if time.Since(started) > 5*time.Second || !strings.Contains(v.stdout, "FIXTURE_KEY") || strings.Contains(v.stdout, "auth login") {
+	if time.Since(started) > 5*time.Second || !strings.Contains(v.stdout, "FIXTURE_KEY") || strings.Contains(v.stdout, "mcparcel auth ") {
 		t.Fatal(time.Since(started), v.stdout)
 	}
 	r.login(2, "invalid_arguments")
@@ -346,5 +350,55 @@ func TestKeychainUnavailableBlackBox(t *testing.T) {
 	// browser: nothing reached the authorization server.
 	if r.page() != "" || r.as.Requests("/authorize") != 0 || r.as.Requests("/token") != 0 {
 		t.Fatal("sign-in started without a keyring", r.page(), r.as.Requests(""))
+	}
+}
+
+// OAuth with a 1Password client secret: auth reads the secret again, then
+// signs in, and says both.
+func TestOAuthAuthBothBlackBox(t *testing.T) {
+	id := literal("fixture-client")
+	r := newOAuthRig(t, testutil.AuthServerOptions{ClientID: "fixture-client", ClientSecret: "FIXTURE-API-KEY"}, &config.OAuth{
+		Type: "oauth", ClientID: &id, ClientSecret: &config.Value{Secret: &config.SecretRef{Secret: "op://Fixture/api/key"}},
+	})
+	c := r.personal.Connections["n"]
+	c.CredentialProfile = "shared"
+	r.personal.Connections["n"] = c
+	r.personal.CredentialProfiles["shared"] = config.ProfileRequirement{}
+	r.save()
+	v := r.login(0, "")
+	if string(v.envelope.Data) != `{"connection":"local:n","secretsRefreshed":true,"signedIn":true}` || r.countEvents("resolve-api") != 1 {
+		t.Fatal(v.stdout, r.countEvents("resolve-api"))
+	}
+	r.call("n.echo", "text=hi")
+	human := r.run("auth", "n")
+	if human.code != 0 || human.stdout != "Read the 1Password secrets for n again.\nSigned in to n.\n" || r.countEvents("resolve-api") != 2 {
+		t.Fatalf("%q %q %d", human.stdout, human.stderr, r.countEvents("resolve-api"))
+	}
+	noCredentialLeaks(t, r.rig, v, human)
+}
+
+// A connection named lock is shadowed by auth lock: next actions use its
+// canonical ID, which reaches it, and doctor warns.
+func TestAuthNameClashBlackBox(t *testing.T) {
+	r := newOAuthRig(t, testutil.AuthServerOptions{Registration: true}, &config.OAuth{Type: "oauth"})
+	r.personal.Connections["lock"] = r.personal.Connections["n"]
+	delete(r.personal.Connections, "n")
+	r.save()
+	v := r.check(r.run("call", "lock.echo", "text=hi", "--no-input", "--json"), 3, "auth_required")
+	if !strings.Contains(v.stdout, `"nextAction":"mcparcel auth local:lock"`) {
+		t.Fatal(v.stdout)
+	}
+	if locked := r.check(r.run("auth", "lock", "--json"), 0, ""); string(locked.envelope.Data) != `{"locked":true}` {
+		t.Fatal(locked.stdout)
+	}
+	signed := r.run("auth", "local:lock", "--json")
+	signed.stderr = "" // the sign-in URL
+	if signed = r.check(signed, 0, ""); string(signed.envelope.Data) != `{"connection":"local:lock","signedIn":true}` {
+		t.Fatal(signed.stdout)
+	}
+	r.call("lock.echo", "text=hi")
+	d := doctorData(t, r.check(r.run("doctor", "lock", "--json"), 0, ""))
+	if row := doctorRow(t, d, "credentials.auth-name", "local:lock"); row.Status != "warn" || row.NextAction != "Use mcparcel auth local:lock to make its credentials fresh." {
+		t.Fatalf("%+v", row)
 	}
 }

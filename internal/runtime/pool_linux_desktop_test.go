@@ -44,11 +44,11 @@ func TestNoDesktopAppGuard(t *testing.T) {
 	}
 }
 
-// The login preflight: a keyring that fails before the sign-in refuses it
+// The sign-in preflight: a keyring that fails before the sign-in refuses it
 // with keychain_unavailable before any URL is sent or the authorization
 // server is asked. An empty keyring (ErrNoSession) signs in as usual
 // (TestPoolLoginSendsAuthURLAndPoolsSession).
-func TestPoolLoginKeyringPreflight(t *testing.T) {
+func TestPoolAuthKeyringPreflight(t *testing.T) {
 	r, as, kr := oauthRig(t, testutil.AuthServerOptions{ClientID: "pre-id"}, true)
 	kr.Err = errors.New("no session bus")
 	r.start()

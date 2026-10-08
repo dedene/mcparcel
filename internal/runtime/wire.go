@@ -97,7 +97,7 @@ func validateRequest(intent string, r Request) error {
 	if r.Prompt != "" && (r.Method != "call" || r.NoInput || r.Prompt != "terminal" && r.Prompt != "dialog") {
 		return ErrInvalidFrame
 	}
-	if (intent == "restart" || intent == "stop") && r.Method != intent || intent == "status" && r.Method != "status" || intent == "work" && r.Method != "tools" && r.Method != "call" && r.Method != "login" && r.Method != "logout" && r.Method != "lock" && r.Method != "refresh" {
+	if (intent == "restart" || intent == "stop") && r.Method != intent || intent == "status" && r.Method != "status" || intent == "work" && r.Method != "tools" && r.Method != "call" && r.Method != "auth" && r.Method != "logout" && r.Method != "lock" {
 		return ErrInvalidFrame
 	}
 	switch r.Method {
@@ -120,7 +120,7 @@ func validateRequest(intent string, r Request) error {
 		if r.Tool != "" || r.Timeout != "" || len(r.Arguments.Values) != 0 || r.Force {
 			return ErrInvalidFrame
 		}
-	case "login", "logout":
+	case "auth", "logout":
 		if r.Connection == "" || r.Tool != "" || r.Timeout != "" || len(r.Arguments.Values) != 0 || r.Cached || r.Force {
 			return ErrInvalidFrame
 		}
@@ -129,10 +129,6 @@ func validateRequest(intent string, r Request) error {
 		}
 	case "lock":
 		if r.Connection != "" || r.Tool != "" || r.Timeout != "" || len(r.Arguments.Values) != 0 || r.Cached || r.Force {
-			return ErrInvalidFrame
-		}
-	case "refresh":
-		if config.ValidateCanonicalID(r.Connection) != nil || r.Tool != "" || r.Timeout != "" || len(r.Arguments.Values) != 0 || r.Cached || r.Force || r.NoInput {
 			return ErrInvalidFrame
 		}
 	case "status", "restart", "stop":

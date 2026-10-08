@@ -245,6 +245,12 @@ func TestServiceAccountHeadlessBlackBox(t *testing.T) {
 	if human.code != 0 || !strings.HasPrefix(human.stdout, "No sign-ins in headless mode.\nprofile shared  service-account  active  until ") || !strings.Contains(human.stdout, "  token from "+saTokenEnv+"\n") {
 		t.Fatalf("%q", human.stdout)
 	}
+	// auth reads the secrets again now, without a prompt or a new bootstrap.
+	renewed := r.check(r.run("auth", "a", "--json"), 0, "")
+	if string(renewed.envelope.Data) != `{"connection":"local:a","secretsRefreshed":true}` || r.countEvents("bootstrap-token") != 1 || r.countEvents("resolve-api") != 2 {
+		t.Fatal(renewed.stdout, r.countEvents("bootstrap-token"), r.countEvents("resolve-api"))
+	}
+	out = append(out, renewed)
 	// A desktop-app profile is refused in headless mode.
 	r.profile = config.Profile{Mode: "desktop-service-account", Account: "Fixture account", BootstrapRef: "op://Private/fixture/token"}
 	r.save()

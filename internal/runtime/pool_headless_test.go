@@ -141,7 +141,7 @@ func TestHeadlessUnmarked401CannotSignIn(t *testing.T) {
 	r.start()
 	res := r.call(testCtx(t), "a", "counter")
 	responseCode(t, res, "auth_required", false)
-	if res.Error.Message != "This server needs sign-in, which headless mode cannot do." || strings.Contains(res.Error.NextAction, "auth login") {
+	if res.Error.Message != "This server needs sign-in, which headless mode cannot do." || strings.Contains(res.Error.NextAction, "mcparcel auth ") {
 		t.Fatalf("%+v", res.Error)
 	}
 	if o := <-r.captured; o.OAuth != nil {
@@ -158,7 +158,7 @@ func TestHeadlessMarkedNeedsSignIn(t *testing.T) {
 	r.start()
 	res := r.call(testCtx(t), "a", "counter")
 	responseCode(t, res, "auth_required", false)
-	if res.Error.Message != "This server needs sign-in, which headless mode cannot do." || strings.Contains(res.Error.NextAction, "auth login") || r.connects.Load() != 0 {
+	if res.Error.Message != "This server needs sign-in, which headless mode cannot do." || strings.Contains(res.Error.NextAction, "mcparcel auth ") || r.connects.Load() != 0 {
 		t.Fatalf("%+v %d", res.Error, r.connects.Load())
 	}
 	res = r.logout(testCtx(t))

@@ -37,14 +37,6 @@ func (p *pool) clientCredentialsHandler(c config.Connection, values map[string]s
 	})
 }
 
-// clientCredentialsSignIn refuses a sign-in to a client_credentials
-// connection: its token comes from the client ID and secret alone.
-func clientCredentialsSignIn(name string) *output.Error {
-	e := output.NewError("invalid_arguments", nil)
-	e.Message = name + " uses client credentials; there is nothing to sign in to."
-	return e
-}
-
 // ccTokenRejected replaces auth_required on a client_credentials
 // connection. The SDK hands a 401 to the handler, which mints a new token,
 // and resends once; a 401 to that resend never reaches the handler and

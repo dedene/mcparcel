@@ -33,7 +33,7 @@ func (h *OAuthHandler) login(ctx context.Context, req *http.Request, resp *http.
 		return nil
 	}
 	if h.shut {
-		return NotSignedIn(h.opts.Name)
+		return NotSignedIn(h.opts.Name, h.opts.Account)
 	}
 	err := h.loginLocked(ctx, req, resp)
 	if err != nil {
@@ -241,7 +241,7 @@ func issuerMismatch(iss string, asm *oauthex.AuthServerMeta) bool {
 func (h *OAuthHandler) authFailed(message string) *output.Error {
 	e := output.NewError("auth_failed", nil)
 	e.Message = message
-	e.NextAction = "mcparcel auth login " + h.opts.Name
+	e.NextAction = output.AuthAction(h.opts.Name, h.opts.Account)
 	return e
 }
 
@@ -290,7 +290,7 @@ func (h *OAuthHandler) listenCallback(redirect string) (*callback, error) {
 		if err != nil || u.Scheme != "http" || host != "127.0.0.1" && host != "::1" && host != "localhost" || u.User != nil {
 			e := output.NewError("invalid_arguments", nil)
 			e.Message = "auth.redirectUrl must be an http URL on 127.0.0.1, [::1] or localhost."
-			e.NextAction = "Fix the connection definition, then run mcparcel auth login " + h.opts.Name + " again."
+			e.NextAction = "Fix the connection definition, then run " + output.AuthAction(h.opts.Name, h.opts.Account) + " again."
 			return nil, e
 		}
 		if host == "localhost" {
@@ -309,7 +309,7 @@ func (h *OAuthHandler) listenCallback(redirect string) (*callback, error) {
 	if err != nil {
 		e := output.NewError("auth_callback_unavailable", nil)
 		e.Message = "The sign-in callback address " + addr + " is in use."
-		e.NextAction = "Close the program using that port, then run mcparcel auth login " + h.opts.Name + " again."
+		e.NextAction = "Close the program using that port, then run " + output.AuthAction(h.opts.Name, h.opts.Account) + " again."
 		return nil, e
 	}
 	cb.ln = ln
@@ -340,7 +340,7 @@ func (cb *callback) fetch(ctx context.Context, args *sdkauth.AuthorizationArgs) 
 		return r.res, r.err
 	case <-ctx.Done():
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			e := NotSignedIn(cb.h.opts.Name)
+			e := NotSignedIn(cb.h.opts.Name, cb.h.opts.Account)
 			e.Message = "Sign-in was not completed in time."
 			return nil, e
 		}
@@ -370,7 +370,7 @@ func (cb *callback) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	q := r.URL.Query()
-	p := callbackPage{Label: cb.h.opts.Label, Name: cb.h.opts.Name}
+	p := callbackPage{Label: cb.h.opts.Label, Name: output.AuthTarget(cb.h.opts.Name, cb.h.opts.Account)}
 	cb.mu.Lock()
 	match, used := q.Get("state") == cb.state && cb.state != "", cb.used
 	if match {

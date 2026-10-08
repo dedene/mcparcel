@@ -75,7 +75,7 @@ func (r *poolRig) login(ctx context.Context, b *loginBrowser, noInput bool) Resp
 	if b != nil {
 		ctx = withAuthURLSender(ctx, b.send)
 	}
-	return r.h.Handle(ctx, testID, Request{Method: "login", Connection: "a", Arguments: emptyArgs(), NoInput: noInput}, nil)
+	return r.h.Handle(ctx, testID, Request{Method: "auth", Connection: "a", Arguments: emptyArgs(), NoInput: noInput}, nil)
 }
 
 func (r *poolRig) logout(ctx context.Context) Response {
@@ -85,7 +85,7 @@ func (r *poolRig) logout(ctx context.Context) Response {
 func signInAction(t *testing.T, res Response) {
 	t.Helper()
 	responseCode(t, res, "auth_required", false)
-	if res.Error.NextAction != "mcparcel auth login a" {
+	if res.Error.NextAction != "mcparcel auth a" {
 		t.Fatal(res.Error.NextAction)
 	}
 }
@@ -150,8 +150,8 @@ func TestPoolLoginSendsAuthURLAndPoolsSession(t *testing.T) {
 			b := &loginBrowser{visit: true}
 			res := r.login(testCtx(t), b, false)
 			success(t, res)
-			var d LoginData
-			if e := json.Unmarshal(res.Data, &d); e != nil || d.Connection != "local:a" || !d.SignedIn {
+			var d AuthData
+			if e := json.Unmarshal(res.Data, &d); e != nil || d.Connection != "local:a" || d.SignedIn == nil || !*d.SignedIn || d.SecretsRefreshed != nil || d.TokenRenewed != nil {
 				t.Fatal(string(res.Data), e)
 			}
 			if b.count() != 1 {
@@ -210,7 +210,11 @@ func TestPoolLoginNoInput(t *testing.T) {
 	r, _, kr := oauthRig(t, testutil.AuthServerOptions{Registration: true}, false)
 	r.start()
 	b := &loginBrowser{}
-	signInAction(t, r.login(testCtx(t), b, true))
+	res := r.login(testCtx(t), b, true)
+	responseCode(t, res, "auth_required", false)
+	if res.Error.Message != "Signing in to a opens a browser, which --no-input does not allow." || res.Error.NextAction != "Run mcparcel auth a without --no-input." {
+		t.Fatal(res.Error)
+	}
 	if r.connects.Load() != 0 || b.count() != 0 {
 		t.Fatal("effects")
 	}
@@ -325,9 +329,8 @@ func TestPoolLoginWithoutChallengeNotReused(t *testing.T) {
 	b := &loginBrowser{}
 	res := r.login(testCtx(t), b, false)
 	success(t, res)
-	var d LoginData
-	if e := json.Unmarshal(res.Data, &d); e != nil || d.SignedIn {
-		t.Fatal(string(res.Data), e)
+	if string(res.Data) != `{"connection":"local:a","signedIn":false}` {
+		t.Fatal(string(res.Data))
 	}
 	opened.Store(false)
 	ctx, cancel := context.WithTimeout(testCtx(t), 5*time.Second)
@@ -391,7 +394,7 @@ func TestPoolHeaderKey401KeepsEnvAction(t *testing.T) {
 	start := time.Now()
 	res := r.call(testCtx(t), "a", "counter")
 	responseCode(t, res, "auth_required", false)
-	if !strings.Contains(res.Error.NextAction, "FIXTURE_TOKEN") || strings.Contains(res.Error.NextAction, "auth login") || time.Since(start) > 2*time.Second {
+	if !strings.Contains(res.Error.NextAction, "FIXTURE_TOKEN") || strings.Contains(res.Error.NextAction, "mcparcel auth ") || time.Since(start) > 2*time.Second {
 		t.Fatal(res.Error.NextAction, time.Since(start))
 	}
 	if o := <-r.captured; o.OAuth != nil {

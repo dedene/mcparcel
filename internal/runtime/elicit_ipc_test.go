@@ -29,7 +29,7 @@ func TestElicitRequestValidation(t *testing.T) {
 		"call yes":      {Request{Method: "call", Tool: "t", Arguments: empty, Prompt: "yes"}, false},
 		"call no input": {Request{Method: "call", Tool: "t", Arguments: empty, Prompt: "terminal", NoInput: true}, false},
 		"tools":         {Request{Method: "tools", Connection: "a", Arguments: empty, Prompt: "terminal"}, false},
-		"login":         {Request{Method: "login", Connection: "a", Arguments: empty, Prompt: "terminal"}, false},
+		"auth":          {Request{Method: "auth", Connection: "a", Arguments: empty, Prompt: "terminal"}, false},
 		"status":        {Request{Method: "status", Arguments: empty, Prompt: "terminal"}, false},
 	} {
 		t.Run(name, func(t *testing.T) {

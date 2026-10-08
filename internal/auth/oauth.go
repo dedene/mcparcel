@@ -95,11 +95,21 @@ func NewOAuthHandler(o OAuthOptions) *OAuthHandler {
 	return h
 }
 
-// NotSignedIn is auth_required pointing at auth login.
-func NotSignedIn(name string) *output.Error {
+// NotSignedIn is auth_required pointing at auth <mcp>. name is what the
+// user typed, canonical the connection's ID.
+func NotSignedIn(name, canonical string) *output.Error {
 	e := output.NewError("auth_required", nil)
 	e.Message = "Sign-in required for " + name + "."
-	e.NextAction = "mcparcel auth login " + name
+	e.NextAction = output.AuthAction(name, canonical)
+	return e
+}
+
+// SignInNeedsInput is auth_required for a sign-in under --no-input, which
+// never opens a browser.
+func SignInNeedsInput(name, canonical string) *output.Error {
+	e := output.NewError("auth_required", nil)
+	e.Message = "Signing in to " + name + " opens a browser, which --no-input does not allow."
+	e.NextAction = "Run " + output.AuthAction(name, canonical) + " without --no-input."
 	return e
 }
 
@@ -144,7 +154,7 @@ func (h *OAuthHandler) Token() (*oauth2.Token, error) {
 		return nil, h.terminal
 	}
 	if h.shut {
-		return nil, NotSignedIn(h.opts.Name)
+		return nil, NotSignedIn(h.opts.Name, h.opts.Account)
 	}
 	if err := h.retrySaveLocked(); err != nil {
 		return nil, err
@@ -161,7 +171,7 @@ func (h *OAuthHandler) Refresh(trigger string) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.terminal != nil || h.shut || h.state.RefreshToken == "" {
-		return NotSignedIn(h.opts.Name)
+		return NotSignedIn(h.opts.Name, h.opts.Account)
 	}
 	if err := h.retrySaveLocked(); err != nil {
 		return err
@@ -260,7 +270,7 @@ func (h *OAuthHandler) Authorize(ctx context.Context, req *http.Request, resp *h
 		return h.terminal
 	}
 	if h.shut {
-		return NotSignedIn(h.opts.Name)
+		return NotSignedIn(h.opts.Name, h.opts.Account)
 	}
 	if err == nil && found && (!issuersEqual(issuer, h.state.Issuer) || resource != h.state.Resource) {
 		return h.failLocked(HealthReauthorizationRequired, "issuer_changed", TriggerCall, 0)
@@ -296,7 +306,7 @@ func (h *OAuthHandler) Authorize(ctx context.Context, req *http.Request, resp *h
 // recorded in the health file; trigger says what asked for the refresh.
 func (h *OAuthHandler) refreshLocked(trigger string) (*oauth2.Token, error) {
 	if h.closed.Load() || h.state.RefreshToken == "" {
-		return nil, NotSignedIn(h.opts.Name)
+		return nil, NotSignedIn(h.opts.Name, h.opts.Account)
 	}
 	cfg := oauth2.Config{ClientID: h.state.ClientID, ClientSecret: h.state.ClientSecret, Endpoint: oauth2.Endpoint{TokenURL: h.state.TokenURL, AuthStyle: oauth2.AuthStyle(h.state.AuthStyle)}}
 	if cfg.ClientID == "" {
@@ -348,7 +358,7 @@ func (h *OAuthHandler) failLocked(kind HealthKind, code, trigger string, status 
 	_ = h.save()
 	h.log("oauth_refresh_failed")
 	h.record(HealthEvent{Kind: kind, Trigger: trigger, Code: code, HTTPStatus: status, Terminal: true})
-	h.terminal = NotSignedIn(h.opts.Name)
+	h.terminal = NotSignedIn(h.opts.Name, h.opts.Account)
 	return h.terminal
 }
 

@@ -111,7 +111,7 @@ all MCP calls."
 | Whole-object arguments | `--args '<json>'` | unchanged; also `--args-file <path>` or `--args-file -` |
 | JSON output | `--output json` | `--json`: one envelope `{schemaVersion, ok, data, error}`, the MCP result in `data.result` |
 | Errors | exit status and text | exit codes 0–8 and 130, branch on `error.code` ([cli.md](cli.md#output-and-errors)) |
-| Sign-in | handled by mcporter | `mcparcel auth login <mcp>`; a call never opens a browser, it fails `auth_required` (exit 3) |
+| Sign-in | handled by mcporter | `mcparcel auth <mcp>`; a call never opens a browser, it fails `auth_required` (exit 3) |
 | Images | — | `--output-dir <dir>` saves image and audio blocks |
 | Function-call syntax, positional arguments | `server.tool(a: 1)` | not supported: name every argument |
 | Ad-hoc servers | `--stdio`, `--http-url` | not supported: `mcparcel local add --file <definition.json>` |

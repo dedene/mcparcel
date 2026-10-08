@@ -511,6 +511,12 @@ CLIs that use this runtime run as the same user with the same
   restart` from a caller that has it (through claw-wrap, which reads its
   `file:` credential on every call), or restart the pod or process.
 
+`mcparcel auth <mcp>` reads a connection's `op://` values again now, without
+a prompt; use it after you change an item in 1Password. With an active
+session it reads through that session and does not read the token file or
+variable again. Without one (a new runtime, an expired session, or after
+`mcparcel auth lock`), it bootstraps from the token now, as a call would.
+
 `auth lock` ends every 1Password session, service-account ones included, but
 does not block them: the next call (every headless call is `--no-input`)
 bootstraps again from the token without a prompt. To stop a service-account

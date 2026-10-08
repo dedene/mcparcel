@@ -137,13 +137,11 @@ func (p *pool) Handle(ctx context.Context, id string, req Request, before func()
 	defer func() { cancel(nil); p.mu.Lock(); delete(p.requests, w); p.mu.Unlock(); p.workers.Done() }()
 	fail := func(e error) Response { return Response{Error: poolError(e, context.Cause(workCtx), id, false)} }
 	switch req.Method {
-	case "call", "tools", "login":
+	case "call", "tools", "auth":
 	case "logout":
 		return p.logout(workCtx, req.Connection)
 	case "lock":
 		return p.lock(workCtx)
-	case "refresh":
-		return p.refresh(req.Connection)
 	default:
 		return fail(output.NewError("protocol_error", nil))
 	}
@@ -164,10 +162,23 @@ func (p *pool) Handle(ctx context.Context, id string, req Request, before func()
 			return fail(e)
 		}
 	}
+	var plan AuthPlan
 	var login *auth.LoginOptions
-	if req.Method == "login" {
-		if login, e = loginOptions(ctx, req, c); e != nil {
+	if req.Method == "auth" {
+		if plan, e = PlanAuth(snapshot, req.Connection); e != nil {
 			return fail(e)
+		}
+		if plan.SignIn && p.opts.Headless {
+			// Refused before any effect: nothing is read again.
+			return fail(headlessSignIn(nil))
+		}
+		if !plan.SignIn && !plan.ClientCredentials {
+			return p.rereadSecrets(workCtx, w, req, plan, snapshot.Local.CredentialProfiles[c.CredentialProfile], fail)
+		}
+		if plan.SignIn {
+			if login, e = loginOptions(ctx, req, canonical); e != nil {
+				return fail(e)
+			}
 		}
 	}
 	hash, e := snapshot.ConnectionHash(canonical)
@@ -175,7 +186,7 @@ func (p *pool) Handle(ctx context.Context, id string, req Request, before func()
 		return fail(e)
 	}
 	duration := 180 * time.Second
-	if req.Method == "login" {
+	if plan.SignIn {
 		duration = loginTimeout
 	}
 	if req.Method == "call" {
@@ -229,7 +240,7 @@ func (p *pool) Handle(ctx context.Context, id string, req Request, before func()
 	if len(refs) > 0 || oauthCapable(c) {
 		if e = p.admitProtected(w); e != nil {
 			if len(refs) == 0 && !clientCredentials(c) {
-				return fail(auth.NotSignedIn(req.Connection))
+				return fail(auth.NotSignedIn(req.Connection, canonical))
 			}
 			return fail(e)
 		}
@@ -253,7 +264,7 @@ func (p *pool) Handle(ctx context.Context, id string, req Request, before func()
 	} else if oauthCapable(c) && !clientCredentials(c) && len(refs) == 0 {
 		defer func() {
 			if resp.Error != nil && resp.Error.Code == "auth_required" {
-				resp.Error.NextAction = "mcparcel auth login " + req.Connection
+				resp.Error.NextAction = output.AuthAction(req.Connection, canonical)
 				if resp.Error.Message == output.NewError("auth_required", nil).Message {
 					resp.Error.Message = "Sign-in required for " + req.Connection + "."
 				}
@@ -272,6 +283,11 @@ func (p *pool) Handle(ctx context.Context, id string, req Request, before func()
 				resp.Error.NextAction = "Check " + strings.Join(names, ", ") + " (" + source + "), update the value, then run mcparcel runtime restart."
 			}
 		}()
+	}
+	if req.Method == "auth" {
+		if e = p.beginAuth(req, plan, snapshot); e != nil {
+			return fail(e)
+		}
 	}
 	if len(refs) > 0 {
 		if lease, e = p.resolveLease(workCtx, canonical, c, snapshot.Local.CredentialProfiles[c.CredentialProfile], refs, req.NoInput); e != nil {
@@ -292,7 +308,7 @@ func (p *pool) Handle(ctx context.Context, id string, req Request, before func()
 	}
 	entry, handler, e := p.session(workCtx, canonical, hash, c, lease, gate, req.Connection, login, w.epoch)
 	if login != nil {
-		return p.finishLogin(workCtx, req.Connection, canonical, entry, handler, e, w.epoch, fail)
+		return p.finishLogin(workCtx, req.Connection, canonical, entry, handler, e, w.epoch, len(refs) > 0, fail)
 	}
 	if e != nil {
 		return fail(e)
@@ -315,6 +331,10 @@ func (p *pool) Handle(ctx context.Context, id string, req Request, before func()
 	if e != nil {
 		p.retire(canonical, entry)
 		return Response{Error: poolError(e, context.Cause(callCtx), id, false)}
+	}
+	if req.Method == "auth" {
+		// Listing tools proved that the server accepts the new token.
+		return authResponse(AuthData{Connection: canonical, SecretsRefreshed: stepDone(len(refs) > 0), TokenRenewed: ptr(true)}, fail)
 	}
 	if req.Method == "tools" {
 		current, err := p.opts.Load(p.opts.Paths)

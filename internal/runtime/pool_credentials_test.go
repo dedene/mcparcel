@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/dedene/mcparcel/internal/auth"
 	"github.com/dedene/mcparcel/internal/config"
+	"github.com/dedene/mcparcel/internal/output"
 	"github.com/dedene/mcparcel/internal/testutil"
 )
 
@@ -180,52 +182,158 @@ func TestRateLimitedCallKeepsProcess(t *testing.T) {
 	}
 }
 
-func refreshReq(id string) Request {
-	return Request{Method: "refresh", Connection: id, Arguments: emptyArgs()}
+func authReq(id string, noInput bool) Request {
+	return Request{Method: "auth", Connection: id, Arguments: emptyArgs(), NoInput: noInput}
 }
 
-func TestRefreshInvalidatesLease(t *testing.T) {
+func authData(t *testing.T, res Response) AuthData {
+	t.Helper()
+	success(t, res)
+	var data AuthData
+	if e := json.Unmarshal(res.Data, &data); e != nil {
+		t.Fatal(string(res.Data), e)
+	}
+	return data
+}
+
+func TestAuthRereadsSecrets(t *testing.T) {
 	r, vault, _ := vaultRig(t)
 	r.stdio("a", true)
 	vault.Set(secretRef("a"), "one")
+	var mu sync.Mutex
+	var events []string
+	r.opts.Log = func(e string) { mu.Lock(); events = append(events, e); mu.Unlock() }
 	r.start()
 	count(t, r.call(testCtx(t), "a", "counter"))
-	res := r.h.Handle(testCtx(t), testID, refreshReq("local:a"), nil)
-	success(t, res)
-	var data RefreshData
-	if e := json.Unmarshal(res.Data, &data); e != nil || data != (RefreshData{Connection: "local:a", Invalidated: true}) {
-		t.Fatal(string(res.Data), e)
+	res := r.h.Handle(testCtx(t), testID, authReq("a", false), nil)
+	if string(res.Data) != `{"connection":"local:a","secretsRefreshed":true}` {
+		t.Fatal(string(res.Data), res.Error)
+	}
+	// Read again now, not on the next call.
+	if vault.Reads(secretRef("a")) != 2 || vault.Boots() != 1 {
+		t.Fatal("not re-read right away", vault.Reads(secretRef("a")), vault.Boots())
 	}
 	if n := count(t, noInputCall(r, "a")); n != 2 || vault.Reads(secretRef("a")) != 2 {
-		t.Fatal("unchanged value reconnected or was not re-read", n)
+		t.Fatal("unchanged value reconnected or was read once more", n)
 	}
 	vault.Set(secretRef("a"), "two")
-	success(t, r.h.Handle(testCtx(t), testID, refreshReq("local:a"), nil))
+	authData(t, r.h.Handle(testCtx(t), testID, authReq("local:a", false), nil))
 	if n := count(t, noInputCall(r, "a")); n != 1 || vault.Boots() != 1 {
 		t.Fatal("changed value did not reconnect", n, vault.Boots())
 	}
 	if first, second := connectSecret(t, r), connectSecret(t, r); first != "one" || second != "two" {
 		t.Fatal(first, second)
 	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !hasEvent(events, "credential_invalidated") || !hasEvent(events, "credential_rotated") {
+		t.Fatal(events)
+	}
 }
 
-func TestRefreshRequiresSecretConnection(t *testing.T) {
+func TestAuthNothingToAuthenticate(t *testing.T) {
 	r := newRig(t)
-	r.http("web", testutil.FixtureOptions{}, false)
+	r.stdio("plain", false)
 	r.stdio("envonly", false)
 	c := r.personal.Connections["envonly"]
 	c.Transport.Stdio.Env["TOKEN"] = config.Value{Secret: &config.SecretRef{Secret: "env:FIXTURE_TOKEN"}}
 	r.personal.Connections["envonly"] = c
 	r.start()
-	for id, action := range map[string]string{"local:web": "", "local:envonly": "mcparcel runtime restart"} {
-		res := r.h.Handle(testCtx(t), testID, refreshReq(id), nil)
+	for id, want := range map[string][2]string{
+		"plain":         {"plain has no sign-in, client credentials or 1Password secrets to refresh.", ""},
+		"local:envonly": {"local:envonly has no sign-in, client credentials or 1Password secrets to refresh. Its env: values are read when the runtime starts.", "mcparcel runtime restart"},
+	} {
+		res := r.h.Handle(testCtx(t), testID, authReq(id, false), nil)
 		responseCode(t, res, "invalid_arguments", false)
-		if res.Error.Message != id+" uses no 1Password secrets." || res.Error.NextAction != action {
+		if res.Error.Message != want[0] || res.Error.NextAction != want[1] {
 			t.Fatal(res.Error.Message, res.Error.NextAction)
 		}
 	}
-	responseCode(t, r.h.Handle(testCtx(t), testID, refreshReq("local:missing"), nil), "connection_unavailable", false)
+	responseCode(t, r.h.Handle(testCtx(t), testID, authReq("local:missing", false), nil), "connection_unavailable", false)
 	if r.connects.Load() != 0 {
-		t.Fatal("refresh connected")
+		t.Fatal("auth connected")
 	}
+}
+
+// A re-read holds no gate: it never waits behind a long call, and a failed
+// re-read does not stop the call's process.
+func TestAuthRereadNoGate(t *testing.T) {
+	started := make(chan string, 1)
+	release := make(chan struct{})
+	r, vault, _ := vaultRig(t)
+	r.http("a", testutil.FixtureOptions{Started: started, Release: release}, true)
+	vault.Set(secretRef("a"), "old")
+	r.start()
+	active := asyncCall(r, testCtx(t), "a", "wait")
+	<-started
+	authData(t, r.h.Handle(testCtx(t), testID, authReq("a", false), nil))
+	if vault.Reads(secretRef("a")) != 2 {
+		t.Fatal("not re-read", vault.Reads(secretRef("a")))
+	}
+	vault.Fail(secretRef("a"), errors.New("REVOKED"))
+	responseCode(t, r.h.Handle(testCtx(t), testID, authReq("a", false), nil), "auth_failed", false)
+	if r.closed.Load() != 0 {
+		t.Fatal("a failed re-read stopped the in-flight call's process")
+	}
+	close(release)
+	success(t, response(t, active))
+	// Once the call ended, the process that failed revalidation stops.
+	awaitClosed(t, r, 1)
+}
+
+func TestAuthRereadNoInputDesktop(t *testing.T) {
+	r, vault, _ := vaultRig(t)
+	r.stdio("a", true)
+	r.local.CredentialProfiles["shared"] = config.Profile{Mode: config.ProfileModeDesktop, Account: "fixture", SessionDuration: "24h"}
+	vault.Set(secretRef("a"), "value")
+	r.start()
+	count(t, r.call(testCtx(t), "a", "counter"))
+	res := r.h.Handle(testCtx(t), testID, authReq("a", true), nil)
+	responseCode(t, res, "auth_required", false)
+	if want := output.RereadNeedsInputError("a", "local:a"); res.Error.Message != want.Message || res.Error.NextAction != want.NextAction {
+		t.Fatal(res.Error)
+	}
+	// Nothing was dropped: a --no-input call still uses the cached values.
+	if n := count(t, noInputCall(r, "a")); n != 2 || vault.Reads(secretRef("a")) != 1 {
+		t.Fatal("cache dropped", n, vault.Reads(secretRef("a")))
+	}
+	// Interactive, it reads again.
+	authData(t, r.h.Handle(testCtx(t), testID, authReq("a", false), nil))
+	if vault.Reads(secretRef("a")) != 2 {
+		t.Fatal("not re-read", vault.Reads(secretRef("a")))
+	}
+}
+
+func TestAuthRereadNoInputDesktopServiceAccount(t *testing.T) {
+	r, vault, _ := vaultRig(t)
+	r.stdio("a", true)
+	vault.Set(secretRef("a"), "value")
+	r.start()
+	// Without a session, --no-input never bootstraps.
+	responseCode(t, r.h.Handle(testCtx(t), testID, authReq("a", true), nil), "auth_required", false)
+	if vault.Boots() != 0 {
+		t.Fatal("bootstrapped under --no-input")
+	}
+	count(t, r.call(testCtx(t), "a", "counter"))
+	// With one, it reads again without a prompt.
+	data := authData(t, r.h.Handle(testCtx(t), testID, authReq("a", true), nil))
+	if data.SecretsRefreshed == nil || vault.Boots() != 1 || vault.Reads(secretRef("a")) != 2 {
+		t.Fatal(data, vault.Boots(), vault.Reads(secretRef("a")))
+	}
+}
+
+func TestAuthRereadLocked(t *testing.T) {
+	r, vault, _ := vaultRig(t)
+	r.stdio("a", true)
+	vault.Set(secretRef("a"), "value")
+	vault.Block = make(chan struct{})
+	r.start()
+	ch := make(chan Response, 1)
+	go func() { ch <- r.h.Handle(testCtx(t), testID, authReq("a", false), nil) }()
+	for vault.Boots() == 0 {
+		time.Sleep(time.Millisecond)
+	}
+	lockPool(t, r)
+	responseCode(t, response(t, ch), "auth_required", false)
+	close(vault.Block)
 }

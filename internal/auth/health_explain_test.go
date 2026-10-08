@@ -110,13 +110,20 @@ func TestExplainCauses(t *testing.T) {
 func TestExplainLocked(t *testing.T) {
 	authorized := ev(1, auth.HealthAuthorized, func(e *auth.HealthEvent) { e.RefreshToken = true })
 	r := auth.ExplainSession(auth.SessionInput{Connection: "local:a", Name: "a", URL: explainURL, State: signedInState(), Found: true, Locked: true, Health: auth.ConnectionHealth{Events: []auth.HealthEvent{authorized}}, Now: explainNow})
-	if r.State != auth.StateSignInRequired || r.Cause == nil || r.Cause.Code != "locked" || r.Cause.Message != "Locked by mcparcel auth lock." || r.NextAction != "mcparcel auth login a" || r.PreviousCause != nil {
+	if r.State != auth.StateSignInRequired || r.Cause == nil || r.Cause.Code != "locked" || r.Cause.Message != "Locked by mcparcel auth lock." || r.NextAction != "mcparcel auth a" || r.PreviousCause != nil {
 		t.Fatalf("%+v %+v", r, r.Cause)
 	}
 	// A logout after the lock explains the missing item, not the lock.
 	r = auth.ExplainSession(auth.SessionInput{Connection: "local:a", Name: "a", URL: explainURL, Locked: true, Health: auth.ConnectionHealth{Events: []auth.HealthEvent{authorized, ev(0, auth.HealthLogout)}}, Now: explainNow})
 	if r.Cause == nil || r.Cause.Code != "signed_out" {
 		t.Fatalf("%+v", r.Cause)
+	}
+}
+
+func TestExplainShadowedName(t *testing.T) {
+	r := auth.ExplainSession(auth.SessionInput{Connection: "local:lock", Name: "lock", URL: explainURL, Now: explainNow})
+	if r.State != auth.StateSignInRequired || r.NextAction != "mcparcel auth local:lock" {
+		t.Fatalf("%+v", r)
 	}
 }
 
@@ -140,7 +147,7 @@ func TestExplainStates(t *testing.T) {
 			if r.State != tc.want {
 				t.Fatalf("state %q, want %q (%+v)", r.State, tc.want, r.Cause)
 			}
-			if (r.NextAction == "mcparcel auth login a") != (tc.want == auth.StateSignInRequired) {
+			if (r.NextAction == "mcparcel auth a") != (tc.want == auth.StateSignInRequired) {
 				t.Fatal(r.NextAction)
 			}
 		})

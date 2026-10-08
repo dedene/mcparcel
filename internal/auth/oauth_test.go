@@ -281,7 +281,7 @@ func TestRefreshInvalidGrantRecordsFailure(t *testing.T) {
 	defer h.Close()
 	f.as.Revoke()
 	_, err := h.Token()
-	if e := code(t, err, "auth_required"); e.NextAction != "mcparcel auth login demo" || e.Message != "Sign-in required for demo." {
+	if e := code(t, err, "auth_required"); e.NextAction != "mcparcel auth demo" || e.Message != "Sign-in required for demo." {
 		t.Fatal(e)
 	}
 	stored := f.stored(t)

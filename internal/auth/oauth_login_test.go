@@ -62,6 +62,27 @@ func TestCallbackStateMismatchKeepsWaiting(t *testing.T) {
 	}
 }
 
+// A connection named like an auth subcommand is pointed at by its canonical
+// ID: mcparcel auth status would run auth status instead.
+func TestCallbackShadowedNameUsesCanonical(t *testing.T) {
+	f := newFixture(t, testutil.AuthServerOptions{Registration: true})
+	b := newBrowser()
+	var mismatch page
+	b.visit = func(u string) page {
+		parsed, _ := url.Parse(u)
+		mismatch = get(parsed.Query().Get("redirect_uri") + "?state=wrong&code=x")
+		return get(u)
+	}
+	h := auth.NewOAuthHandler(auth.OAuthOptions{Account: "local:status", Name: "status", Label: "Status", URL: f.mcpURL, Keyring: f.kr, Login: b.login()})
+	t.Cleanup(h.Close)
+	if status, err := send(ctx(t), h, f.mcpURL); err != nil || status != 200 {
+		t.Fatal(status, err)
+	}
+	if !strings.Contains(mismatch.body, "mcparcel auth local:status") || strings.Contains(mismatch.body, "mcparcel auth status<") {
+		t.Fatal(mismatch.body)
+	}
+}
+
 func TestCallbackSecondUseExpired(t *testing.T) {
 	f := newFixture(t, testutil.AuthServerOptions{Registration: true})
 	saving, release := make(chan struct{}), make(chan struct{})
@@ -164,7 +185,7 @@ func TestCallbackPortBusy(t *testing.T) {
 	h := f.handler(t, &config.OAuth{Type: "oauth", RedirectURL: "http://" + addr + "/cb"}, auth.OAuthClient{}, b.login(), nil)
 	_, err = send(ctx(t), h, f.mcpURL)
 	e := code(t, err, "auth_callback_unavailable")
-	if !strings.Contains(e.Message, addr) || e.NextAction != "Close the program using that port, then run mcparcel auth login demo again." || len(b.shown()) != 0 {
+	if !strings.Contains(e.Message, addr) || e.NextAction != "Close the program using that port, then run mcparcel auth demo again." || len(b.shown()) != 0 {
 		t.Fatal(e)
 	}
 }

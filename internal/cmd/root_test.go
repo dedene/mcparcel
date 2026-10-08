@@ -96,9 +96,13 @@ func TestNewCommandUsageIsSafeJSON(t *testing.T) {
 		{"tools", "--json"},
 		{"runtime", "bogus-CANARY", "--json"},
 		{"auth", "--json"},
-		{"auth", "login", "--json"},
 		{"auth", "logout", "--json"},
-		{"auth", "bogus-CANARY", "--json"},
+		{"auth", "login", "x", "--json"},
+		{"auth", "refresh", "x", "--json"},
+		{"auth", "n", "extra-CANARY", "--json"},
+		{"auth", "lock", "x", "--json"},
+		{"auth", "status", "a", "b", "--json"},
+		{"auth", "-x", "n", "--json"},
 		{"call", "fixture.echo", "--timeout", "CANARY", "--json"},
 		{"call", "fixture.echo", "--args", "", "--json"},
 		{"call", "fixture.echo", "--args-file=", "--json"},
@@ -115,6 +119,20 @@ func TestNewCommandUsageIsSafeJSON(t *testing.T) {
 			}
 		})
 	}
+}
+
+// auth <mcp> takes any connection name: an unknown one is
+// connection_unavailable, checked offline, and never echoed.
+func TestAuthUnknownConnection(t *testing.T) {
+	paths := ccEnv(t, false)
+	code, stdout, stderr := run(t, "auth", "bogus-CANARY", "--json")
+	if e := envelopeError(t, stdout); code != 4 || e.Code != "connection_unavailable" || stderr != "" {
+		t.Fatal(code, stdout, stderr)
+	}
+	if strings.Contains(stdout+stderr, "CANARY") {
+		t.Fatalf("unsafe diagnostic: %q %q", stdout, stderr)
+	}
+	noRuntime(t, paths)
 }
 
 func TestPayloadIsNotJSONIntent(t *testing.T) {

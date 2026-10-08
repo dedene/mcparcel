@@ -46,8 +46,9 @@ func TestKeyringUnreachableLoginBlackBox(t *testing.T) {
 	}
 }
 
-// With a runtime already running, auth login skips the offline keyring
-// pre-check (D14a): the runtime has its own bus, and the login reaches it.
+// With a runtime already running, a sign-in through auth <mcp> skips the
+// offline keyring pre-check (D14a): the runtime has its own bus, and the
+// sign-in reaches it.
 func TestKeyringUnreachableLoginRunningRuntimeBlackBox(t *testing.T) {
 	r := newOAuthRig(t, testutil.AuthServerOptions{Registration: true}, &config.OAuth{Type: "oauth"})
 	r.call("fixture.counter")
@@ -94,6 +95,33 @@ func TestNoDesktopAppBlackBox(t *testing.T) {
 	}
 	if after := r.daemonPIDs(); len(pids) != 1 || !reflect.DeepEqual(pids, after) {
 		t.Fatal("not the same runtime:", pids, after)
+	}
+	// auth refuses the desktop-app profile as config_required, also under
+	// --no-input, and reads the service-account one again.
+	refused := r.check(r.run("auth", "a", "--no-input", "--json"), 2, "config_required")
+	if !strings.Contains(refused.stdout, "Profile shared uses the 1Password desktop app") {
+		t.Fatal(refused.stdout)
+	}
+	renewed := r.check(r.run("auth", "b", "--no-input", "--json"), 0, "")
+	if string(renewed.envelope.Data) != `{"connection":"local:b","secretsRefreshed":true}` || r.countEvents("resolve-api") != 2 {
+		t.Fatal(renewed.stdout, r.countEvents("resolve-api"))
+	}
+	noTokenLeaks(t, r, v, refused, renewed)
+}
+
+// The keyring refusal applies to a sign-in only: without a session bus and
+// with no runtime, auth reads a service-account connection's secrets.
+func TestKeyringUnreachableAuthSecretsBlackBox(t *testing.T) {
+	r := newRig(t)
+	token := r.root + "/secrets/op-token"
+	r.write(token, saToken+"\n", 0o600)
+	r.stdio("a", "op://Fixture/api/key")
+	r.saProfile(token)
+	r.write(r.paths.StateDir+"/fixture-no-session-bus", "", 0o600)
+	r.noRuntime()
+	v := r.check(r.run("auth", "a", "--json"), 0, "")
+	if string(v.envelope.Data) != `{"connection":"local:a","secretsRefreshed":true}` || r.countEvents("bootstrap-token") != 1 {
+		t.Fatal(v.stdout, r.countEvents("bootstrap-token"))
 	}
 	noTokenLeaks(t, r, v)
 }

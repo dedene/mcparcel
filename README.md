@@ -95,9 +95,10 @@ Upgrades and rollbacks are in [docs/migration.md](docs/migration.md).
 
    Arguments are typed by the tool's schema. Add `--json` for one
    machine-readable envelope with stable error codes.
-5. For a server that uses OAuth, sign in once with `mcparcel auth login <mcp>`.
-   A call never opens a browser by itself; it fails with `auth_required` and
-   tells you which command to run.
+5. For a server that uses OAuth, sign in once with `mcparcel auth <mcp>`.
+   The same command reads a connection's 1Password secrets again or gets a
+   new client-credentials token. A call never opens a browser by itself; it
+   fails with `auth_required` and tells you which command to run.
 
 ## Team catalogs
 

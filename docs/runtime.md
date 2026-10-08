@@ -344,7 +344,7 @@ Before a protected call, ensure its credential lease is current (maximum 5 minut
 If its resolved values changed, drain existing work and reconnect before admitting
 new work. If revalidation fails, deny new work on that connection even if an old
 process still has credentials. Bound drain by the active call's timeout; no new
-work enters while rotating. `auth refresh <mcp>` invalidates the lease explicitly.
+work enters while rotating. `auth <mcp>` drops the lease and reads it again explicitly.
 API-key creation at providers and automatic service-account provisioning are out
 of scope; updating the 1Password item is supported.
 
@@ -451,9 +451,10 @@ checks is a different deployment and explicitly deferred.
   stop, each once its canceled call unwound (bounded by the shutdown timeout).
   `<state>/auth-lock.json` then lists every OAuth-capable connection and every
   one with sign-in history: their stored sessions are not used (a marked
-  connection gets `auth_required` with next action `mcparcel auth login <mcp>`,
+  connection gets `auth_required` with next action `mcparcel auth <mcp>`,
   an unmarked one connects without OAuth), keep-alive skips them and
-  `auth status` shows cause `locked`. Only a completed `auth login` removes an
+  `auth status` shows cause `locked`. Only a sign-in completed through
+  `auth <mcp>` removes an
   entry, and only one admitted after the lock: a sign-in that finishes while
   the lock runs gets `auth_required` and clears nothing. An unreadable file
   counts as all locked. Work admitted after the lock never sees a pre-lock
@@ -465,9 +466,19 @@ checks is a different deployment and explicitly deferred.
   them, or revoke its token in 1Password. A 1Password prompt still open
   at lock time keeps its call quarantined: the profile's next interactive call
   gets `auth_failed`, not a second prompt, until that call returns.
-- `auth refresh <mcp>` drops the connection's cached values without a provider
-  call; the next call reads them through the existing session, without a
-  prompt. A read already in flight may still cache what it read.
+- `auth <mcp>` on a connection with `op://` references drops its cached values
+  and reads them again right away, starting the runtime if needed, so a
+  prompt or error shows now and not on the next call. With an active session
+  the read needs no prompt; without one it bootstraps, and the desktop app
+  may prompt. It holds no connection gate: an in-flight call keeps the values
+  it started with, and the next call reconnects only when a value changed
+  (`credential_rotated`). A failed re-read stops the pooled process once the
+  in-flight call ends. `--no-input` works for a `service-account` profile and
+  for a `desktop-service-account` profile with an active session; a `desktop`
+  profile may prompt on any read, so `--no-input` is refused before anything
+  is dropped (`auth_required`). With an active session it does not read a
+  service-account token file or variable again; without one, that bootstrap
+  reads the token now, as a call would. Logged as `credential_invalidated`.
 - `runtime status` lists `credentialSessions` and `auth status` lists profile
   rows; neither shows an account, a reference or a value. A service-account
   row in `auth status` shows where its token comes from (`tokenEnv` or
@@ -507,9 +518,9 @@ refresh token rotation need fixture coverage; never invent a generic callback fo
 a server with a registered fixed URL. Do not import mcporter's token cache.
 
 Serialize refresh per token identity; save rotated refresh tokens atomically before
-other calls can use them. Login is explicit in this release: `mcparcel auth login
+other calls can use them. Login is explicit in this release: `mcparcel auth
 <mcp>`. A call without a usable stored session returns `auth_required` with next
-action `mcparcel auth login <mcp>`; implicit browser login on first need is
+action `mcparcel auth <mcp>`; implicit browser login on first need is
 deferred. Headless calls return structured instructions, never hang. A callback port conflict gives
 an actionable error; don't silently substitute a nonregistered port.
 
@@ -528,14 +539,15 @@ and prints no token. `auth lock` as built: see "1Password sessions as built
 
 ### OAuth as built (stage 7 core)
 
-- Daemon only. `auth login` sends IPC `login`; the daemon connects with an OAuth
-  handler in login mode, streams the authorization URL to the CLI (`auth_url`
+- Daemon only. `auth <mcp>` sends IPC `auth`; for a sign-in (after any
+  1Password re-read) the daemon connects with an OAuth handler in login mode, streams the authorization URL to the CLI (`auth_url`
   frame), and the CLI prints it on stderr and runs `/usr/bin/open` (argv, https or
   loopback http only; on Linux `xdg-open`, see "Linux desktop mode"). 10-minute deadline; a pending login holds the connection's
   gate, so its calls queue; Ctrl-C cancels. `--no-input` returns `auth_required`
-  after the connection check (unknown: `connection_unavailable`; not sign-in
-  capable: `invalid_arguments`). A login the server never challenges stores
-  nothing and does not keep its session.
+  offline, after the connection check (unknown: `connection_unavailable`;
+  nothing to authenticate: `invalid_arguments`), and the daemon checks again.
+  A login the server never challenges stores nothing and does not keep its
+  session.
 - Keyring preflight, on every platform: before the daemon listens for the
   callback or the CLI opens a browser, a login reads the connection's stored
   item, waiting up to 2 minutes for a keyring unlock prompt to be answered.
@@ -592,15 +604,16 @@ and prints no token. `auth lock` as built: see "1Password sessions as built
   token is not dropped with it; after that a closed handler never writes the
   item again.
 - Unmarked HTTP connections without a credential header are OAuth-capable: a 401
-  gives `auth_required` pointing at `auth login`, and a stored session is used
+  gives `auth_required` pointing at `auth <mcp>`, and a stored session is used
   when present (one Keychain read per new session). The first such
-  `auth_required` from the server (call, tools or login; not `--no-input` login,
-  which contacts nothing) writes a Keychain item holding only the URL, so
+  `auth_required` from the server (call, tools or sign-in; not a `--no-input`
+  `auth`, which contacts nothing) writes a Keychain item holding only the URL, so
   `auth status` lists the connection as `sign-in required`; an existing item is
   kept, sign-in replaces it and `auth logout` removes it. Servers are never
   probed for the list. A connection with a credential
-  header answers 401 as `auth_required` naming its `env:` variables; `auth login`
-  rejects it (`invalid_arguments`).
+  header answers 401 as `auth_required` naming its `env:` variables; `auth <mcp>`
+  gives `invalid_arguments` for it unless it has `op://` references, which it
+  reads again.
 - Log events: `oauth_signed_in`, `oauth_refreshed`, `oauth_refresh_failed`,
   `oauth_signed_out`, and `oauth_sign_in_failed` with `stage` (`discovery`,
   `registration`, `authorization`, `callback`, `token_exchange`, `token_save`)
@@ -620,9 +633,11 @@ and prints no token. `auth lock` as built: see "1Password sessions as built
   `runtime restart` drops it. Concurrent requests share one token request. A
   token is minted again when `max(lifetime/5, 10 s)`, capped at `lifetime/2`,
   remains (Front: 180 s before the 900 s expiry); one without `expires_in` is
-  used until a 401. `auth login` and `auth logout` refuse such a connection
-  offline (`invalid_arguments`, "there is nothing to sign in to") and
-  `auth status` leaves it out. Token-endpoint failures: `invalid_client` and
+  used until a 401. `auth <mcp>` gets a new token now: it retires the pooled
+  session, connects again (a new token is minted, log trigger `first`) and
+  lists tools, which proves the server accepts it; `{tokenRenewed: true}`.
+  `auth logout` refuses such a connection offline (`invalid_arguments`,
+  "there is nothing to sign in to") and `auth status` leaves it out. Token-endpoint failures: `invalid_client` and
   the other RFC 6749 codes give `auth_failed` naming the code; 5xx, 429,
   timeouts and network errors give `connection_failed`; no failure is cached
   past the request, and no body, secret or token appears in any output. Log
@@ -746,7 +761,7 @@ use starts the daemon again. No launchd agent is installed.
 - `auth status`: per item `state` (`ok`, `expiring`, `sign-in required`),
   `lastRefreshAt` (last sign-in or refresh), `refreshTokenExpiresAt` (that time
   plus its `refreshTtl`, when known), `cause {code, message}` and `nextAction`
-  (`mcparcel auth login <mcp>` when sign-in is required); for a signed-in
+  (`mcparcel auth <mcp>` when sign-in is required); for a signed-in
   session whose last sign-in followed a terminal failure, `previousCause
   {code, message}` says why that sign-in was needed (human output: `Last
   sign-in needed: …`); `events` only for `auth status <mcp>`. `expiring` means signed in with a known refresh-token
@@ -942,8 +957,8 @@ default shell is `/bin/sh` when `SHELL` is unset. What differs:
   headless configuration, so it fails at once instead of running desktop
   mode by accident. With a `config.json`, desktop mode runs without a desktop
   session, for example in a devcontainer or over SSH without a user bus:
-  service-account profiles and `env:` references work, and `auth login` is
-  refused (see below). The daemon a CLI starts does not check again. Doctor's
+  service-account profiles and `env:` references work, and a sign-in through
+  `auth <mcp>` is refused (see below). The daemon a CLI starts does not check again. Doctor's
   `runtime.mode` row applies the same rule. Offline commands always work.
 - 1Password: only `service-account` profiles. The 1Password desktop app
   integration is macOS only, so the daemon never wires it; a connection bound
@@ -968,14 +983,15 @@ default shell is `/bin/sh` when `SHELL` is unset. What differs:
   when it passes the same check, and never `DISPLAY`, `WAYLAND_DISPLAY` or
   `XDG_RUNTIME_DIR`. A daemon started from SSH keeps that bus until
   `runtime restart`.
-- `auth login` without a keyring: when no runtime runs and this session has
-  no usable bus, the CLI refuses before starting one (`keychain_unavailable`,
+- A sign-in through `auth <mcp>` without a keyring: when no runtime runs and
+  this session has no usable bus, the CLI refuses before starting one (`keychain_unavailable`,
   "No Secret Service keyring is reachable from this session (no usable D-Bus
   session bus), so MCParcel cannot store a sign-in."). A running daemon has
   its own bus; its keyring preflight (see "OAuth as built") refuses instead,
   before any browser opens. Over SSH with a systemd user bus, the offline
   check passes and a refusal comes from the preflight, which can wait up to
-  2 minutes.
+  2 minutes. `auth <mcp>` for `op://` references through a service-account
+  profile or for a `client_credentials` connection needs no keyring.
 - Prompts: Secret Service calls run one at a time. A locked keyring shows
   the provider's unlock dialog during the login preflight; unlocked within 2
   minutes, the sign-in goes on, otherwise the login exits 3 before any
@@ -1061,8 +1077,10 @@ Kubernetes sidecar. The deployment guide is [headless.md](headless.md).
   and doctor as well as in the runtime. A connection that needs browser
   sign-in fails `auth_required` ("This server needs sign-in, which headless
   mode cannot do."), or, when its credentials are `env:` references, names
-  those variables; nothing is written to a Keychain. `auth login` is refused
-  before the runtime starts. `auth status` lists no sign-ins (`items` is
+  those variables; nothing is written to a Keychain. A sign-in through
+  `auth <mcp>` is refused before the runtime starts; `auth <mcp>` still reads
+  service-account `op://` values again and renews `client_credentials`
+  tokens. `auth status` lists no sign-ins (`items` is
   empty), but lists the credential profiles of enabled connections, with
   their session state from a running daemon. `auth lock` ends service-account
   sessions, and the next call bootstraps again from the token. Keep-alive and

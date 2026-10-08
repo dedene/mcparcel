@@ -44,16 +44,12 @@ type Client struct {
 	// daemon (doctor --live in an unsupervised headless runtime).
 	NoStart bool
 	NoInput bool
-	// OnAuthURL receives the authorization URL of a running login.
+	// OnAuthURL receives the authorization URL of a running sign-in.
 	OnAuthURL func(string)
 	// Prompt ("terminal" or "dialog") and OnElicit let a call's server ask
 	// its user; OnElicit must return once its context ends.
 	Prompt   string
 	OnElicit func(context.Context, elicit.Prompt) elicit.Answer
-}
-type LoginData struct {
-	Connection string `json:"connection"`
-	SignedIn   bool   `json:"signedIn"`
 }
 type LogoutData struct {
 	Connection      string `json:"connection"`
@@ -315,7 +311,7 @@ func (c *Client) exchangeAck(ctx context.Context, intent string, r Request, ensu
 				}
 				continue
 			}
-			if v.f.Kind == "auth_url" && r.Method == "login" {
+			if v.f.Kind == "auth_url" && r.Method == "auth" {
 				var u AuthURL
 				if decodeBody(v.f.Body, &u) != nil {
 					return c.lost(ctx, id, attempted)
@@ -391,9 +387,11 @@ func (c *Client) Call(ctx context.Context, req CallRequest) (CallResponse, error
 	return out, e
 }
 
-func (c *Client) Login(ctx context.Context, id string) (LoginData, error) {
-	var out LoginData
-	r, _, e := c.exchange(ctx, "work", Request{Method: "login", Connection: id, Arguments: emptyArgs(), NoInput: c.NoInput}, true)
+// Auth makes a connection's credentials fresh through the runtime, which it
+// starts if needed. name is what the user typed; messages use it.
+func (c *Client) Auth(ctx context.Context, name string) (AuthData, error) {
+	var out AuthData
+	r, _, e := c.exchange(ctx, "work", Request{Method: "auth", Connection: name, Arguments: emptyArgs(), NoInput: c.NoInput}, true)
 	if e == nil {
 		e = decodeBody(r.Data, &out)
 	}
@@ -414,20 +412,6 @@ func (c *Client) Logout(ctx context.Context, canonical string) (LogoutData, erro
 func (c *Client) Lock(ctx context.Context) (LockData, error) {
 	var out LockData
 	r, _, e := c.exchange(ctx, "work", Request{Method: "lock", Arguments: emptyArgs()}, true)
-	if e == nil {
-		e = decodeBody(r.Data, &out)
-	}
-	return out, e
-}
-
-// Refresh drops a connection's cached 1Password values. It never starts the
-// daemon: a daemon that is not running caches nothing.
-func (c *Client) Refresh(ctx context.Context, canonical string) (RefreshData, error) {
-	out := RefreshData{Connection: canonical}
-	r, _, e := c.exchange(ctx, "work", Request{Method: "refresh", Connection: canonical, Arguments: emptyArgs()}, false)
-	if errors.Is(e, os.ErrNotExist) || errors.Is(e, syscall.ECONNREFUSED) {
-		return out, nil
-	}
 	if e == nil {
 		e = decodeBody(r.Data, &out)
 	}

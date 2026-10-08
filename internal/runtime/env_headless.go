@@ -141,8 +141,8 @@ func headlessMissingEnv(names []string) *output.Error {
 }
 
 // HeadlessSignIn is the error for a sign-in asked of headless mode, which has
-// no browser and no Keychain: auth login there is refused before the runtime
-// starts.
+// no browser and no Keychain: a sign-in through auth <mcp> there is refused
+// before the runtime starts.
 func HeadlessSignIn() *output.Error { return headlessSignIn(nil) }
 
 // headlessSignIn is auth_required for a server that asks a headless runtime

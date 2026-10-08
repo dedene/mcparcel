@@ -195,7 +195,7 @@ func TestIssuerChangeRecordsReauthorization(t *testing.T) {
 	if e := health.last(t); e.Kind != auth.HealthReauthorizationRequired || e.Code != "issuer_changed" || !e.Terminal {
 		t.Fatalf("%+v", e)
 	}
-	if r := f.explain(t, health); r.Cause == nil || r.Cause.Code != "issuer_changed" || r.NextAction != "mcparcel auth login demo" {
+	if r := f.explain(t, health); r.Cause == nil || r.Cause.Code != "issuer_changed" || r.NextAction != "mcparcel auth demo" {
 		t.Fatalf("%+v", r)
 	}
 }

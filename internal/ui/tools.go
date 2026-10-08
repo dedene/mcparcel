@@ -234,7 +234,7 @@ func (m *Model) connectFailure(id string, err error) []string {
 	lines := []string{failure.Message}
 	next := failure.NextAction
 	if failure.Code == "auth_required" || failure.Code == "auth_expired" {
-		next = "Run mcparcel auth login " + output.DisplayMetadata(id) + "."
+		next = "Run mcparcel auth " + output.DisplayMetadata(output.AuthTarget(id, id)) + "."
 	}
 	if next != "" {
 		lines = append(lines, output.DisplayMetadata(next))

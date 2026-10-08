@@ -18,6 +18,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/dedene/mcparcel/internal/auth"
 	"github.com/dedene/mcparcel/internal/config"
 	"github.com/dedene/mcparcel/internal/testutil"
 )
@@ -366,12 +367,103 @@ func TestCCWrongSecretIsAuthFailed(t *testing.T) {
 	}
 }
 
-func TestCCLoginRefused(t *testing.T) {
-	r, s := ccRig(t, false)
+func ccAuth(r *poolRig, noInput bool) Response {
+	return r.h.Handle(testCtx(r.t), testID, authReq("a", noInput), nil)
+}
+
+// auth <mcp> drops the pooled token and mints a new one now; the next call
+// uses it without another grant.
+func TestCCAuthRenewsToken(t *testing.T) {
+	for name, headless := range map[string]bool{"desktop": false, "headless": true} {
+		t.Run(name, func(t *testing.T) {
+			r, s := ccRig(t, headless)
+			r.start()
+			count(t, r.call(testCtx(t), "a", "counter"))
+			res := ccAuth(r, false)
+			if string(res.Data) != `{"connection":"local:a","tokenRenewed":true}` {
+				t.Fatalf("%s %+v", res.Data, res.Error)
+			}
+			noCCLeak(t, responseText(res))
+			if s.grants() != 2 || r.closed.Load() != 1 || r.connects.Load() != 2 {
+				t.Fatal("grants", s.grants(), "closed", r.closed.Load(), "connects", r.connects.Load())
+			}
+			count(t, r.call(testCtx(t), "a", "counter"))
+			if s.grants() != 2 || r.connects.Load() != 2 {
+				t.Fatal("next call", s.grants(), r.connects.Load())
+			}
+			logged := s.logged()
+			if len(logged) != 2 || logged[1] != `oauth_token_minted {"trigger":"first","ttl":900}` {
+				t.Fatal(logged)
+			}
+			// --no-input is fine: no browser and no prompt.
+			if d := authData(t, ccAuth(r, true)); d.TokenRenewed == nil || s.grants() != 3 {
+				t.Fatal(d, s.grants())
+			}
+		})
+	}
+}
+
+func TestCCAuthMintFailure(t *testing.T) {
+	r, s := ccRig(t, true)
 	r.start()
-	res := r.login(testCtx(t), &loginBrowser{}, false)
-	responseCode(t, res, "invalid_arguments", false)
-	if res.Error.Message != "a uses client credentials; there is nothing to sign in to." || r.connects.Load() != 0 || s.grants() != 0 {
+	s.tokenDown.Store(true)
+	res := ccAuth(r, false)
+	r.h.(*pool).mu.Lock()
+	pooled := len(r.h.(*pool).entries)
+	r.h.(*pool).mu.Unlock()
+	if pooled != 0 {
+		t.Fatal("an entry stayed pooled", pooled)
+	}
+	tokenEndpointDown(t, r, s, res)
+}
+
+func TestCCAuthRejected(t *testing.T) {
+	r, s := ccRig(t, true)
+	r.start()
+	s.reject.Store(true)
+	res := ccAuth(r, false)
+	responseCode(t, res, "auth_failed", false)
+	if !strings.Contains(res.Error.Message, "token_rejected") {
 		t.Fatalf("%+v", res.Error)
+	}
+	noCCLeak(t, responseText(res))
+}
+
+// With a 1Password client secret, the secret is read again before the new
+// token is requested.
+func TestCCAuthBothOrder(t *testing.T) {
+	r, s := ccRig(t, false)
+	var mu sync.Mutex
+	var order []string
+	record := func(step string) { mu.Lock(); order = append(order, step); mu.Unlock() }
+	r.opts.Credentials = auth.NewResolver(auth.ResolverOptions{Provider: testutil.FakeProvider{BootstrapFunc: func(context.Context, config.Profile) (auth.SecretClient, error) {
+		return testutil.FakeSecretClient{ResolveFunc: func(context.Context, string) (string, error) {
+			record("vault")
+			return ccSecret, nil
+		}}, nil
+	}}})
+	tokenLog := r.opts.TokenLog
+	r.opts.TokenLog = func(event string, fields map[string]any) {
+		if event == "oauth_token_minted" {
+			record("mint")
+		}
+		tokenLog(event, fields)
+	}
+	c := r.personal.Connections["a"]
+	c.CredentialProfile = "shared"
+	c.Auth.ClientSecret = &config.Value{Secret: &config.SecretRef{Secret: "op://vault/front/secret"}}
+	r.personal.Connections["a"] = c
+	r.personal.CredentialProfiles["shared"] = config.ProfileRequirement{}
+	r.local.CredentialProfiles["shared"] = config.Profile{Mode: "desktop-service-account", Account: "fixture", BootstrapRef: "op://vault/bootstrap/token", SessionDuration: "24h"}
+	r.start()
+	count(t, r.call(testCtx(t), "a", "counter"))
+	res := ccAuth(r, false)
+	if string(res.Data) != `{"connection":"local:a","secretsRefreshed":true,"tokenRenewed":true}` {
+		t.Fatalf("%s %+v", res.Data, res.Error)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !slices.Equal(order, []string{"vault", "mint", "vault", "mint"}) || s.grants() != 2 {
+		t.Fatal(order, s.grants())
 	}
 }

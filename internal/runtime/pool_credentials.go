@@ -16,10 +16,6 @@ import (
 type LockData struct {
 	Locked bool `json:"locked"`
 }
-type RefreshData struct {
-	Connection  string `json:"connection"`
-	Invalidated bool   `json:"invalidated"`
-}
 
 // admitProtected marks w as protected work, which auth lock cancels. Work
 // admitted before a lock is refused here, before any provider call or prompt.
@@ -39,21 +35,11 @@ func (p *pool) admitProtected(w *poolWork) error {
 // process outlives a failed revalidation. A rate limit keeps it: the provider
 // refused this request only.
 func (p *pool) resolveLease(ctx context.Context, canonical string, c config.Connection, profile config.Profile, refs []string, noInput bool) (auth.Lease, error) {
-	authCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
-	defer cancel()
-	lease, e := p.opts.Credentials.Resolve(authCtx, c.CredentialProfile, profile, refs, noInput)
-	if e == nil && auth.Expired(p.opts.Now(), lease.SessionExpiresAt) {
-		e = auth.ErrExpired
-	}
+	lease, e := p.resolve(ctx, c, profile, refs, noInput)
 	if e == nil {
 		return lease, nil
 	}
-	if errors.Is(e, auth.ErrRateLimited) {
-		p.opts.Log("auth_rate_limited")
-		return lease, e
-	}
-	p.opts.Log("auth_failed")
-	if errors.Is(e, auth.ErrProvider) || errors.Is(e, auth.ErrExpired) || errors.Is(e, auth.ErrTokenUnavailable) || errors.Is(e, auth.ErrTokenUnsafe) {
+	if retiresProcess(e) {
 		p.mu.Lock()
 		entry := p.entries[canonical]
 		p.mu.Unlock()
@@ -61,12 +47,106 @@ func (p *pool) resolveLease(ctx context.Context, canonical string, c config.Conn
 			p.retire(canonical, entry)
 		}
 	}
-	if profile.PromptFree() {
-		if safe := p.serviceAccountError(c.CredentialProfile, profile, e); safe != nil {
-			return lease, safe
-		}
+	return lease, p.leaseError(c.CredentialProfile, profile, e)
+}
+
+// retiresProcess reports whether a failed revalidation stops the
+// connection's pooled process: a failed or expired session, or a
+// service-account token that can no longer be read. A rate limit does not.
+func retiresProcess(e error) bool {
+	return errors.Is(e, auth.ErrProvider) || errors.Is(e, auth.ErrExpired) || errors.Is(e, auth.ErrTokenUnavailable) || errors.Is(e, auth.ErrTokenUnsafe)
+}
+
+// retireAfterGate stops canonical's pooled process once the work holding its
+// gate ends: a failed re-read outside the gate must not cancel a running
+// call, yet no process outlives a failed revalidation.
+func (p *pool) retireAfterGate(canonical string) {
+	p.mu.Lock()
+	entry := p.entries[canonical]
+	if p.closed || entry == nil || entry.sweeping {
+		p.mu.Unlock()
+		return
+	}
+	entry.sweeping = true
+	p.sweeps.Add(1)
+	p.mu.Unlock()
+	go func() {
+		defer p.sweeps.Done()
+		gate := p.gate(canonical)
+		<-gate
+		defer func() { gate <- struct{}{} }()
+		p.retire(canonical, entry)
+	}()
+}
+
+// resolve reads a protected connection's lease and logs a failure. It
+// retires nothing, so it is safe without the connection's gate; its error is
+// the resolver's own (see leaseError).
+func (p *pool) resolve(ctx context.Context, c config.Connection, profile config.Profile, refs []string, noInput bool) (auth.Lease, error) {
+	authCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	defer cancel()
+	lease, e := p.opts.Credentials.Resolve(authCtx, c.CredentialProfile, profile, refs, noInput)
+	if e == nil && auth.Expired(p.opts.Now(), lease.SessionExpiresAt) {
+		e = auth.ErrExpired
+	}
+	switch {
+	case e == nil:
+	case errors.Is(e, auth.ErrRateLimited):
+		p.opts.Log("auth_rate_limited")
+	default:
+		p.opts.Log("auth_failed")
 	}
 	return lease, e
+}
+
+// leaseError maps a service-account profile's bootstrap failure to its
+// named error; any other error is returned as is.
+func (p *pool) leaseError(id string, profile config.Profile, e error) error {
+	if profile.PromptFree() && !errors.Is(e, auth.ErrRateLimited) {
+		if safe := p.serviceAccountError(id, profile, e); safe != nil {
+			return safe
+		}
+	}
+	return e
+}
+
+// rereadSecrets is auth <mcp> for a connection whose only credentials are
+// 1Password references: drop the cached values and read them again now, so
+// a prompt or error shows here. It holds no gate: an in-flight call keeps
+// the values it started with, and its connection reconnects on its next
+// call only when a value changed. A failed re-read stops the pooled process
+// once that call ends.
+func (p *pool) rereadSecrets(ctx context.Context, w *poolWork, req Request, plan AuthPlan, profile config.Profile, fail func(error) Response) Response {
+	if e := p.admitProtected(w); e != nil {
+		return fail(e)
+	}
+	c := plan.Connection
+	if e := p.rereadRefused(req.Connection, plan.Canonical, c.CredentialProfile, profile, req.NoInput); e != nil {
+		return fail(e)
+	}
+	p.opts.Credentials.Invalidate(c.CredentialProfile, plan.Refs)
+	p.opts.Log("credential_invalidated")
+	if _, e := p.resolve(ctx, c, profile, plan.Refs, req.NoInput); e != nil {
+		if retiresProcess(e) {
+			p.retireAfterGate(plan.Canonical)
+		}
+		return fail(p.leaseError(c.CredentialProfile, profile, e))
+	}
+	return authResponse(AuthData{Connection: plan.Canonical, SecretsRefreshed: ptr(true)}, fail)
+}
+
+// rereadRefused refuses a re-read that could only fail, before the cache is
+// dropped: a desktop-app profile where the app cannot be used (Linux, D8),
+// and --no-input with a "desktop" profile, which the resolver serves from
+// its cache only.
+func (p *pool) rereadRefused(name, canonical, profileID string, profile config.Profile, noInput bool) error {
+	switch {
+	case p.opts.NoDesktopApp && profile.UsesDesktopApp():
+		return output.DesktopAppUnavailableError(profileID)
+	case noInput && profile.Mode == config.ProfileModeDesktop:
+		return output.RereadNeedsInputError(name, canonical)
+	}
+	return nil
 }
 
 // serviceAccountError names a service-account profile's token source in the
@@ -155,50 +235,6 @@ func (p *pool) lock(ctx context.Context) Response {
 		return Response{Error: output.NewError("internal_error", nil)}
 	}
 	return Response{Data: b}
-}
-
-// refresh drops the connection's cached 1Password values; its next call reads
-// them again and reconnects only when one changed. It holds no gate: an
-// in-flight call keeps the values it was started with.
-func (p *pool) refresh(name string) Response {
-	snapshot, e := p.opts.Load(p.opts.Paths)
-	if e != nil {
-		return Response{Error: poolError(e, nil, "", false)}
-	}
-	canonical, c, refs, e := RefreshTarget(snapshot, name)
-	if e != nil {
-		return Response{Error: poolError(e, nil, "", false)}
-	}
-	if p.opts.Credentials != nil {
-		p.opts.Credentials.Invalidate(c.CredentialProfile, refs)
-	}
-	p.opts.Log("credential_invalidated")
-	b, e := json.Marshal(RefreshData{Connection: canonical, Invalidated: true})
-	if e != nil {
-		return Response{Error: output.NewError("internal_error", nil)}
-	}
-	return Response{Data: b}
-}
-
-// RefreshTarget checks that name is a runtime connection with 1Password
-// references and returns its canonical ID, definition and references. The CLI
-// checks it too, so the answer does not depend on whether the daemon runs.
-func RefreshTarget(snapshot config.Snapshot, name string) (string, config.Connection, []string, error) {
-	canonical, c, e := snapshot.RuntimeConnection(name)
-	if e != nil {
-		return "", config.Connection{}, nil, e
-	}
-	refs := config.SecretRefs(c)
-	if len(refs) == 0 {
-		err := output.NewError("invalid_arguments", nil)
-		err.Message = name + " uses no 1Password secrets."
-		err.NextAction = ""
-		if len(config.EnvRefs(c)) > 0 {
-			err.NextAction = "mcparcel runtime restart"
-		}
-		return "", config.Connection{}, nil, err
-	}
-	return canonical, c, refs, nil
 }
 
 // CredentialSessions reports the credential profile sessions for runtime

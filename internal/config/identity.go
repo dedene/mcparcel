@@ -48,7 +48,9 @@ func CanonicalGitHub(owner, repo, id string) (string, error) {
 	return s, ValidateCanonicalID(s)
 }
 
-func connectionBase(id string) string {
+// ConnectionBase is a canonical ID's connection name: the part after
+// "local:" or after "#".
+func ConnectionBase(id string) string {
 	if s, ok := strings.CutPrefix(id, "local:"); ok {
 		return s
 	}
@@ -92,7 +94,7 @@ func ResolveID(name string, aliases map[string]string, ids []string) (string, er
 	}
 	candidates := []string{}
 	for _, id := range ids {
-		if connectionBase(id) == name {
+		if ConnectionBase(id) == name {
 			candidates = append(candidates, id)
 		}
 	}

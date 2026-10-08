@@ -230,7 +230,7 @@ func TestKeepAliveSkipsFresh(t *testing.T) {
 
 func TestKeepAliveDormantAfterTerminal(t *testing.T) {
 	for name, fail := range map[string]error{
-		"auth_required": auth.NotSignedIn("demo"),
+		"auth_required": auth.NotSignedIn("demo", "local:demo"),
 		"dormant":       auth.ErrKeepAliveDormant,
 	} {
 		t.Run(name, func(t *testing.T) {

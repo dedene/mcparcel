@@ -276,3 +276,46 @@ func TestHeadlessJSONContract(t *testing.T) {
 		t.Fatal(string(log), err)
 	}
 }
+
+// auth front drops the pooled client_credentials token and mints a new one
+// now; the next call uses it. It needs no browser, so --no-input works too.
+func TestHeadlessAuthRenewsTokenBlackBox(t *testing.T) {
+	r := newFrontRig(t, nil)
+	r.check(r.run("call", "front.counter", "--json"), 0, "")
+	if n := r.as.GrantCounts().ClientCredentials; n != 1 {
+		t.Fatal("grants", n)
+	}
+	v := r.check(r.run("auth", "front", "--json"), 0, "")
+	if string(v.envelope.Data) != `{"connection":"local:front","tokenRenewed":true}` || r.as.GrantCounts().ClientCredentials != 2 {
+		t.Fatal(v.stdout, r.as.GrantCounts())
+	}
+	r.check(r.run("call", "front.counter", "--json"), 0, "")
+	if n := r.as.GrantCounts().ClientCredentials; n != 2 {
+		t.Fatal("the next call minted again", n)
+	}
+	human := r.run("auth", "front", "--no-input")
+	if human.code != 0 || human.stdout != "Got a new access token for front.\n" || r.as.GrantCounts().ClientCredentials != 3 {
+		t.Fatalf("%q %q", human.stdout, human.stderr)
+	}
+}
+
+// A sign-in through auth <mcp> is refused offline in headless mode: no
+// runtime starts and nothing claims to open a browser.
+func TestHeadlessAuthSignInRefusedBlackBox(t *testing.T) {
+	r := newFrontRig(t, nil)
+	r.personal.Connections["code"] = config.Connection{
+		Transport: config.Transport{HTTP: &config.HTTP{URL: config.Literal("https://code.example.invalid/mcp")}},
+		Auth:      &config.OAuth{Type: "oauth"},
+	}
+	// Only personal.json: save would rewrite config.json in desktop mode.
+	b, err := json.Marshal(r.personal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.write(r.paths.PersonalFile, string(b), 0o600)
+	v := r.check(r.run("auth", "code", "--json"), 3, "auth_required")
+	if !strings.Contains(v.stdout, "This server needs sign-in, which headless mode cannot do.") || strings.Contains(v.stdout+v.stderr, "browser") {
+		t.Fatal(v.stdout, v.stderr)
+	}
+	r.noRuntimeContact()
+}

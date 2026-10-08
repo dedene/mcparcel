@@ -1,8 +1,11 @@
 package doctor
 
 import (
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/dedene/mcparcel/internal/output"
 )
 
 func opDocs(env, bootstrap string) docs {
@@ -108,4 +111,60 @@ func TestDesktopEmitsNoEnvOrOAuthRows(t *testing.T) {
 	absent(t, checks, "credentials.oauth")
 	absent(t, checks, "credentials.reference")
 	absent(t, checks, "prereq.onepassword")
+}
+
+// A connection whose name, or an alias of it, is an auth subcommand is
+// shadowed in mcparcel auth <mcp>: doctor warns and names the canonical ID.
+func TestAuthNameShadowed(t *testing.T) {
+	d := docs{
+		personal: `{"schemaVersion":1,"connections":{
+"status":{"transport":{"type":"http","url":"https://a.example.invalid/mcp"},"auth":{"type":"oauth"}},
+"web":{"transport":{"type":"http","url":"https://b.example.invalid/mcp"}},
+"logout":{"transport":{"type":"stdio","command":"/bin/sh","env":{"K":"v"}}},
+"plain":{"transport":{"type":"http","url":"https://c.example.invalid/mcp"},"auth":{"type":"oauth"}}}}`,
+		local:      `{"schemaVersion":1,"aliases":{"lock":"local:web"}}`,
+		selections: `{"schemaVersion":1,"revision":1,"connections":{"local:status":{"enabled":true},"local:web":{"enabled":true},"local:logout":{"enabled":true},"local:plain":{"enabled":true}}}`,
+	}
+	checks := Offline(inputFor(t, d))
+	c := find(t, checks, "credentials.auth-name", "local:status")
+	want(t, c, Warn, "")
+	if c.Message != "mcparcel auth status runs the auth status command, not this connection." || c.NextAction != "Use mcparcel auth local:status to make its credentials fresh." {
+		t.Fatal(c)
+	}
+	if c = find(t, checks, "credentials.auth-name", "local:web"); c.Message != "mcparcel auth lock runs the auth lock command, not this connection." {
+		t.Fatal(c)
+	}
+	noAuthNameRow(t, checks, "local:logout", "local:plain")
+	// Headless mode refuses every sign-in, so pointing at the canonical ID
+	// would not help: no row for sign-in connections.
+	noAuthNameRow(t, Offline(headlessInput(inputFor(t, d))), "local:status", "local:web", "local:logout", "local:plain")
+}
+
+// In headless mode the row stays for a client_credentials connection, which
+// auth <mcp> renews, and is dropped for a sign-in whose client secret is a
+// 1Password reference, which headless mode refuses as a whole.
+func TestAuthNameShadowedHeadless(t *testing.T) {
+	d := docs{
+		personal: `{"schemaVersion":1,"credentialProfiles":{"team":{}},"connections":{
+"status":{"transport":{"type":"http","url":"https://a.example.invalid/mcp"},"auth":{"type":"oauth","grant":"client_credentials","tokenUrl":"https://a.example.invalid/token","clientId":{"secret":"env:CC_ID"},"clientSecret":{"secret":"env:CC_SECRET"}}},
+"web":{"credentialProfile":"team","transport":{"type":"http","url":"https://b.example.invalid/mcp"},"auth":{"type":"oauth","clientId":"id","clientSecret":{"secret":"op://v/i/f"}}}}}`,
+		local:      `{"schemaVersion":1,"aliases":{"lock":"local:web"},"credentialProfiles":{"ops":{"mode":"service-account","tokenEnv":"OP_SERVICE_ACCOUNT_TOKEN"}}}`,
+		selections: `{"schemaVersion":1,"revision":1,"connections":{"local:status":{"enabled":true},"local:web":{"enabled":true,"credentialProfile":"ops"}}}`,
+	}
+	checks := Offline(headlessInput(inputFor(t, d)))
+	c := find(t, checks, "credentials.auth-name", "local:status")
+	want(t, c, Warn, "")
+	if c.NextAction != "Use mcparcel auth local:status to make its credentials fresh." {
+		t.Fatal(c)
+	}
+	noAuthNameRow(t, checks, "local:web")
+}
+
+func noAuthNameRow(t *testing.T, checks []output.DoctorCheck, subjects ...string) {
+	t.Helper()
+	for _, row := range checks {
+		if row.ID == "credentials.auth-name" && slices.Contains(subjects, row.Subject) {
+			t.Fatal("unexpected row", row)
+		}
+	}
 }

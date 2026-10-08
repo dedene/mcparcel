@@ -9,6 +9,7 @@ import (
 
 	"github.com/dedene/mcparcel/internal/config"
 	"github.com/dedene/mcparcel/internal/output"
+	runtimeclient "github.com/dedene/mcparcel/internal/runtime"
 )
 
 // opRef is one 1Password reference and where it sits. Only where is ever shown.
@@ -76,6 +77,9 @@ func credentialChecks(in Input, row config.EffectiveConnection) []output.DoctorC
 	if mode != config.ModeDesktop && mode != config.ModeHeadless {
 		return checks
 	}
+	if check, ok := authNameCheck(in, row.ID, *c); ok {
+		checks = append(checks, check)
+	}
 	// Headless mode reaches 1Password only through a service-account
 	// profile; config.connection reports any other.
 	name, p, bound := boundProfile(in, c)
@@ -96,6 +100,34 @@ func credentialChecks(in Input, row config.EffectiveConnection) []output.DoctorC
 		checks = append(checks, output.DoctorCheck{ID: "credentials.oauth", Subject: id, Status: Fail, Code: "auth_required", Message: "This server needs sign-in, which headless mode cannot do.", NextAction: `Use an OAuth client_credentials grant (auth.grant "client_credentials") for this connection in headless mode.`})
 	}
 	return checks
+}
+
+// authNameCheck warns when the connection's name, or an alias of it, is an
+// auth subcommand: mcparcel auth <name> runs that command, so the
+// connection is reached by its canonical ID. Headless mode refuses any
+// sign-in, so there the row is only for connections auth <mcp> can renew.
+func authNameCheck(in Input, id string, c config.Connection) (output.DoctorCheck, bool) {
+	if !runtimeclient.HasAuthTarget(c) || Mode(in) == config.ModeHeadless && runtimeclient.PlansSignIn(c) {
+		return output.DoctorCheck{}, false
+	}
+	names := []string{config.ConnectionBase(id)}
+	if in.Snapshot != nil && in.Snapshot.Effective != nil {
+		for _, alias := range slices.Sorted(maps.Keys(in.Snapshot.Effective.Aliases)) {
+			if in.Snapshot.Effective.Aliases[alias] == id {
+				names = append(names, alias)
+			}
+		}
+	}
+	for _, name := range names {
+		if slices.Contains(output.AuthSubcommands, name) {
+			return output.DoctorCheck{
+				ID: "credentials.auth-name", Subject: show(id), Status: Warn,
+				Message:    "mcparcel auth " + show(name) + " runs the auth " + show(name) + " command, not this connection.",
+				NextAction: "Use mcparcel auth " + show(id) + " to make its credentials fresh.",
+			}, true
+		}
+	}
+	return output.DoctorCheck{}, false
 }
 
 func referenceCheck(id string, refs []opRef) output.DoctorCheck {
