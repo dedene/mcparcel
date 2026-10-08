@@ -52,7 +52,7 @@ also work via `npx mcparcel ...`. No global installation or Homebrew is required
 | `setup` | Interactive domain and connection editor (see "Domain matrix and terminal sketch"); renders on stderr, prints `Configuration saved at revision N.` or `No changes saved.` on stdout (plus `The last save could not be confirmed. Run mcparcel list to check the configuration.` after an unconfirmed save); Ctrl+C exits 130 after printing any save that already happened |
 | `sync [<owner/repo>] [--apply [--accept <mcp>...]]` | Fetch and display update; only `--apply` changes active snapshot; `--accept` unblocks named connections whose execution or auth changed |
 | `import mcporter --file <path> [--bindings <file>] [--only <id>...] [--apply]` | Preview or apply supported imports, with explicit unresolved-field report; unbound `${NAME}` in env/header values becomes `env:NAME` with an `environment_reference` warning |
-| `local add --file <definition.json>` | Add a connection object containing `id` plus catalog connection fields |
+| `local add --file <definition.json>` | Add a connection object containing `id` plus catalog connection fields. `domains` declares each ID it names; `other` is reserved (omit `domains` instead). An invalid file fails `invalid_config` with `Invalid definition: <field path>: <reason>.`; any other `invalid_config` with a field error reads `Invalid configuration: <field path>: <reason>.` |
 | `local update <id> --file <definition.json>` | Replace that personal connection atomically; matching ID required |
 | `local remove <id>` | Remove personal definition; never mutate a team catalog |
 | `config validate --file <catalog.json>` | Validate schema and references offline |

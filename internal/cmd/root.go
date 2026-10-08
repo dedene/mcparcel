@@ -295,7 +295,12 @@ func safeFailure(err error) *output.Error {
 	case errors.Is(err, config.ErrConfigWrite), errors.Is(err, config.ErrDurability):
 		code = "config_write_failed"
 	}
-	return output.NewError(code, nil)
+	failure := output.NewError(code, nil)
+	// A field error names the field and a fixed reason, never a value.
+	if reason := config.FieldReason(err); code == "invalid_config" && reason != "" {
+		failure.Message = "Invalid configuration: " + reason + "."
+	}
+	return failure
 }
 
 func writeFailure(out, errOut io.Writer, jsonMode bool, err error) int {

@@ -316,3 +316,29 @@ func TestLocalDecoderCopy(t *testing.T) {
 		t.Fatal("decoder shares nested pointers")
 	}
 }
+
+// An invalid definition names the failing field, never a value.
+func TestLocalAddNamesField(t *testing.T) {
+	p := metadataEnv(t)
+	for raw, want := range map[string]string{
+		`{"id":"paper","domains":["other"],"transport":{"type":"stdio","command":"fixture"}}`:                  `domains: other is reserved; omit domains to list the connection under Other`,
+		`{"id":"paper","transport":{"type":"stdio","command":"fixture"},"callTimeout":"soon"}`:                 `connections.paper.callTimeout: positive duration required`,
+		`{"id":"paper","transport":{"type":"stdio","command":"fixture","env":{"TOKEN":"secret-value"}},"x":1}`: `connections.paper.x: unknown field`,
+	} {
+		file := localFile(t, p, raw)
+		got, out, _ := run(t, "local", "add", "--file", file, "--json")
+		if got != 2 || !strings.Contains(out, `"code":"invalid_config"`) || !strings.Contains(out, `"message":"Invalid definition: `+want+`."`) || !strings.Contains(out, "Fix the definition file") || strings.Contains(out, "secret-value") {
+			t.Fatal(raw, out)
+		}
+	}
+	file := localFile(t, p, localPaper)
+	selectionRun(t, 0, "", "local", "add", "--file", file)
+	localFile(t, p, strings.Replace(localPaper, "old", "new", 1))
+	if got, _, errOut := run(t, "local", "add", "--file", file); got != 2 || !strings.Contains(errOut, "id: a different connection with this ID exists; use local update") {
+		t.Fatal(got, errOut)
+	}
+	localFile(t, p, strings.Replace(localPaper, `"id":"paper"`, `"id":"other"`, 1))
+	if got, out, _ := run(t, "local", "update", "paper", "--file", file, "--json"); got != 2 || !strings.Contains(out, "id: does not match the connection being updated") {
+		t.Fatal(got, out)
+	}
+}

@@ -2,9 +2,11 @@ package cmd
 
 import (
 	"context"
+	"strings"
 
 	"github.com/dedene/mcparcel/internal/config"
 	"github.com/dedene/mcparcel/internal/edit"
+	"github.com/dedene/mcparcel/internal/output"
 )
 
 type LocalCmd struct {
@@ -39,7 +41,7 @@ func (c *LocalAddCmd) Run(ctx context.Context, s *Streams, opts *CommandOptions)
 	}
 	next, err := store.Update(ctx, state.Selections.Revision, func(draft *config.State) error {
 		_, err := edit.StageLocalAdd(draft, raw)
-		return err
+		return definitionError(err)
 	})
 	if err != nil {
 		return err
@@ -61,7 +63,7 @@ func (c *LocalUpdateCmd) Run(ctx context.Context, s *Streams, opts *CommandOptio
 		return err
 	}
 	next, err := store.Update(ctx, state.Selections.Revision, func(draft *config.State) error {
-		return edit.StageLocalUpdate(draft, id, raw)
+		return definitionError(edit.StageLocalUpdate(draft, id, raw))
 	})
 	if err != nil {
 		return err
@@ -89,4 +91,18 @@ func (c *LocalRemoveCmd) Run(ctx context.Context, s *Streams, opts *CommandOptio
 		return err
 	}
 	return writeMutation(s, opts, next)
+}
+
+// definitionError points a field error in the --file definition at that file
+// rather than at personal.json. The decoder's "catalog." root is not part of
+// the file the user wrote.
+func definitionError(err error) error {
+	reason := strings.TrimPrefix(config.FieldReason(err), "catalog.")
+	if reason == "" {
+		return err
+	}
+	failure := output.NewError("invalid_config", nil)
+	failure.Message = "Invalid definition: " + reason + "."
+	failure.NextAction = "Fix the definition file, then run the command again."
+	return failure
 }

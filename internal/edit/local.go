@@ -2,6 +2,7 @@ package edit
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 
@@ -52,6 +53,9 @@ func DecodeLocalDefinition(raw []byte, personal config.Catalog) (string, config.
 	if domains, ok := obj["domains"].([]any); ok {
 		for _, domain := range domains {
 			if name, ok := domain.(string); ok {
+				if name == "other" {
+					return "", config.Catalog{}, fieldError("domains", "other is reserved; omit domains to list the connection under Other")
+				}
 				if _, exists := normalized.Domains[name]; !exists {
 					normalized.Domains[name] = config.Domain{Label: name}
 				}
@@ -87,6 +91,12 @@ func DecodeLocalDefinition(raw []byte, personal config.Catalog) (string, config.
 	return id, result, nil
 }
 
+// fieldError is a config.ErrConfig that config.FieldReason reports as
+// "<path>: <reason>".
+func fieldError(path, reason string) error {
+	return fmt.Errorf("%w: %s: %s", config.ErrConfig, path, reason)
+}
+
 // StageLocalAdd adds a personal definition, stored disabled. An equal existing
 // definition is a no-op; a different one is ErrConfig.
 func StageLocalAdd(draft *config.State, raw []byte) (string, error) {
@@ -96,7 +106,7 @@ func StageLocalAdd(draft *config.State, raw []byte) (string, error) {
 	}
 	if existing, ok := draft.Personal.Connections[id]; ok {
 		if !reflect.DeepEqual(existing, personal.Connections[id]) {
-			return "", config.ErrConfig
+			return "", fieldError("id", "a different connection with this ID exists; use local update")
 		}
 		return id, nil
 	}
@@ -119,7 +129,7 @@ func StageLocalUpdate(draft *config.State, id string, raw []byte) error {
 		return err
 	}
 	if fileID != id {
-		return config.ErrConfig
+		return fieldError("id", "does not match the connection being updated")
 	}
 	before, exists := draft.Personal.Connections[id]
 	if !exists {
