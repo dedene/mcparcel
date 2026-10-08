@@ -21,7 +21,7 @@ import (
 )
 
 // HTTPReport is one row of the HTTP/OAuth probe. It holds no URL, token or
-// header value, so rows can be pasted into docs/feasibility.md.
+// header value, so rows can be shared as evidence.
 type HTTPReport struct {
 	Name             string   `json:"name"`
 	ConfiguredAuth   string   `json:"configuredAuth"` // oauth, header or none

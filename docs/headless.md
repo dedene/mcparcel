@@ -6,12 +6,10 @@ it with the Front client credentials, and MCParcel mints an OAuth
 `client_credentials` token, applies the tool policy and calls Front's MCP
 server. The agent container holds no secret.
 
-Built in stage 12 ([plan](superpowers/plans/2026-10-07-mcparcel-stage-12-headless-linux.md)).
 The contracts behind this guide are in [runtime.md](runtime.md#headless-mode-stage-12),
-[catalog.md](catalog.md) and [cli.md](cli.md). The end-to-end proof through
-real claw-wrap in a read-only Linux container is in
-[feasibility.md](feasibility.md) (`make test-headless-e2e`). Not yet done: a
-run against the real Front server.
+[catalog.md](catalog.md) and [cli.md](cli.md). `make test-headless-e2e` proves
+the setup end to end through real claw-wrap in a read-only Linux container.
+Not yet done: a run against the real Front server.
 
 ## The pod
 

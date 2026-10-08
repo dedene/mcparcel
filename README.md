@@ -1,107 +1,153 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/brand/logo-dark.svg">
+    <img alt="MCParcel" src="docs/brand/logo-light.svg" width="320">
+  </picture>
+</p>
+
 # MCParcel
 
-Eén CLI voor alle MCP-aanroepen, met een centraal onderhouden teamcatalogus,
-persoonlijke toolselecties en credentials uit 1Password.
-
-MCParcel wordt een zelfstandige vervanger van mcporter. Agents en harnesses
-gebruiken dezelfde CLI; serverconfiguratie en authenticatie hoeven niet in elke
-AI-client afzonderlijk onderhouden te worden.
-
-## Beoogde ervaring
-
-Onderstaande commando's beschrijven de gewenste interface. Ze bestaan nog niet.
+One CLI for every MCP call. A team keeps its MCP server definitions in a
+GitHub repository, each person picks the servers and tools they want, and
+credentials are fetched only when a call needs them.
 
 ```sh
-npx mcparcel add acme/mcp-catalog
-npx mcparcel setup
-npx mcparcel list
-npx mcparcel call <server>.<tool> key=value
+mcparcel tools context7
+mcparcel call context7.resolve-library-id libraryName=react query="React hooks"
 ```
 
-`add` koppelt de GitHub-repository als catalogusbron. `setup` opent een terminalinterface
-waarin je per domein, zoals Design of Servers, MCP's uit catalogi of lokale configuratie
-activeert. De eerste aanroep die credentials nodig heeft, regelt de authenticatie;
-een expliciet unlockcommando hoort niet bij de normale workflow.
+Agents and harnesses all use the same command, so you configure servers and
+sign-ins once instead of in every AI client. One line in a global `AGENTS.md`
+is enough:
 
-`setup` werkt volledig met het toetsenbord: pijltjes om te navigeren, spatie om een MCP
-aan of uit te zetten, Enter voor details, Ctrl+S om te bewaren en `?` voor alle toetsen.
+> Use mcparcel for all MCP calls.
 
-De voorbeelden gebruiken `npx` en vereisen geen globale installatie. Een blijvende
-native installatie met een rechtstreeks `mcparcel`-commando blijft mogelijk; de
-precieze distributiewijze moet nog worden uitgewerkt.
+## Why
 
-In de globale `AGENTS.md` volstaat één instructie:
+If you use more than a couple of MCP servers across Claude Code, Codex and
+other agents, the configuration drifts. Every client has its own server list,
+API keys end up in plain JSON files, and each new teammate rebuilds the setup
+by hand. MCParcel puts the shared part in one place and keeps the personal part
+on your machine:
 
-> Gebruik mcparcel voor alle MCP-aanroepen.
-
-- Het team onderhoudt serverdefinities en secretverwijzingen centraal.
-- Iedere collega kiest welke servers en tools actief zijn en kan eigen servers toevoegen.
-- Lokale MCP's, zoals Paper, blijven op de eigen laptop werken.
-- Credentials worden alleen opgehaald wanneer de gekozen server ze nodig heeft.
-- Na een eenmalige autorisatie kan een werksessie zonder herhaalde biometrische prompts doorgaan.
-
-De CLI en terminalinterface worden volledig Engelstalig.
-
-## Documentatie
-
-Begin bij de [roadmap](docs/superpowers/plans/2026-10-04-mcparcel.md). Die bevat
-de keuzes, elf bouwstappen, bestanden, tests en acceptatiepoorten. Elke stap krijgt
-een eigen gedetailleerd plan; het
-[plan voor stap 1](docs/superpowers/plans/2026-10-04-mcparcel-stage-1-feasibility.md)
-is klaar om uit te voeren. Publicatie vraagt een afzonderlijke opdracht.
-
-- [CLI-contract en terminalschets](docs/cli.md): commando’s en Engelstalige interface.
-- [Catalogus en persoonlijke configuratie](docs/catalog.md): JSON-model, bronnen, merge en import.
-- [Runtime en authenticatie](docs/runtime.md): daemon, 1Password, OAuth, sessies en procesbeheer.
-- [Compatibiliteitsbasis](docs/compatibility.md): alle 32 huidige MCP’s moeten bruikbaar blijven.
-- [Onderzoeksbasis](docs/research.md): primaire bronnen, gecontroleerde feiten en nog te bewijzen aannames.
-- [Productrichting](docs/product.md): oorspronkelijke behoeften en productgrenzen.
-
-Het bouwplan beveelt Go op macOS arm64 aan, met API-keys in 1Password en persoonlijke
-OAuth-sessies in Keychain. Die OAuth-opslag is een expliciete ontwerpkeuze ter review.
-Een lokale sessie van 24 uur garandeert geen onmiddellijke intrekking bij offboarding.
+- A **catalog** is a JSON file in a GitHub repo. It holds server definitions and
+  secret references, never secret values. `mcparcel add <owner/repo>`
+  registers one, and `mcparcel sync` shows what changed before you apply it.
+- Your **selection** of servers and tools stays local. `mcparcel setup` is a
+  keyboard-driven terminal UI with tabs per domain (Design, Research, …).
+  `enable` and `disable` do the same from scripts.
+- **Personal connections** (a local app such as Paper, a server only you use)
+  live next to the catalogs and never touch them.
+- **Credentials** come from 1Password (`op://` references) or environment
+  variables. OAuth sign-ins are stored in the macOS Keychain and refreshed for
+  you. One 1Password approval covers a work session, so you don't get a
+  biometric prompt on every call.
+- A local **runtime** keeps server sessions open between calls, so an agent
+  doesn't pay a cold start on each tool call.
 
 ## Status
 
-Release candidate `0.1.0-rc.1`. It installs from a local tarball and is not
-published to npm. The npm package supports macOS on Apple Silicon only; Linux
-runs headless from a static binary (see [docs/headless.md](docs/headless.md)).
-The macOS binary is ad-hoc signed. It is not Developer ID signed or notarized.
+Release candidate `0.1.0-rc.1`. It is used daily, but it is early software:
 
-## Install from a local tarball
+- The desktop build runs on **macOS with Apple Silicon** only. The binary is
+  ad-hoc signed, not notarized.
+- On **Linux** it runs headless from a static binary, for example as a
+  Kubernetes sidecar. There is no 1Password or Keychain integration there; see
+  [docs/headless.md](docs/headless.md).
+- It is not published to npm yet. You build and install it from source.
 
-You need Node.js 20 or newer; Go and Homebrew are not needed to run it.
+## Install
+
+You need Go 1.26 and Node.js 20 or newer.
 
 ```sh
+git clone https://github.com/dedene/mcparcel.git
+cd mcparcel
 make npm-pack
-npx --yes --package ./dist/mcparcel-0.1.0-rc.1.tgz mcparcel doctor
-# or install it globally
 npm install -g ./dist/mcparcel-0.1.0-rc.1.tgz
 ```
 
-Upgrading, rolling back and returning to mcporter are described in
-[docs/migration.md](docs/migration.md).
+Or run it without a global install:
+`npx --yes --package ./dist/mcparcel-0.1.0-rc.1.tgz mcparcel doctor`.
+Upgrades and rollbacks are in [docs/migration.md](docs/migration.md).
 
 ## Getting started
 
-1. Run `mcparcel doctor`. It is offline and writes nothing; fix any `fail` row
-   with the next action it shows.
-2. Preview an import of your mcporter servers:
-   `mcparcel import mcporter --file ~/.mcporter/mcporter.json`. The preview shows
-   what would be imported and what still needs a credential binding. When it is
-   right, run it again with `--bindings <file>` (if needed) and `--apply`.
-   mcporter's file is only read.
-3. Choose connections per domain with `mcparcel setup` (keyboard only), or with
-   `mcparcel enable <mcp>` from scripts and agents.
-4. Make a first call:
+1. Run `mcparcel doctor`. It works offline and writes nothing. Every `fail` row
+   tells you what to do next.
+2. Coming from [mcporter](https://github.com/openclaw/mcporter)? Preview an
+   import of its config with
+   `mcparcel import mcporter --file ~/.mcporter/mcporter.json`. The preview
+   lists what would be imported and which values still need a credential
+   binding. Add `--apply` once it looks right. MCParcel only reads mcporter's
+   file, so mcporter keeps working and you can switch one server at a time.
+3. Pick your servers with `mcparcel setup`, or `mcparcel enable <mcp>`.
+4. Look at a server's tools and make a call:
 
    ```sh
    mcparcel tools context7
-   mcparcel call context7.resolve-library-id libraryName=react query="React hooks"
+   mcparcel call context7.resolve-library-id libraryName=react
    ```
 
-   OAuth connections need `mcparcel auth login <mcp>` once.
-5. Team catalogs: `mcparcel add <owner/repo>`. An example catalog is in
-   [docs/catalog.md](docs/catalog.md#shared-catalog-example).
-6. Switching from mcporter connection by connection, and rolling back, are in
-   [docs/migration.md](docs/migration.md).
+   Arguments are typed by the tool's schema. Add `--json` for one
+   machine-readable envelope with stable error codes.
+5. For a server that uses OAuth, sign in once with `mcparcel auth login <mcp>`.
+   A call never opens a browser by itself; it fails with `auth_required` and
+   tells you which command to run.
+
+## Team catalogs
+
+A catalog is a `mcparcel.json` file in any GitHub repository you can read
+(private repos work through `gh`):
+
+```json
+{
+  "schemaVersion": 1,
+  "name": "Example team",
+  "domains": {"research": {"label": "Research"}},
+  "credentialProfiles": {
+    "team": {"description": "Team API credentials from 1Password"}
+  },
+  "connections": {
+    "perplexity": {
+      "label": "Perplexity",
+      "domains": ["research"],
+      "credentialProfile": "team",
+      "transport": {
+        "type": "stdio",
+        "command": "npx",
+        "args": ["-y", "example-perplexity-mcp@1.0.0"],
+        "env": {
+          "PERPLEXITY_API_KEY": {"secret": "op://example-vault/perplexity/api-key"}
+        }
+      }
+    }
+  }
+}
+```
+
+Register it with `mcparcel add acme/mcp-catalog`. Validate a catalog before
+you push it with `mcparcel config validate --file mcparcel.json`. The full
+format, including HTTP servers, OAuth and inputs, is in
+[docs/catalog.md](docs/catalog.md).
+
+## Documentation
+
+- [docs/cli.md](docs/cli.md): commands, arguments, JSON output and exit codes.
+- [docs/catalog.md](docs/catalog.md): catalog format, local state and merging.
+- [docs/runtime.md](docs/runtime.md): the runtime, 1Password sessions and OAuth.
+- [docs/migration.md](docs/migration.md): installing, upgrading and moving over
+  from mcporter.
+- [docs/headless.md](docs/headless.md): running headless on Linux.
+
+## Development
+
+```sh
+make build   # bin/mcparcel
+make test    # unit and CLI tests
+make ci      # format, lint, vet, tests and packaging tests
+```
+
+## License
+
+[MIT](LICENSE)

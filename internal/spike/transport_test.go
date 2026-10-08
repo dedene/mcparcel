@@ -122,7 +122,7 @@ func TestLegacySSECall(t *testing.T) {
 }
 
 // TestStreamableAgainstSSEOnlyServerFails records how the SDK reports a
-// transport mismatch. The logged error text is evidence for docs/feasibility.md:
+// transport mismatch. The logged error text is evidence:
 // stage 5 uses it to decide when a legacy SSE fallback is allowed.
 func TestStreamableAgainstSSEOnlyServerFails(t *testing.T) {
 	ctx := testContext(t)
@@ -133,7 +133,7 @@ func TestStreamableAgainstSSEOnlyServerFails(t *testing.T) {
 	session, err := newClient().Connect(ctx, &mcp.StreamableClientTransport{Endpoint: httpServer.URL, MaxRetries: -1}, nil)
 	if err == nil {
 		session.Close()
-		t.Fatal("streamable client connected to an SSE-only server; the SDK falls back on its own, record this in feasibility.md")
+		t.Fatal("streamable client connected to an SSE-only server; the SDK falls back on its own")
 	}
 	t.Logf("mismatch error (%T): %v", err, err)
 }

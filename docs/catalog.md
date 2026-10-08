@@ -1,8 +1,7 @@
 # MCParcel catalog and local configuration
 
-Review draft, 4 October 2026. Proposed v1 contract, not implemented.
-This resolves the configuration questions in [product.md](product.md) and
-[cli.md](cli.md). Examples are fictional and contain no operational credentials.
+The catalog and local configuration contract, alongside [cli.md](cli.md).
+Examples are fictional and contain no operational credentials.
 
 ## Decisions proposed for v1
 
@@ -75,8 +74,7 @@ This resolves the configuration questions in [product.md](product.md) and
 
 The package name and endpoints above are deliberately non-operational. Obtain
 actual transport details from the local migration, not these documentation values.
-[All 32 existing connections](compatibility.md) must have sanitized fixtures before
-accepting the schema. Paper's real URL stays a local value, not a fabricated default.
+Paper's real URL stays a local value, not a fabricated default.
 
 ## Field contract
 

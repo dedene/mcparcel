@@ -1,7 +1,6 @@
 # MCParcel runtime and authentication
 
-Review draft, 4 October 2026. Proposed implementation contract; not tested software.
-See [catalog.md](catalog.md) for values and [research.md](research.md) for evidence.
+The runtime and authentication contract. See [catalog.md](catalog.md) for values.
 
 ## Architecture
 
@@ -211,7 +210,7 @@ and the CLI rejects a daemon response that already carries `artifacts`
 
 Protocol support starts with list/call, progress and cancellation. Stage 1 checks
 whether real workflows need resources/prompts, roots, elicitation or sampling.
-The audit (feasibility.md) found no resources, prompts, roots or sampling in use,
+An audit of real workflows found no resources, prompts, roots or sampling in use,
 so none are built; the client advertises form elicitation only, and a sampling
 request gets the SDK's -32601 (the call then ends however the server answers).
 Do not advertise unsupported client capabilities. A required missing capability
@@ -752,7 +751,7 @@ use starts the daemon again. No launchd agent is installed.
   `runtime status` reports `stayAlive` (`Stay-alive: on|off`).
 - Locked login Keychain: a background Keychain read while the login keychain
   is locked could make macOS show an unlock dialog. Tests cannot exercise
-  this; it is accepted, and the user confirms the behaviour by observation.
+  this; it is accepted and confirmed by observation.
 
 `runtime.approvalDialog: true` in `config.json` (default `false`) lets a call
 without a terminal (or with `--json`, never with `--no-input`) show a server's

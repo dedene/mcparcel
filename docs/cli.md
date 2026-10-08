@@ -384,7 +384,6 @@ secret-bearing messages are sanitized. No automatic execution of corrective hint
 
 ## Domain matrix and terminal sketch
 
-All 32 existing connections are covered by [compatibility.md](compatibility.md).
 A connection appearing in multiple tabs has one shared selection. For example,
 context7 belongs to Development and Research without creating two processes.
 
@@ -394,8 +393,8 @@ context7 belongs to Development and Research without creating two processes.
 | [Design 2/3]  Development 1/4  Research 0/4  Servers 0/2  ...                   |
 |                                                                              |
 | MCP          Enabled   Source                           Runs on              |
-| > Paper      [x]       acme/mcp-catalog    This device          |
-|   Figma      [ ]       acme/mcp-catalog    Remote               |
+| > Paper      [x]       acme/mcp-catalog                 This device          |
+|   Figma      [ ]       acme/mcp-catalog                 Remote               |
 |   Excalidraw [x]       Personal                         This device          |
 |                                                                              |
 | Paper                                                                        |
@@ -408,8 +407,7 @@ context7 belongs to Development and Research without creating two processes.
 +------------------------------------------------------------------------------+
 ```
 
-Sources and counts are illustrative; the as-built renders are in
-[acceptance.md](acceptance.md). The wide layout above (columns MCP, Enabled,
+Sources and counts are illustrative. The wide layout above (columns MCP, Enabled,
 State, Source, Runs on) needs at least 100x30. Anything smaller uses a compact
 list: MCP with a state tag (`(config)`, `(review)`, `(unavailable)`), Enabled,
 Runs on and a truncated Source, one summary line and one help line ending in
