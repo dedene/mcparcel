@@ -405,12 +405,15 @@ func TestSecretNeverInErrorsOrLogs(t *testing.T) {
 			}
 		}
 	}
+	// A mint logs after it hands over its result, so a log can still arrive:
+	// read logs only under the lock.
 	mu.Lock()
 	texts = append(texts, logs...)
+	logged := len(logs)
 	secrets := append([]string{ccSecret, ccID}, issued...)
 	mu.Unlock()
-	if len(logs) == 0 || len(secrets) != 4 {
-		t.Fatal("nothing logged or wrong mint count", len(logs), len(secrets))
+	if logged == 0 || len(secrets) != 4 {
+		t.Fatal("nothing logged or wrong mint count", logged, len(secrets))
 	}
 	for _, text := range texts {
 		for _, secret := range secrets {
