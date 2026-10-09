@@ -855,15 +855,23 @@ HTML-escaped. The page carries MCParcel's own identity; catalogs cannot restyle 
 
 ### Release version
 
-`packaging/npm/package.json` holds the release version (`0.1.0-rc.1`, still
+Releases are cut by pushing a `v<version>` tag. The release workflow
+(`.github/workflows/release.yml`) runs GoReleaser (`.goreleaser.yaml`) on a
+macOS runner: the darwin-arm64 binary is built with CGO and ad-hoc signed with
+the identifier `mcparcel`, the linux amd64 and arm64 binaries are static. It
+publishes the archives and `checksums.txt` as a GitHub release and updates the
+`mcparcel` formula in `dedene/homebrew-tap`. A release binary's version is the
+tag without the `v` (`0.1.0`).
+
+`packaging/npm/package.json` holds the same version (`0.1.0`, still
 `private: true`, so `npm publish` refuses). `make npm-binary` builds the
 darwin-arm64 binary as `<package.json version>+<commit>`, for example
-`0.1.0-rc.1+5319954009e0`, and `make npm-pack` packs it into
+`0.1.0+5319954009e0`, and `make npm-pack` packs it into
 `dist/mcparcel-<version>.tgz`. A build from a tree with uncommitted changes
-appends `.dirty.<UTC seconds>` (`0.1.0-rc.1+5319954009e0.dirty.20261007173258`),
+appends `.dirty.<UTC seconds>` (`0.1.0+5319954009e0.dirty.20261007173258`),
 so it never claims a clean commit. The handshake compares the whole string, so
-two builds of one release candidate, from different commits or from one dirty
-tree at different times, never pass as the same version; semver comparisons
+two builds of one version, from different commits or from one dirty tree at
+different times, never pass as the same version; semver comparisons
 (`minVersion`) ignore the build metadata after `+`.
 `make build` and `make build-linux` keep the `git describe` version: a dev or
 container build does not claim the release version.
@@ -943,8 +951,8 @@ a new binary. Both are still to be confirmed by hand on a clean macOS account.
 
 ## Linux desktop mode
 
-Desktop mode runs on Linux from the static binary (`make build-linux`,
-`CGO_ENABLED=0`, amd64 and arm64), with the same daemon, login-shell
+Desktop mode runs on Linux from the static binary (the release archives or
+`make build-linux`; `CGO_ENABLED=0`, amd64 and arm64), with the same daemon, login-shell
 capture, retained binary (a byte copy) and socket rules as on macOS; the
 default shell is `/bin/sh` when `SHELL` is unset. What differs:
 

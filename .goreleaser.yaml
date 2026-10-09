@@ -1,0 +1,80 @@
+version: 2
+
+project_name: mcparcel
+
+builds:
+  # The 1Password desktop app integration needs CGO, so the macOS build runs
+  # on a macOS runner. Ad-hoc signed with a stable identifier like make
+  # npm-binary (the linker's own signature says a.out); not notarized.
+  - id: mcparcel_darwin
+    main: ./cmd/mcparcel
+    binary: mcparcel
+    flags:
+      - -trimpath
+    ldflags: >-
+      -s -w
+      -X github.com/dedene/mcparcel/internal/cmd.version={{ .Version }}
+      -X github.com/dedene/mcparcel/internal/cmd.commit={{ .ShortCommit }}
+      -X github.com/dedene/mcparcel/internal/cmd.date={{ .Date }}
+    env:
+      - CGO_ENABLED=1
+    targets:
+      - darwin_arm64
+    hooks:
+      post:
+        - codesign --force --sign - --identifier mcparcel "{{ .Path }}"
+        - codesign --verify --strict "{{ .Path }}"
+  # Static: no 1Password desktop app integration; see docs/runtime.md.
+  - id: mcparcel_linux
+    main: ./cmd/mcparcel
+    binary: mcparcel
+    flags:
+      - -trimpath
+    ldflags: >-
+      -s -w
+      -X github.com/dedene/mcparcel/internal/cmd.version={{ .Version }}
+      -X github.com/dedene/mcparcel/internal/cmd.commit={{ .ShortCommit }}
+      -X github.com/dedene/mcparcel/internal/cmd.date={{ .Date }}
+    env:
+      - CGO_ENABLED=0
+    targets:
+      - linux_amd64
+      - linux_arm64
+
+archives:
+  - ids:
+      - mcparcel_darwin
+      - mcparcel_linux
+    formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^style:"
+      - "^test:"
+      - "^ci:"
+      - "^chore:"
+
+brews:
+  - repository:
+      owner: dedene
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Formula
+    homepage: https://github.com/dedene/mcparcel
+    description: Local MCP runtime with 1Password-backed credentials and team catalogs
+    license: MIT
+    install: |
+      bin.install "mcparcel"
+    test: |
+      system "#{bin}/mcparcel", "--version"
