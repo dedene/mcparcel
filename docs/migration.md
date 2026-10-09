@@ -1,46 +1,41 @@
 # Installing, upgrading and rolling back MCParcel
 
-Release candidate `0.1.0-rc.1`, 7 October 2026. MCParcel is installed from a local
-tarball; it is not published to npm. The npm package runs on macOS with Apple
-Silicon only; on Linux, use the static binary from `make build-linux` (see
+Version `0.1.0`. MCParcel is installed with Homebrew or from a GitHub release
+archive; it is not published to npm. On macOS it runs on Apple Silicon only;
+on Linux it is a static binary for amd64 and arm64 (see
 [runtime.md](runtime.md#linux-desktop-mode) and [headless.md](headless.md)). Moving from mcporter
 happens one connection at a time: see [Agent instructions during the mixed period](#agent-instructions-during-the-mixed-period).
 
 ## Install
 
-You need macOS on Apple Silicon and Node.js 20 or newer; running MCParcel needs
-neither Go nor Homebrew. Building the tarball in a checkout needs Go:
+With Homebrew, on macOS (Apple Silicon) or Linux:
 
 ```sh
-make npm-pack
-# writes dist/mcparcel-0.1.0-rc.1.tgz
-```
-
-Run it without installing:
-
-```sh
-npx --yes --package ./dist/mcparcel-0.1.0-rc.1.tgz mcparcel doctor
-```
-
-Or install it so `mcparcel` is on your PATH:
-
-```sh
-npm install -g ./dist/mcparcel-0.1.0-rc.1.tgz
+brew install dedene/tap/mcparcel
 mcparcel doctor
 ```
+
+Without Homebrew, download `mcparcel_<version>_<os>_<arch>.tar.gz` from
+[GitHub Releases](https://github.com/dedene/mcparcel/releases), check it
+against `checksums.txt` and put `mcparcel` on your PATH.
+
+From a checkout you can also build an npm tarball (needs Go and Node.js 20 or
+newer): `make npm-pack` writes `dist/mcparcel-<version>.tgz`, which
+`npm install -g` installs.
 
 `mcparcel doctor` is offline. It does not start the runtime, read the Keychain or
 1Password, or write anything. It exits 0 when no check failed and 8 when at least
 one did; every failed row has a next action. `mcparcel version` prints
-`mcparcel 0.1.0-rc.1+<commit> (<commit>, <date>)`; a tarball built from a
-checkout with uncommitted changes adds `.dirty.<UTC seconds>` after the commit.
+`mcparcel 0.1.0 (<commit>, <date>)` for a release; an npm tarball built from a
+checkout prints `<version>+<commit>`, and adds `.dirty.<UTC seconds>` when the
+checkout has uncommitted changes.
 
 The macOS binary is ad-hoc signed. It is not Developer ID signed or notarized.
 
 ## Upgrade
 
-1. Install the new tarball the same way (`npm install -g <new tgz>`, or `npx`
-   with the new tarball).
+1. Install the new version: `brew upgrade mcparcel`, or replace the binary
+   with the one from the new release archive.
 2. Run `mcparcel doctor`. If the runtime of the old version is still running,
    `runtime.version` fails and names both versions and the daemon's PID. Until
    you restart it, `tools` and `call` fail with `runtime_version_mismatch`.
@@ -57,7 +52,7 @@ to approve the new binary.
 
 The runtime runs from a copy of the binary in
 `~/.local/share/mcparcel/runtime/<version>/mcparcel`, so cleaning the npm or npx
-cache does not affect a running daemon. A new version's copy replaces all older
+cache, or `brew cleanup`, does not affect a running daemon. A new version's copy replaces all older
 copies except the most recent one, which stays for a rollback.
 
 If `add` or `sync` reports `catalog_requires_upgrade`, the team catalog needs a
@@ -66,17 +61,16 @@ catalog stays active in the meantime.
 
 ## Roll back to a previous MCParcel
 
-Install the older tarball again, then run `mcparcel runtime restart` when no
-calls are active. Your configuration, selections and stored sign-ins are kept.
+Put the older binary back (from its GitHub release archive), then run
+`mcparcel runtime restart` when no calls are active. Your configuration, selections and stored sign-ins are kept.
 
 Rolling back to a build from before the first release candidate (`0.1.0-rc.1`)
 is not supported: those binaries do not know the catalog `minVersion` field and reject any catalog that
 has it. If a saved catalog asks for a newer MCParcel than the one you rolled back
 to, it keeps working, and `doctor` reports it under `version.catalog`.
 
-The `service-account` credential profile mode was added after the `0.1.0-rc.1`
-release candidate of 7 October 2026, before the next version number, so the
-version string does not mark the cut-off: a `0.1.0-rc.1+<commit>` build
+The `service-account` credential profile mode is in `0.1.0`. It was added
+after the `0.1.0-rc.1` release candidate, so a `0.1.0-rc.1+<commit>` build
 (`mcparcel --version`) may or may not know the mode. If `config.json` has a `service-account` profile, an MCParcel without
 the mode rejects the whole file: every command that reads the configuration fails with
 `invalid_config`. Before you install an older version, remove those profiles

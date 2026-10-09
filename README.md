@@ -48,32 +48,30 @@ on your machine:
 
 ## Status
 
-Release candidate `0.1.0-rc.1`. It is used daily, but it is early software:
+Version `0.1.0`. It is used daily, but it is early software:
 
-- The npm package runs on **macOS with Apple Silicon** only. Its binary is
-  ad-hoc signed, not notarized.
-- On **Linux** it runs from the static binary that `make build-linux` writes
-  (amd64 and arm64), both interactively and headless. Interactively (desktop
-  mode), OAuth sign-ins are stored in the Secret Service (GNOME Keyring,
-  KWallet) and 1Password works through service-account profiles; the
-  1Password desktop app integration is macOS only. Headless mode runs it on a
-  server or as a Kubernetes sidecar; see [docs/headless.md](docs/headless.md).
-- It is not published to npm yet. You build and install it from source.
+- On **macOS** it runs on Apple Silicon only. The binary is ad-hoc signed,
+  not notarized.
+- On **Linux** it runs from a static binary (amd64 and arm64), both
+  interactively and headless. Interactively (desktop mode), OAuth sign-ins
+  are stored in the Secret Service (GNOME Keyring, KWallet) and 1Password
+  works through service-account profiles; the 1Password desktop app
+  integration is macOS only. Headless mode runs it on a server or as a
+  Kubernetes sidecar; see [docs/headless.md](docs/headless.md).
+- It is not published to npm.
 
 ## Install
 
-You need Go 1.26 and Node.js 20 or newer.
+With Homebrew, on macOS or Linux:
 
 ```sh
-git clone https://github.com/dedene/mcparcel.git
-cd mcparcel
-make npm-pack
-npm install -g ./dist/mcparcel-0.1.0-rc.1.tgz
+brew install dedene/tap/mcparcel
 ```
 
-Or run it without a global install:
-`npx --yes --package ./dist/mcparcel-0.1.0-rc.1.tgz mcparcel doctor`.
-Upgrades and rollbacks are in [docs/migration.md](docs/migration.md).
+Or download the archive for your platform from
+[GitHub Releases](https://github.com/dedene/mcparcel/releases) and put
+`mcparcel` on your PATH. Upgrades and rollbacks are in
+[docs/migration.md](docs/migration.md).
 
 ## Getting started
 

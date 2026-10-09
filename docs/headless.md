@@ -39,8 +39,10 @@ covers only what MCParcel adds.
 ## Images
 
 Sidecar: the claw-wrap image already runs `tini` as PID 1. Add the static Linux
-build of MCParcel (`make build-linux` writes `dist/mcparcel-linux-amd64` and
-`dist/mcparcel-linux-arm64`):
+build of MCParcel: the `mcparcel` binary from the `linux_amd64` or
+`linux_arm64` archive of a [GitHub release](https://github.com/dedene/mcparcel/releases),
+or `make build-linux`, which writes `dist/mcparcel-linux-amd64` and
+`dist/mcparcel-linux-arm64` (the example copies those):
 
 ```dockerfile
 FROM ghcr.io/dedene/claw-wrap:0.6.0
@@ -439,14 +441,10 @@ jobs:
       OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
     steps:
       - uses: actions/checkout@v7.0.1      # holds ci/personal.json and ci/selections.json
-      - uses: actions/setup-go@v7.0.0
-        with:
-          go-version: '1.26'
       - name: Install MCParcel
         run: |
-          git clone --depth 1 https://github.com/dedene/mcparcel.git "$RUNNER_TEMP/mcparcel"
-          make -C "$RUNNER_TEMP/mcparcel" build-linux
-          sudo install -m 0755 "$RUNNER_TEMP/mcparcel/dist/mcparcel-linux-amd64" /usr/local/bin/mcparcel
+          curl -fsSL https://github.com/dedene/mcparcel/releases/download/v0.1.0/mcparcel_0.1.0_linux_amd64.tar.gz \
+            | sudo tar -xz -C /usr/local/bin mcparcel
       - name: Configure MCParcel
         run: |
           umask 077
