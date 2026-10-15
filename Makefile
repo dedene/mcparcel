@@ -59,8 +59,12 @@ npm-pack: npm-binary
 	@mkdir -p $(DIST)
 	@cd packaging/npm && npm pack --pack-destination $(DIST)
 
+# RACE= skips the race detector locally: CleanMyMac flags every macOS -race
+# test binary as malware (Morcut). CI and make test-linux keep -race.
+RACE ?= -race
+
 test:
-	@go test -race -timeout 20m ./...
+	@go test $(RACE) -timeout 20m ./...
 
 # Full go test -race ./... in a Linux container as uid 10001 (needs Docker).
 test-linux:

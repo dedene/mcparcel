@@ -148,11 +148,17 @@ format, including HTTP servers, OAuth and inputs, is in
 
 ```sh
 make build              # bin/mcparcel
-make test               # unit and CLI tests
+make test               # unit and CLI tests, with the race detector
+make test RACE=         # the same without the race detector
 make ci                 # format, lint, vet, tests and packaging tests
 make test-linux         # the test suite in a Linux container (Docker)
 make test-headless-e2e  # headless end-to-end tests in a Linux container (Docker)
 ```
+
+CleanMyMac reports macOS test binaries built with `-race` as malware
+("Morcut"). It is a false positive; release binaries are built without
+`-race`. To avoid the alerts, run `make test RACE=` on macOS and
+`make test-linux` for the race check.
 
 ## License
 
