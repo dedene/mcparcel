@@ -67,7 +67,7 @@ func (m *Model) toolsPage() []string {
 	body := []string{"Policy: " + m.policyText(row), m.revisionText()}
 	switch {
 	case m.loading == row.ID:
-		body = append(body, "Connecting to "+rowLabel(row)+"... Credentials may be requested.")
+		body = append(body, m.spinner()+" Connecting to "+rowLabel(row)+"... Credentials may be requested.")
 	case len(m.loadErr[row.ID]) > 0:
 		body = append(body, m.loadErr[row.ID]...)
 	case m.loaded[row.ID].tools != nil:
@@ -77,7 +77,7 @@ func (m *Model) toolsPage() []string {
 	rows := m.toolRows(row.ID)
 	nameWidth := 0
 	for _, r := range rows {
-		nameWidth = max(nameWidth, len(r.display))
+		nameWidth = max(nameWidth, textWidth(r.display))
 	}
 	nameWidth = min(nameWidth, max(w/3, 12))
 	focus := -1
@@ -105,9 +105,9 @@ func (m *Model) toolsPage() []string {
 		}
 		body = append(body, "Press l to connect and load tools.")
 	}
-	help := "Up/Down: tool   Space: toggle   Esc: back"
+	help := "Up/Down: tool   Space: on/off   Esc: back"
 	if m.opts.LoadTools != nil {
-		help = "Up/Down: tool   Space: toggle   l: connect and load tools   Esc: back"
+		help = "Up/Down: tool   Space: on/off   l: connect and load tools   Esc: back"
 	}
 	return m.page("MCParcel / Setup / "+rowLabel(row)+" / Tools", body, focus, help)
 }
@@ -186,10 +186,11 @@ func (m *Model) connect() tea.Cmd {
 		m.loadErr = map[string][]string{}
 	}
 	delete(m.loadErr, id)
-	return func() tea.Msg {
+	m.spinFrame = 0
+	return tea.Batch(func() tea.Msg {
 		list, err := load(ctx, id)
 		return toolsMsg{seq: seq, id: id, list: list, err: err}
-	}
+	}, m.spin())
 }
 
 // cancelLoad stops a running load; its result is then ignored.
@@ -210,8 +211,14 @@ func (m *Model) toolsLoaded(msg toolsMsg) {
 		m.loadErr[msg.id] = m.connectFailure(msg.id, msg.err)
 		return
 	}
+	m.keepTools(msg.id, msg.list)
+}
+
+// keepTools keeps a loaded tool list for this session: Connect and the
+// finish screen both load one.
+func (m *Model) keepTools(id string, list output.ToolList) int {
 	tools := []toolInfo{}
-	for _, raw := range msg.list.Items {
+	for _, raw := range list.Items {
 		var item struct {
 			Name        string `json:"name"`
 			Description string `json:"description"`
@@ -224,7 +231,9 @@ func (m *Model) toolsLoaded(msg toolsMsg) {
 	if m.loaded == nil {
 		m.loaded = map[string]loadedTools{}
 	}
-	m.loaded[msg.id] = loadedTools{tools: tools, at: m.opts.Now()}
+	m.loaded[id] = loadedTools{tools: tools, at: m.opts.Now()}
+	delete(m.loadErr, id)
+	return len(tools)
 }
 
 // connectFailure is the error message, its next action, and for connection

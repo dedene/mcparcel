@@ -83,7 +83,9 @@ Or download the archive for your platform from
    lists what would be imported and which values still need a credential
    binding. Add `--apply` once it looks right. MCParcel only reads mcporter's
    file, so mcporter keeps working and you can switch one server at a time.
-3. Pick your servers with `mcparcel setup`, or `mcparcel enable <mcp>`.
+3. Joining a team? Run `mcparcel join <owner/repo>` (see
+   [Team catalogs](#team-catalogs)). Otherwise pick your servers with
+   `mcparcel setup`, or `mcparcel enable <mcp>`.
 4. Look at a server's tools and make a call:
 
    ```sh
@@ -129,8 +131,31 @@ A catalog is a `mcparcel.json` file in any GitHub repository you can read
 }
 ```
 
-Register it with `mcparcel add acme/mcp-catalog`. Validate a catalog before
-you push it with `mcparcel config validate --file mcparcel.json`. The full
+A new teammate needs two lines:
+
+```sh
+brew install dedene/tap/mcparcel
+mcparcel join acme/mcp-catalog
+```
+
+`join` adds the catalog and then asks a few questions in the terminal. If the
+catalog suggests a 1Password account, you confirm it or type another one;
+that creates your local profile and nothing else. If the catalog has role
+presets, you pick the ones that fit. Setup then opens with those servers
+turned on but not saved. Press Ctrl+S to save, and setup offers to start the
+servers and sign in where needed. Quitting before you save keeps only the
+catalog and a profile you confirmed.
+
+Without a terminal, or to go step by step, do the same by hand:
+
+```sh
+mcparcel add acme/mcp-catalog
+mcparcel config profile set team --file profile.json   # {"mode":"desktop","account":"example.1password.com"}
+mcparcel setup                                         # or: mcparcel enable <mcp>...
+```
+
+Validate a catalog before you push it with
+`mcparcel config validate --file mcparcel.json`. The full
 format, including HTTP servers, OAuth and inputs, is in
 [docs/catalog.md](docs/catalog.md).
 

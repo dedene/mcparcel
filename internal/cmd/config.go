@@ -9,6 +9,7 @@ import (
 
 	"github.com/dedene/mcparcel/internal/config"
 	"github.com/dedene/mcparcel/internal/edit"
+	"github.com/dedene/mcparcel/internal/output"
 )
 
 type ConfigCmd struct {
@@ -44,6 +45,9 @@ type ConfigValidationData struct {
 }
 type ConfigMutationData struct {
 	Revision uint64 `json:"revision"`
+	// LinkedProfiles maps canonical connection IDs to the local credential
+	// profile that enable bound on its own. Omitted when nothing was bound.
+	LinkedProfiles map[string]string `json:"linkedProfiles,omitempty"`
 }
 
 func readCommandFile(ctx context.Context, path string) ([]byte, error) {
@@ -109,11 +113,27 @@ func metadataStore(ctx context.Context) (*config.Store, config.State, error) {
 }
 
 func writeMutation(s *Streams, opts *CommandOptions, state config.State) error {
-	var payload any = ConfigMutationData{state.Selections.Revision}
-	if !opts.JSON {
-		payload = fmt.Sprintf("Configuration saved at revision %d.\n", state.Selections.Revision)
+	return writeLinkedMutation(s, opts, state, nil)
+}
+
+// writeLinkedMutation also reports profiles that enable bound on its own, by
+// profile ID only, never by account.
+func writeLinkedMutation(s *Streams, opts *CommandOptions, state config.State, linked []linkedProfile) error {
+	if opts.JSON {
+		data := ConfigMutationData{Revision: state.Selections.Revision}
+		for _, l := range linked {
+			if data.LinkedProfiles == nil {
+				data.LinkedProfiles = map[string]string{}
+			}
+			data.LinkedProfiles[l.id] = l.profile
+		}
+		return writeSuccess(s, opts, data)
 	}
-	return writeSuccess(s, opts, payload)
+	text := fmt.Sprintf("Configuration saved at revision %d.\n", state.Selections.Revision)
+	for _, l := range linked {
+		text += fmt.Sprintf("Linked credential profile %s to %s.\n", output.DisplayMetadata(l.profile), output.DisplayMetadata(l.name))
+	}
+	return writeSuccess(s, opts, text)
 }
 
 func (c *ConfigInputSetCmd) Run(ctx context.Context, s *Streams, opts *CommandOptions) error {

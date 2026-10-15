@@ -3,7 +3,9 @@ package ui
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/dedene/mcparcel/internal/config"
@@ -49,20 +51,22 @@ func TestUnavailableReviewRowTurnsOff(t *testing.T) {
 	h := newHarness(t, seed, 120, 35)
 	h.selectTab("Other")
 	h.selectRow("local:gone")
-	h.contains("> local:gone", "[!]      Unavailable")
+	h.focused("[-] local:gone", "unavailable")
 	h.press("space")
-	h.contains("[ ]      Unavailable", "1 unsaved change")
+	h.focused("[ ] local:gone", "unavailable")
+	h.contains("1 unsaved change")
 	h.lacks("The connection is not defined")
 	h.press("space")
-	h.contains("[ ]      Unavailable", "Personal no longer defines this connection.")
+	h.focused("[ ] local:gone", "unavailable")
+	h.contains("Personal no longer defines this connection.")
 
 	details := newHarness(t, seed, 120, 35)
 	details.selectTab("Other")
 	details.selectRow("local:gone")
 	details.press("enter")
-	details.contains("Enabled: [!]   State: Unavailable")
+	details.contains("State: [-] On, unavailable")
 	details.press("space")
-	details.contains("Enabled: [ ]   State: Unavailable", "1 unsaved change")
+	details.contains("State: [ ] Off, unavailable", "1 unsaved change")
 }
 
 func TestAddWithNewDomainKeepsTab(t *testing.T) {
@@ -150,14 +154,14 @@ func TestSearchShowsSearchKeys(t *testing.T) {
 	for _, size := range [][2]int{{120, 35}, {80, 24}} {
 		h := newHarness(t, seedFixture, size[0], size[1])
 		h.press("/")
-		h.contains("Enter/Down: list   Esc: clear")
-		h.lacks("Space: toggle")
+		h.contains("Enter/Down list   Backspace/Ctrl+U edit   Esc clear")
+		h.lacks("Space on/off")
 	}
 }
 
 func TestHelpListsEveryScreen(t *testing.T) {
-	for _, section := range []string{"List", "Search", "Details", "Tools", "Forms and fields", "Conflict", "Confirm"} {
-		if !slices.Contains(helpText, section) {
+	for _, section := range []string{"List", "Search", "Details", "Tools", "Forms and fields", "Finish", "Join", "Conflict", "Confirm"} {
+		if !slices.ContainsFunc(helpText(asciiGlyphs), func(line string) bool { return line == section || strings.HasPrefix(line, section+" (") }) {
 			t.Fatalf("help lacks a %s section", section)
 		}
 	}
@@ -221,4 +225,75 @@ func TestCtrlCDuringUnconfirmedSaveReportsIt(t *testing.T) {
 	if r := h.m.Result(); !h.quit || !r.Interrupted || !r.Unconfirmed || r.Saves != 0 {
 		t.Fatal(h.quit, r)
 	}
+}
+
+// A value as wide as its column keeps a gap before the next column instead of
+// running into it ("zenjoy/prompt-engineering-clubRemote"): every cut ("...")
+// in the list is followed by the gutter or ends the list.
+func TestListColumnsKeepAGutter(t *testing.T) {
+	seed := func(t *testing.T, store *config.Store) {
+		seedFixture(t, store)
+		mustUpdate(t, store, func(s *config.State) {
+			s.Local.Sources[0].Owner, s.Local.Sources[0].Repo = "zenjoy", "prompt-engineering-club"
+			s.Personal.Connections["excalidraw"] = config.Connection{Label: strings.Repeat("Long label ", 6), Transport: stdio("excalidraw-fixture")}
+		})
+	}
+	runInto := regexp.MustCompile(`\.\.\.(\S| \S)`)
+	check := func(h *harness, width int) {
+		t.Helper()
+		for _, tab := range []string{"Design", "Research", "Other"} {
+			h.selectTab(tab)
+			lines := strings.Split(h.plain(), "\n")
+			for _, line := range lines[4 : 4+h.m.listHeight()] {
+				if list := truncate(line, width, ""); runInto.MatchString(list) {
+					t.Fatalf("%s: a cut runs into the next column: %q", tab, list)
+				}
+			}
+		}
+	}
+	h := newHarness(t, seed, 120, 35)
+	h.selectTab("Other")
+	h.contains("Long label Long label", "...  excalidraw")
+	check(h, listWidth(120))
+	h.selectTab("Research")
+	h.focused("input workspace", "...  zenjoy/")
+
+	compact := newHarness(t, seed, 80, 24)
+	compact.selectTab("Other")
+	compact.contains("Long label Long label", "...  excalidraw")
+	check(compact, 80)
+}
+
+// With a single source the Source column is hidden and MCP and Needs share
+// its width.
+func TestSourceColumnHiddenWithSingleSource(t *testing.T) {
+	seed := func(t *testing.T, store *config.Store) {
+		seedFixture(t, store)
+		mustUpdate(t, store, func(s *config.State) {
+			delete(s.Personal.Connections, "excalidraw")
+			delete(s.Selections.Connections, idExcali)
+			delete(s.Selections.Connections, idGone)
+		})
+	}
+	columns := func(h *harness) string { return strings.Split(h.plain(), "\n")[3] }
+	for _, size := range [][2]int{{120, 35}, {80, 24}} {
+		h := newHarness(t, seed, size[0], size[1])
+		h.selectTab("Design")
+		if line := h.focused("Figma"); strings.Contains(line, "acmeco/mcp-catalog") || strings.Contains(columns(h), "Source") {
+			t.Fatalf("%q\n%s", line, h.plain())
+		}
+	}
+	h := newHarness(t, seedFixture, 120, 35)
+	if line := h.focused("Figma", "acmeco/mcp-catalog"); !strings.Contains(columns(h), "Source") {
+		t.Fatalf("%q\n%s", line, h.plain())
+	}
+	single := newHarness(t, seed, 120, 35)
+	with, without := h.m.wideColumns(listWidth(120)), single.m.wideColumns(listWidth(120))
+	if without.source != 0 || without.name <= with.name || without.needs <= with.needs || without.name+without.needs != with.name+with.needs+with.source {
+		t.Fatalf("with Source %+v, without %+v", with, without)
+	}
+	// Near the wide threshold MCP still shows ordinary labels whole.
+	narrow := newHarness(t, seedFixture, 100, 30)
+	narrow.selectTab("Other")
+	narrow.focused("Excalidraw  ")
 }

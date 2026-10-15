@@ -374,3 +374,53 @@ func TestDraftRebaseDropsChangesThatNoLongerApply(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// An enable that links the profile named like the requirement journals the
+// link as its own change. Turning the row off again keeps the link, as with
+// the CLI, and the draft counts and saves it whatever else it holds.
+func TestDraftCountsAutoLinkedProfile(t *testing.T) {
+	seed := func(t *testing.T, store *config.Store) {
+		withProfiles("team")(t, store)
+		mustUpdate(t, store, func(s *config.State) {
+			s.Selections.Connections[idNotes] = config.Selection{Inputs: map[string]string{"workspace": "docs"}}
+		})
+	}
+	for _, extra := range []bool{false, true} {
+		store, _, state := fixtureStore(t, seed)
+		d, err := NewDraft(state)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := d.SetEnabled(idNotes, true); err != nil {
+			t.Fatal(err)
+		}
+		if d.Changes() != 2 || d.State().Selections.Connections[idNotes].CredentialProfile != "team" {
+			t.Fatal(d.Changes(), d.State().Selections.Connections[idNotes])
+		}
+		if extra {
+			if err := d.SetEnabled(idPaper, true); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := d.SetEnabled(idNotes, false); err != nil {
+			t.Fatal(err)
+		}
+		want := 1
+		if extra {
+			want = 2
+		}
+		if d.Changes() != want {
+			t.Fatal(extra, d.Changes())
+		}
+		if _, err := d.Save(context.Background(), store); err != nil {
+			t.Fatal(err)
+		}
+		disk, err := store.Read(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if sel := disk.Selections.Connections[idNotes]; sel.Enabled || sel.CredentialProfile != "team" {
+			t.Fatal(extra, sel)
+		}
+	}
+}

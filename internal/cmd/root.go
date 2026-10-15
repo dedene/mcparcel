@@ -35,6 +35,7 @@ type Streams struct {
 // CLI is the root command tree.
 type CLI struct {
 	Add     AddCmd     `cmd:"" json:"-" help:"Register a repository catalog."`
+	Join    JoinCmd    `cmd:"" json:"-" help:"Add a team catalog, then choose and start its connections in an interactive terminal."`
 	Remove  RemoveCmd  `cmd:"" json:"-" help:"Remove a repository catalog offline."`
 	Sync    SyncCmd    `cmd:"" json:"-" help:"Preview or apply repository catalog updates."`
 	Local   LocalCmd   `cmd:"" json:"-" help:"Add, update or remove personal definitions offline."`
@@ -127,7 +128,7 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	if intent.flags["--domain"] > 1 || intent.command == "catalog" && intent.flags["empty"] > 0 {
 		return writeFailure(out, errOut, intent.json, usageFailure(intent.command))
 	}
-	if intent.command == "add" || intent.command == "sync" {
+	if intent.command == "add" || intent.command == "sync" || intent.command == "join" {
 		if intent.flags["--path"] > 1 || intent.flags["--ref"] > 1 || intent.flags["empty"] > 0 {
 			return writeFailure(out, errOut, intent.json, usageFailure(intent.command))
 		}
@@ -205,7 +206,7 @@ func scanIntent(argv []string) parseIntent {
 		}
 		if i.command == "" && !strings.HasPrefix(token, "-") {
 			i.command = token
-			i.product = token == "tools" || token == "call" || token == "auth" || token == "runtime" || token == "daemon" || token == "config" || token == "import" || token == "catalog" || token == "list" || token == "inspect" || token == "enable" || token == "disable" || token == "local" || token == "add" || token == "remove" || token == "sync" || token == "setup" || token == "doctor"
+			i.product = token == "tools" || token == "call" || token == "auth" || token == "runtime" || token == "daemon" || token == "config" || token == "import" || token == "catalog" || token == "list" || token == "inspect" || token == "enable" || token == "disable" || token == "local" || token == "add" || token == "join" || token == "remove" || token == "sync" || token == "setup" || token == "doctor"
 		}
 	}
 	return i

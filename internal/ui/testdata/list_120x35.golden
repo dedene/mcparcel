@@ -1,35 +1,35 @@
-MCParcel / Setup                                                                                    1 catalog + personal
+MCParcel  acmeco/mcp-catalog - aaaaaaa                                                           3 on - 2 need attention
 [Design 0/2]  Development 1/2   Research 0/1   Other 2/2
 
-  MCP                                        Enabled  State                   Source                        Runs on
-> Figma                                      [ ]      Ready                   acmeco/mcp-catalog            Remote
-  Paper                                      [ ]      Ready                   acmeco/mcp-catalog            This device
+      MCP                      Needs                     Source             | Figma
+> [ ] Figma                                              acmeco/mcp-catalog | Remote design files.
+  [ ] Paper                    paper-fixture             acmeco/mcp-catalog |
+                                                                            | State   [ ] Off
+                                                                            |
+                                                                            | Runs    Remote - mcp.figma.example
+                                                                            | Tools   all tools
+                                                                            | Source  acmeco/mcp-catalog
+                                                                            |
+                                                                            |
+                                                                            |
+                                                                            |
+                                                                            |
+                                                                            |
+                                                                            |
+                                                                            |
+                                                                            |
+                                                                            |
+                                                                            |
+                                                                            |
+                                                                            |
+                                                                            |
+                                                                            |
+                                                                            |
+                                                                            |
+                                                                            |
+                                                                            |
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-Figma
-Remote design files.
-Configuration ready. Connection not checked.
-
-Left/Right: domain   Up/Down: MCP   Space: toggle   Enter: details   Ctrl+S: save
-/: search   Tab: actions   A: add personal connection   q: cancel   ?: help
+Space on/off   Left/Right domain   Up/Down MCP   Enter details   Ctrl+S save
+/ search   Tab actions   A add personal connection   q cancel   ? help
 
 No unsaved changes                                                                                       [Save] [Cancel]

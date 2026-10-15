@@ -114,6 +114,15 @@ func SourceNotRegisteredError() *Error {
 	return err
 }
 
+// JoinTerminalError is terminal_required for mcparcel join, which asks
+// questions and so needs a terminal. repository is display-safe.
+func JoinTerminalError(repository string) *Error {
+	err := NewError("terminal_required", nil)
+	err.Message = "Join needs an interactive terminal; it does not run with --json, --no-input or without a terminal."
+	err.NextAction = "Run mcparcel add " + repository + ", then mcparcel setup in a terminal, or mcparcel enable <mcp>."
+	return err
+}
+
 // HeadlessOnlyError is runtime_unsupported for a runtime command in desktop
 // mode where only headless mode is supported. Every shipped platform runs
 // desktop mode; this guards future targets.

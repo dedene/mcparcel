@@ -3,15 +3,18 @@ package ui
 import (
 	"fmt"
 	"slices"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/dedene/mcparcel/internal/config"
+	"github.com/dedene/mcparcel/internal/edit"
 	"github.com/dedene/mcparcel/internal/output"
 )
 
-// Binding screens opened from details: editing one input (config input set)
-// and choosing a credential profile (config profile bind).
+// Binding screens opened from details, or by Space on a row that misses
+// configuration: editing one input (config input set) and choosing a
+// credential profile (config profile bind).
 
 // openField edits one input: string and path inputs are pre-filled; a url
 // input (see urlInput) starts empty and shows only the current host.
@@ -34,11 +37,12 @@ func (m *Model) fieldPage() []string {
 	name := output.DisplayMetadata(m.input.name)
 	body := []string{fmt.Sprintf("Input %s (%s)", name, m.input.kind)}
 	if row.Definition != nil {
+		// Two lines at most, so the Value line stays on screen.
 		if d := row.Definition.Inputs[m.input.name].Description; d != "" {
-			body = append(body, output.DisplayMetadata(firstLine(d)))
+			body = append(body, wrapAtMost(output.DisplayMetadata(firstLine(d)), w, 2)...)
 		}
 	}
-	help := "Enter: apply   Esc: discard   Ctrl+U: clear"
+	help := "Enter: apply   Ctrl+U: clear   Esc: discard"
 	if m.input.current != "" {
 		body = append(body, "Current: "+m.input.current)
 		help = "Enter: apply (empty keeps the current value)   Esc: discard"
@@ -50,6 +54,10 @@ func (m *Model) fieldPage() []string {
 func (m *Model) fieldKey(msg tea.KeyPressMsg, k string) {
 	switch k {
 	case "esc":
+		if m.pending() {
+			m.stayOff()
+			return
+		}
 		m.screen = screenDetails
 	case "enter":
 		value := m.input.value.String()
@@ -59,6 +67,10 @@ func (m *Model) fieldKey(msg tea.KeyPressMsg, k string) {
 		}
 		if err := m.draft.SetInput(m.detailID, m.input.name, value); err != nil {
 			m.input.err = m.inline(err)
+			return
+		}
+		if m.pending() {
+			m.continueEnable("")
 			return
 		}
 		m.screen = screenDetails
@@ -112,6 +124,10 @@ func (m *Model) profileKey(k string) {
 	case "down":
 		m.profileCursor = min(m.profileCursor+1, max(len(names)-1, 0))
 	case "esc":
+		if m.pending() {
+			m.stayOff()
+			return
+		}
 		m.screen = screenDetails
 	case "enter":
 		if m.profileCursor >= len(names) {
@@ -121,6 +137,78 @@ func (m *Model) profileKey(k string) {
 			m.status = m.inline(err)
 			return
 		}
+		if m.pending() {
+			m.continueEnable(linkedText(names[m.profileCursor]) + " ")
+			return
+		}
 		m.screen = screenDetails
 	}
+}
+
+// pending reports whether the field or profile screen belongs to an enable
+// that Space started (see toggle).
+func (m *Model) pending() bool { return m.pendingEnable != "" && m.pendingEnable == m.detailID }
+
+// continueEnable moves a pending enable on after each fill: it opens the first
+// missing input, then the credential profile, and turns the connection on
+// once nothing is missing. A profile with the required ID is left to the
+// enable itself; a single local profile is bound without asking; with more
+// the picker opens, and with none its hint. note leads the status.
+func (m *Model) continueEnable(note string) {
+	row := m.detailRow()
+	state := m.draft.State()
+	inputs, profile := config.MissingConfig(state, row)
+	linked := edit.AutoProfile(state, row)
+	profile = profile && linked == ""
+	names := m.profileNames()
+	switch {
+	case len(inputs) > 0:
+		m.openField(row, inputs[0])
+	case profile && len(names) == 1:
+		if err := m.draft.BindProfile(row.ID, names[0]); err != nil {
+			m.endEnable(note + m.inline(err))
+			return
+		}
+		m.continueEnable(note + linkedText(names[0]) + " ")
+		return
+	case profile:
+		m.screen, m.profileCursor = screenProfile, 0
+	default:
+		if err := m.draft.SetEnabled(row.ID, true); err != nil {
+			m.endEnable(note + m.failure(err).Message)
+			return
+		}
+		if linked != "" {
+			note += linkedText(linked) + " "
+		}
+		m.endEnable(note + rowLabel(row) + " is on.")
+		m.flash(row.ID)
+		return
+	}
+	esc := "Esc keeps it off."
+	if row.Enabled {
+		esc = "Esc leaves it unchanged."
+	}
+	m.status = note + rowLabel(row) + " needs: " + strings.Join(missingConfig(state, row), ", ") + ". " + esc
+}
+
+// stayOff abandons a pending enable. A row that is on with a review to accept
+// keeps it, review included.
+func (m *Model) stayOff() {
+	row := m.detailRow()
+	if row.Enabled {
+		m.endEnable(rowLabel(row) + " is unchanged.")
+		return
+	}
+	m.endEnable(rowLabel(row) + " stays off.")
+}
+
+// endEnable ends a pending enable on the list, with the cursor on its row.
+func (m *Model) endEnable(status string) {
+	id := m.pendingEnable
+	m.pendingEnable, m.screen, m.focus, m.status = "", screenList, focusList, status
+	if i := slices.IndexFunc(m.rows(), func(row config.EffectiveConnection) bool { return row.ID == id }); i >= 0 {
+		m.cursor = i
+	}
+	m.clamp()
 }

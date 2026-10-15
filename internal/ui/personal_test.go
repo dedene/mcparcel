@@ -26,7 +26,8 @@ func TestAddPersonalStagesLocalAddDisabled(t *testing.T) {
 	if h.m.screen != screenList {
 		t.Fatalf("form stayed open:\n%s", h.plain())
 	}
-	h.contains("Added My Tool. It is off: press Space to turn it on.", "> My Tool", "1 unsaved change")
+	h.focused("[ ] My Tool")
+	h.contains("Added My Tool. It is off: press Space to turn it on.", "1 unsaved change")
 	h.press("ctrl+s")
 	disk := h.disk()
 	got := disk.Personal.Connections["my-tool"]
@@ -157,7 +158,7 @@ func TestEditPersonalExecutionChangeSetsReview(t *testing.T) {
 	h.formTo("command")
 	h.typeText("excalidraw-v2")
 	h.press("enter")
-	h.contains("Updated Excalidraw. Review required: Space accepts it.", "Enabled: [!]   State: Review required")
+	h.contains("Updated Excalidraw. Review required: Space accepts it.", "State: [!] On, review required")
 	h.press("esc", "ctrl+s")
 	sel := h.disk().Selections.Connections[idExcali]
 	if !sel.Enabled || !sel.ReviewRequired {

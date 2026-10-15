@@ -6,9 +6,12 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
@@ -27,12 +30,20 @@ type fakeLoader struct {
 	canceled []bool
 	items    []string // raw JSON tool objects
 	err      error
+	errs     map[string]error // by connection, before err
+	onLoad   func(id string)  // called first, on the harness goroutine
 }
 
 func (f *fakeLoader) load(ctx context.Context, id string) (output.ToolList, error) {
+	if f.onLoad != nil {
+		f.onLoad(id)
+	}
 	f.calls++
 	f.ids = append(f.ids, id)
 	f.canceled = append(f.canceled, ctx.Err() != nil)
+	if err := f.errs[id]; err != nil {
+		return output.ToolList{}, err
+	}
 	if f.err != nil {
 		return output.ToolList{}, f.err
 	}
@@ -44,23 +55,38 @@ func (f *fakeLoader) load(ctx context.Context, id string) (output.ToolList, erro
 }
 
 // harness drives a Model without a terminal: keys go to Update, returned
-// commands run synchronously and their messages are fed back.
+// commands run synchronously and their messages are fed back. Animation
+// ticks never sleep or run by themselves: they wait in ticks until the test
+// fires one, so a self-rescheduling animation cannot recurse.
 type harness struct {
 	t     *testing.T
 	m     *Model
 	store *config.Store
 	paths config.Paths
 	loads *fakeLoader
+	fin   *fakeFinish
 	held  []tea.Cmd
 	hold  bool
 	quit  bool
+	ticks []pendingTick
+}
+
+// pendingTick is a scheduled animation frame, recorded by the harness Tick.
+type pendingTick struct {
+	d  time.Duration
+	fn func(time.Time) tea.Msg
+}
+
+func recordTick(d time.Duration, fn func(time.Time) tea.Msg) tea.Cmd {
+	return func() tea.Msg { return pendingTick{d: d, fn: fn} }
 }
 
 func newHarness(t *testing.T, seed func(*testing.T, *config.Store), w, h int, opts ...func(*Options)) *harness {
 	t.Helper()
 	store, paths, state := fixtureStore(t, seed)
 	loads := &fakeLoader{}
-	o := Options{Describe: describeFixture, LoadTools: loads.load}
+	fin := &fakeFinish{loads: loads, ended: make(chan error, 16)}
+	o := Options{Describe: describeFixture, LoadTools: loads.load, NeedsSignIn: fin.needsSignIn, SignIn: fin.signIn, Tick: recordTick}
 	for _, apply := range opts {
 		apply(&o)
 	}
@@ -68,7 +94,7 @@ func newHarness(t *testing.T, seed func(*testing.T, *config.Store), w, h int, op
 	if err != nil {
 		t.Fatal(err)
 	}
-	hr := &harness{t: t, m: m, store: store, paths: paths, loads: loads}
+	hr := &harness{t: t, m: m, store: store, paths: paths, loads: loads, fin: fin}
 	hr.send(tea.WindowSizeMsg{Width: w, Height: h})
 	return hr
 }
@@ -92,6 +118,8 @@ func (h *harness) run(cmd tea.Cmd) {
 	case nil:
 	case tea.QuitMsg:
 		h.quit = true
+	case pendingTick:
+		h.ticks = append(h.ticks, msg)
 	case tea.BatchMsg:
 		for _, c := range msg {
 			h.run(c)
@@ -99,6 +127,19 @@ func (h *harness) run(cmd tea.Cmd) {
 	default:
 		h.send(msg)
 	}
+}
+
+// fireTick delivers the oldest pending tick at the model's clock. It fails
+// the test when no tick is pending.
+func (h *harness) fireTick() time.Duration {
+	h.t.Helper()
+	if len(h.ticks) == 0 {
+		h.t.Fatal("no pending tick")
+	}
+	next := h.ticks[0]
+	h.ticks = h.ticks[1:]
+	h.send(next.fn(h.m.opts.Now()))
+	return next.d
 }
 
 func (h *harness) flush() {
@@ -263,6 +304,56 @@ func (h *harness) containsWrapped(want ...string) {
 	}
 }
 
+// focusedLine is the line the list or a page focuses ("> " prefix), or "".
+func (h *harness) focusedLine() string {
+	for line := range strings.SplitSeq(h.plain(), "\n") {
+		if strings.HasPrefix(line, "> ") {
+			return line
+		}
+	}
+	return ""
+}
+
+// focused fails unless the focused line shows each text, for example a
+// row's glyph and label ("[x] Notes") or its Needs; it returns the line.
+func (h *harness) focused(want ...string) string {
+	h.t.Helper()
+	line := h.focusedLine()
+	for _, text := range want {
+		if line == "" || !strings.Contains(line, text) {
+			h.t.Fatalf("focused line %q lacks %q:\n%s", line, text, h.plain())
+		}
+	}
+	return line
+}
+
+// paneText is the wide list's details pane, flattened: the cells right of
+// the rule on the column header and list lines, joined by single spaces.
+func (h *harness) paneText() string {
+	w, _ := h.m.size()
+	lines := strings.Split(h.plain(), "\n")
+	var parts []string
+	for i := 3; i < len(lines) && i <= 3+h.m.listHeight(); i++ {
+		parts = append(parts, cutLeft(lines[i], listWidth(w)+2))
+	}
+	return strings.Join(strings.Fields(strings.Join(parts, " ")), " ")
+}
+
+// paneContains fails unless the details pane shows each text, wrapping
+// ignored.
+func (h *harness) paneContains(want ...string) {
+	h.t.Helper()
+	if h.m.compact() {
+		h.t.Fatal("no details pane on a compact list")
+	}
+	pane := h.paneText()
+	for _, text := range want {
+		if !strings.Contains(pane, text) {
+			h.t.Fatalf("pane lacks %q: %q\n%s", text, pane, h.plain())
+		}
+	}
+}
+
 // lacks fails when the view shows any of the texts.
 func (h *harness) lacks(texts ...string) {
 	h.t.Helper()
@@ -271,6 +362,19 @@ func (h *harness) lacks(texts ...string) {
 			h.t.Fatalf("view shows %q:\n%s", text, h.plain())
 		}
 	}
+}
+
+// painted reports whether view shows text right after an SGR sequence that
+// sets param (1 bold, 7 reverse), alone or combined with other parameters.
+// An empty text matches any SGR sequence that sets param.
+func painted(view, text, param string) bool {
+	re := regexp.MustCompile(`\x1b\[([0-9;:]*)m` + regexp.QuoteMeta(text))
+	for _, match := range re.FindAllStringSubmatch(view, -1) {
+		if slices.Contains(strings.Split(match[1], ";"), param) {
+			return true
+		}
+	}
+	return false
 }
 
 func golden(t *testing.T, name, got string) {

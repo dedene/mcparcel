@@ -189,6 +189,17 @@ func (d *Draft) Pending(id string) bool {
 	})
 }
 
+// pendingIDs lists, in journal order, the connections Pending reports.
+func (d *Draft) pendingIDs() []string {
+	var ids []string
+	for _, o := range d.ops {
+		if !slices.Contains(ids, o.id) && d.Pending(o.id) {
+			ids = append(ids, o.id)
+		}
+	}
+	return ids
+}
+
 // errLocalExists rejects adding a personal ID that is already defined.
 var errLocalExists = errors.New("personal connection already exists")
 
@@ -241,6 +252,12 @@ func (d *Draft) record(o op) error {
 	effective, err := config.Resolve(next)
 	if err != nil {
 		return err
+	}
+	// An enable that links a profile (edit.AutoProfile) journals the link as
+	// its own change, before the enable, so it is counted and saved like a
+	// bind and outlives a later disable, as with the CLI.
+	if profile := next.Selections.Connections[o.id].CredentialProfile; o.kind == opEnabled && profile != d.state.Selections.Connections[o.id].CredentialProfile {
+		d.ops = append(d.ops, op{kind: opProfile, id: o.id, value: profile})
 	}
 	d.ops = append(d.ops, o)
 	d.state, d.effective = next, effective

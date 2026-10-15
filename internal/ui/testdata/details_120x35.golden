@@ -1,6 +1,6 @@
 MCParcel / Setup / Notes
 ID: github:acmeco/mcp-catalog#notes
-Enabled: [ ]   State: Configuration required
+State: [?] Off, configuration required
 Source: acmeco/mcp-catalog, commit aaaaaaa, snapshot 2h old
 Domains: Research
 Transport: stdio: notes-fixture (2 arguments)
@@ -32,4 +32,4 @@ Configuration required: input workspace, credential profile.
 
 
 
-Up/Down: field   Enter: choose   Space: toggle   t: tools   l: connect   Esc: back
+Up/Down field   Enter choose   Space on/off   t tools   l connect   Esc back

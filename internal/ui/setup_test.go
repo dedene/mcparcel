@@ -37,12 +37,13 @@ func TestTabsShareOneSelection(t *testing.T) {
 	h.selectTab("Design")
 	h.selectRow("Paper")
 	h.press("space")
-	h.contains("[Design 1/2]", "> Paper")
+	h.contains("[Design 1/2]")
+	h.focused("[x] Paper")
 	h.selectTab("Development")
 	h.selectRow("Paper")
 	h.contains("[Development 2/2]")
-	if row, _ := h.m.selected(); row.ID != idPaper || enabledMark(row) != "[x]" {
-		t.Fatal(row.ID, enabledMark(row))
+	if row, _ := h.m.selected(); row.ID != idPaper || !lookOf(h.m.draft.State(), row).ready() {
+		t.Fatal(row.ID, lookOf(h.m.draft.State(), row))
 	}
 	h.press("space")
 	h.contains("[Development 1/2]", "Design 0/2")
@@ -74,7 +75,7 @@ func TestNavigationClampsAndScrolls(t *testing.T) {
 		t.Fatal(h.m.cursor, page)
 	}
 	h.press("end")
-	h.contains("> MCP 29")
+	h.focused("MCP 29")
 	if h.m.cursor != 29 || strings.Contains(h.plain(), "MCP 00") {
 		t.Fatal(h.m.cursor, h.plain())
 	}
@@ -83,7 +84,7 @@ func TestNavigationClampsAndScrolls(t *testing.T) {
 		t.Fatal(h.m.cursor)
 	}
 	h.press("home")
-	h.contains("> MCP 00")
+	h.focused("MCP 00")
 	if strings.Contains(h.plain(), "MCP 29") {
 		t.Fatal(h.plain())
 	}
@@ -97,7 +98,8 @@ func TestSearchFiltersAndCountsTabs(t *testing.T) {
 	h := newHarness(t, seedFixture, 120, 35)
 	h.press("/")
 	h.typeText("PAP")
-	h.contains("[Design (1)]", "Development (1)", "Research (0)", "Other (0)", "Search: PAP_", "> Paper")
+	h.contains("[Design (1)]", "Development (1)", "Research (0)", "Other (0)", "Search: PAP_")
+	h.focused("Paper")
 	if strings.Contains(h.plain(), "Figma") {
 		t.Fatal(h.plain())
 	}
@@ -148,13 +150,14 @@ func TestEscClearsSearchBeforeCancel(t *testing.T) {
 
 func TestTabFocusesActionsVisibly(t *testing.T) {
 	h := newHarness(t, seedFixture, 120, 35, func(o *Options) { o.Color = true })
-	h.contains("> Figma", " [Save] [Cancel]")
+	h.focused("Figma")
+	h.contains(" [Save] [Cancel]")
 	h.press("tab")
 	h.contains(">[Save] [Cancel]")
-	if strings.Contains(h.plain(), "> Figma") {
+	if h.focusedLine() != "" {
 		t.Fatal("list still shows focus")
 	}
-	if !strings.Contains(h.view(), ">\x1b[7m[Save]\x1b[0m") {
+	if !painted(h.view(), "[Save]", "7") || !strings.Contains(stripSGR(h.view()), ">[Save]") {
 		t.Fatalf("%q", h.view())
 	}
 	h.press("tab")
@@ -162,7 +165,8 @@ func TestTabFocusesActionsVisibly(t *testing.T) {
 	h.press("shift+tab")
 	h.contains(">[Save] [Cancel]")
 	h.press("shift+tab")
-	h.contains("> Figma", " [Save] [Cancel]")
+	h.focused("Figma")
+	h.contains(" [Save] [Cancel]")
 	h.press("shift+tab", "enter")
 	if !h.quit {
 		t.Fatal("enter on Cancel did not cancel")
@@ -180,6 +184,8 @@ func TestSaveWritesOnceAndStaysOpen(t *testing.T) {
 	if h.quit || disk.Selections.Revision != before+1 || !disk.Selections.Connections[idFigma].Enabled {
 		t.Fatal(h.quit, disk.Selections.Revision, before)
 	}
+	h.contains(fmt.Sprintf("Saved at revision %d.", before+1), "Start 1 server now?")
+	h.press("esc")
 	h.contains(fmt.Sprintf("Saved at revision %d.", before+1), "No unsaved changes")
 	h.press("ctrl+s")
 	h.contains("Nothing to save.")
@@ -295,7 +301,7 @@ func TestConflictKeepsDraftAndOffersReload(t *testing.T) {
 	h.press("space")
 	mustUpdate(t, h.store, func(s *config.State) { s.Local.Aliases = map[string]string{"p": idPaper} })
 	h.press("ctrl+s")
-	h.contains("The configuration changed since setup loaded it. Your 1 change is kept.", "r: reload and reapply   Esc: back")
+	h.contains("The configuration changed since setup loaded it. Your 1 change is kept.", "r reload and reapply   Esc back")
 	h.press("esc")
 	if h.m.screen != screenList || h.m.draft.Changes() != 1 || h.m.Result().Saves != 0 {
 		t.Fatal(h.m.screen, h.m.draft.Changes())
@@ -326,19 +332,34 @@ func TestReloadReappliesAndReportsDropped(t *testing.T) {
 	}
 }
 
+// Browsing, editing and saving never contact the runtime or read a
+// credential: not even the finish offer a save brings up. Only Enter there
+// does (see finish_test.go).
 func TestBrowsingAndSavingNeverLoadTools(t *testing.T) {
-	h := newHarness(t, seedFixture, 120, 35)
+	h := finishHarness(t, seedFinish, 120, 35)
 	h.press("right", "right", "left", "down", "up", "/")
 	h.typeText("a")
-	h.press("enter", "esc", "space", "ctrl+s", "tab", "tab", "enter")
-	if h.loads.calls != 0 {
-		t.Fatal(h.loads.calls)
+	h.press("enter", "esc", "space")
+	h.selectTab("Other")
+	h.selectRow("Calendar")
+	h.press("space", "ctrl+s")
+	if h.m.screen != screenFinish || h.m.finish.started {
+		t.Fatalf("no finish offer:\n%s", h.plain())
+	}
+	h.press("esc", "tab", "tab", "enter")
+	if h.loads.calls != 0 || h.fin.checks != 0 || h.fin.signIns != 0 || !h.quit {
+		t.Fatal(h.loads.calls, h.fin.checks, h.fin.signIns, h.quit)
 	}
 }
 
 func TestUIImportsAllowList(t *testing.T) {
 	allowed := map[string][]string{
-		".":       {"github.com/dedene/mcparcel/internal/config", "github.com/dedene/mcparcel/internal/edit", "github.com/dedene/mcparcel/internal/output", "charm.land/bubbletea/v2"},
+		// Charm's packages only: Bubble Tea, Lip Gloss and Bubbles. Widths and
+		// the color profile come through them, not through their dependencies.
+		".": {
+			"github.com/dedene/mcparcel/internal/config", "github.com/dedene/mcparcel/internal/edit", "github.com/dedene/mcparcel/internal/output",
+			"charm.land/bubbletea/v2", "charm.land/lipgloss/v2", "charm.land/bubbles/v2/...",
+		},
 		"../edit": {"github.com/dedene/mcparcel/internal/config", "github.com/dedene/mcparcel/internal/args", "github.com/dedene/mcparcel/internal/jsonutil"},
 	}
 	for dir, allow := range allowed {
@@ -368,9 +389,13 @@ func TestUIImportsAllowList(t *testing.T) {
 	}
 }
 
+// containsString matches s exactly, or under an entry ending in "/...".
 func containsString(list []string, s string) bool {
 	for _, v := range list {
 		if v == s {
+			return true
+		}
+		if prefix, ok := strings.CutSuffix(v, "/..."); ok && strings.HasPrefix(s, prefix+"/") {
 			return true
 		}
 	}

@@ -21,9 +21,9 @@ npm launcher -> native CLI -> config + local catalog metadata
 
 Recommend Go, Kong, the official MCP Go SDK, the official 1Password Go SDK,
 zalando/go-keyring v0.2.8 for the macOS Keychain and the Linux Secret Service,
-and Bubble Tea v2
-(`charm.land/bubbletea/v2`), without Lip Gloss or Bubbles, for setup. Use SDK transport/auth primitives behind small adapters;
-no custom MCP protocol implementation and no dependency on mcporter at runtime.
+and Bubble Tea v2 (`charm.land/bubbletea/v2`) with Lip Gloss v2 and Bubbles v2
+for setup. Use SDK transport/auth primitives behind small adapters; no custom
+MCP protocol implementation and no dependency on mcporter at runtime.
 The 1Password desktop build must have CGO enabled where the SDK requires it.
 
 A single native binary has a private daemon entrypoint. Metadata commands do not

@@ -77,3 +77,35 @@ func TestSetupJSONEnvelope(t *testing.T) {
 	}
 	r.offline()
 }
+
+// Join asks questions, so without a terminal it stops before it reads the
+// configuration or fetches the catalog. The fixture binary never has one;
+// the interactive flow is covered by internal/cmd and internal/ui tests.
+func TestJoinWithoutTTY(t *testing.T) {
+	r, a, _, _ := catalogFixture(t)
+	for _, argv := range [][]string{{"join", "fixture-owner/fixture.repo"}, {"join", "fixture-owner/fixture.repo", "--no-input"}} {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		c := exec.CommandContext(ctx, binaryA, argv...)
+		c.Env = r.env
+		var out, errOut bytes.Buffer
+		c.Stdout, c.Stderr = &out, &errOut
+		err := c.Run()
+		cancel()
+		exit, ok := err.(*exec.ExitError)
+		if !ok || exit.ExitCode() != 2 || out.Len() != 0 || !strings.Contains(errOut.String(), "Join needs an interactive terminal") ||
+			!strings.Contains(errOut.String(), "mcparcel add fixture-owner/fixture.repo, then mcparcel setup") {
+			t.Fatal(argv, err, out.String(), errOut.String())
+		}
+	}
+	v := r.run(2, "terminal_required", "join", "fixture-owner/fixture.repo", "--json")
+	if string(v.envelope.Data) != "null" {
+		t.Fatal(v.stdout)
+	}
+	if requests := a.Requests(); len(requests) != 0 {
+		t.Fatal("join without a terminal fetched", requests)
+	}
+	if _, err := os.Stat(r.paths.ConfigFile); !os.IsNotExist(err) {
+		t.Fatal("join without a terminal wrote config", err)
+	}
+	r.offline()
+}

@@ -172,7 +172,7 @@ func (m *Model) formPage() []string {
 		case field.readOnly != "":
 			value = field.readOnly
 		case i == f.cursor:
-			value = field.value.render(w - len(label))
+			value = field.value.render(w - textWidth(label))
 		case field.value.String() == "":
 			value = field.note
 		default:

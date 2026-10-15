@@ -63,18 +63,8 @@ func (c *AuthMCPCmd) Run(ctx context.Context, s *Streams, opts *CommandOptions) 
 	if err != nil {
 		return err
 	}
-	if plan.SignIn {
-		switch {
-		case paths.Headless():
-			return runtimeclient.HeadlessSignIn()
-		case opts.NoInput:
-			return auth.SignInNeedsInput(c.MCP, plan.Canonical)
-		case !keyringReachableCheck(paths) && !daemonRunning(ctx, paths):
-			// The runtime this sign-in would start inherits this session's
-			// bus, which reaches no keyring. A running runtime has its own,
-			// which its sign-in preflight checks.
-			return output.KeyringUnreachableError()
-		}
+	if err := signInPreflight(ctx, paths, plan, c.MCP, opts.NoInput); err != nil {
+		return err
 	}
 	client, err := authRuntimeClient(opts)
 	if err != nil {
@@ -96,6 +86,28 @@ func (c *AuthMCPCmd) Run(ctx context.Context, s *Streams, opts *CommandOptions) 
 		return writeSuccess(s, opts, data)
 	}
 	return writeSuccess(s, opts, authLines(c.MCP, data))
+}
+
+// signInPreflight refuses, offline, a sign-in auth <mcp> cannot start: in
+// headless mode, under --no-input and, when no runtime runs, without a
+// reachable keyring (Linux without a session bus). Setup's finish step
+// checks the same before it signs in.
+func signInPreflight(ctx context.Context, paths config.Paths, plan runtimeclient.AuthPlan, name string, noInput bool) error {
+	if !plan.SignIn {
+		return nil
+	}
+	switch {
+	case paths.Headless():
+		return runtimeclient.HeadlessSignIn()
+	case noInput:
+		return auth.SignInNeedsInput(name, plan.Canonical)
+	case !keyringReachableCheck(paths) && !daemonRunning(ctx, paths):
+		// The runtime this sign-in would start inherits this session's
+		// bus, which reaches no keyring. A running runtime has its own,
+		// which its sign-in preflight checks.
+		return output.KeyringUnreachableError()
+	}
+	return nil
 }
 
 // authLines is auth <mcp>'s human output: one line per step, in step order.

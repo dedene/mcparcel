@@ -55,7 +55,7 @@ func TestConnectRequiresSavedEnabledConnection(t *testing.T) {
 	h.contains("Paper is off. Turn it on and save first: the runtime uses the saved configuration.")
 	h.press("esc", "space", "l")
 	h.contains("Save first: the runtime uses the saved configuration.")
-	h.press("esc", "esc", "ctrl+s")
+	h.press("esc", "esc", "ctrl+s", "esc") // Esc: start it later
 	h.details("Design", "Paper")
 	h.press("l")
 	if h.loads.calls != 1 || h.loads.ids[0] != idPaper {
@@ -111,7 +111,7 @@ func TestConnectFailureKeepsMetadata(t *testing.T) {
 	h.contains("Could not connect to the MCP server.", "Check the connection configuration and prerequisites.",
 		"Could not connect. Configured MCPs on this device still work.")
 	h.press("esc")
-	h.contains("Transport: stdio: excalidraw-fixture (0 arguments)", "Schema: none cached", "Enabled: [x]   State: Ready")
+	h.contains("Transport: stdio: excalidraw-fixture (0 arguments)", "Schema: none cached", "State: [x] On")
 	h.loads.err = nil
 	h.press("l")
 	h.contains("> [x] draw")

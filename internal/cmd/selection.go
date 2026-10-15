@@ -3,6 +3,8 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"slices"
+	"strings"
 
 	"github.com/dedene/mcparcel/internal/config"
 	"github.com/dedene/mcparcel/internal/edit"
@@ -34,8 +36,31 @@ func writeEnabled(ctx context.Context, s *Streams, opts *CommandOptions, names [
 	if err != nil {
 		return err
 	}
-	return writeMutation(s, opts, next)
+	return writeLinkedMutation(s, opts, next, linkedProfiles(state, next, names))
 }
+
+// linkedProfiles lists, sorted by canonical ID, each connection whose
+// credential profile enable bound on its own (edit.AutoProfile). It keeps the
+// first name the user typed for that connection, for the human output.
+func linkedProfiles(before, after config.State, names []string) []linkedProfile {
+	var out []linkedProfile
+	for _, name := range names {
+		ids, err := edit.ResolveIDs(before, []string{name})
+		if err != nil {
+			continue
+		}
+		id := ids[0]
+		profile := after.Selections.Connections[id].CredentialProfile
+		if profile == before.Selections.Connections[id].CredentialProfile || slices.ContainsFunc(out, func(l linkedProfile) bool { return l.id == id }) {
+			continue
+		}
+		out = append(out, linkedProfile{id: id, name: name, profile: profile})
+	}
+	slices.SortFunc(out, func(a, b linkedProfile) int { return strings.Compare(a.id, b.id) })
+	return out
+}
+
+type linkedProfile struct{ id, name, profile string }
 
 func saveEnabled(ctx context.Context, store *config.Store, state config.State, names []string, enabled bool) (config.State, error) {
 	ids, err := edit.ResolveIDs(state, names)

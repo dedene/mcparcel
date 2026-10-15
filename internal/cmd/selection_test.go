@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -197,14 +198,75 @@ func TestEnableMetadataPrerequisites(t *testing.T) {
 		s.Personal.CredentialProfiles["team"] = config.ProfileRequirement{}
 		s.Personal.Connections["protected"] = config.Connection{CredentialProfile: "team", Transport: config.Transport{Stdio: &config.Stdio{Command: config.Literal("nonexistent-fixture")}}}
 		s.Personal.Connections["oauth"] = config.Connection{Auth: &config.OAuth{Type: "oauth"}, Transport: config.Transport{HTTP: &config.HTTP{URL: config.Literal("https://fixture.invalid")}}}
+		// A single local profile with another ID is never bound on its own.
+		s.Local.CredentialProfiles["work"] = config.Profile{Mode: "desktop", Account: "Fixture"}
 		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	selectionRun(t, 2, "config_required", "enable", "protected")
+	if sel := selectionRead(t, store).Selections.Connections["local:protected"]; sel.Enabled || sel.CredentialProfile != "" {
+		t.Fatal("failed enable bound a profile", sel)
+	}
 	selectionRun(t, 0, "", "enable", "oauth")
 	if !selectionRead(t, store).Selections.Connections["local:oauth"].Enabled {
 		t.Fatal("OAuth metadata not selectable")
+	}
+}
+
+// TestEnableLinksMatchingProfile: enable binds the local profile whose ID
+// matches the requirement, reports it by profile ID only, and never replaces
+// a valid binding.
+func TestEnableLinksMatchingProfile(t *testing.T) {
+	p, store, state := metadataSeed(t)
+	_, err := store.Update(context.Background(), state.Selections.Revision, func(s *config.State) error {
+		s.Local.CredentialProfiles["team"] = config.Profile{Mode: "desktop", Account: "Secret Account Name"}
+		s.Local.CredentialProfiles["work"] = config.Profile{Mode: "desktop", Account: "Fixture"}
+		for _, id := range []string{"protected", "bound", "other"} {
+			s.Personal.Connections[id] = config.Connection{CredentialProfile: "team", Transport: config.Transport{Stdio: &config.Stdio{Command: config.Literal("nonexistent-fixture")}}}
+		}
+		s.Selections.Connections["local:bound"] = config.Selection{CredentialProfile: "work"}
+		s.Selections.Connections["local:other"] = config.Selection{CredentialProfile: "gone"}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, out, errOut := run(t, "enable", "protected", "bound")
+	next := selectionRead(t, store)
+	if code != 0 || errOut != "" || out != fmt.Sprintf("Configuration saved at revision %d.\nLinked credential profile team to protected.\n", next.Selections.Revision) {
+		t.Fatalf("%d %q %q", code, out, errOut)
+	}
+	if strings.Contains(out, "Secret Account Name") {
+		t.Fatal("account printed", out)
+	}
+	if sel := next.Selections.Connections["local:protected"]; !sel.Enabled || sel.CredentialProfile != "team" {
+		t.Fatal(sel)
+	}
+	if sel := next.Selections.Connections["local:bound"]; !sel.Enabled || sel.CredentialProfile != "work" {
+		t.Fatal("valid binding replaced", sel)
+	}
+	raw, err := os.ReadFile(p.SelectionsFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved, err := config.DecodeSelections(raw); err != nil || saved.Connections["local:protected"].CredentialProfile != "team" {
+		t.Fatal("selections.json lacks the binding", string(raw), err)
+	}
+	code, out, errOut = run(t, "enable", "other", "local:other", "--json")
+	var v struct {
+		Data ConfigMutationData
+	}
+	if code != 0 || errOut != "" || json.Unmarshal([]byte(out), &v) != nil || !reflect.DeepEqual(v.Data.LinkedProfiles, map[string]string{"local:other": "team"}) {
+		t.Fatal(code, out, errOut)
+	}
+	code, out, _ = run(t, "enable", "paper", "--json")
+	if code != 0 || strings.Contains(out, "linkedProfiles") {
+		t.Fatal("empty linkedProfiles not omitted", out)
+	}
+	code, out, _ = run(t, "enable", "paper")
+	if code != 0 || strings.Contains(out, "Linked") {
+		t.Fatal(out)
 	}
 }

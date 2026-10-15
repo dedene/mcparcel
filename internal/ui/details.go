@@ -39,8 +39,10 @@ type inputEdit struct {
 	err        string
 }
 
+// openDetails also abandons a pending enable, so a later edit never turns
+// that connection on.
 func (m *Model) openDetails(id string) {
-	m.screen, m.detailID, m.detailCursor, m.status = screenDetails, id, 0, ""
+	m.screen, m.detailID, m.detailCursor, m.status, m.pendingEnable = screenDetails, id, 0, "", ""
 }
 
 func (m *Model) detailRow() config.EffectiveConnection {
@@ -79,24 +81,6 @@ func (m *Model) detailItems(row config.EffectiveConnection) []detailItem {
 		items = append(items, detailItem{kind: itemEdit})
 	}
 	return items
-}
-
-// firstMissing is the index of the first item missing configuration.
-func (m *Model) firstMissing(row config.EffectiveConnection) int {
-	sel := m.draft.State().Selections.Connections[row.ID]
-	for i, item := range m.detailItems(row) {
-		switch item.kind {
-		case itemInput:
-			if _, ok := sel.Inputs[item.name]; !ok && row.Definition.Inputs[item.name].Default == nil {
-				return i
-			}
-		case itemProfile:
-			if _, ok := m.draft.State().Local.CredentialProfiles[sel.CredentialProfile]; !ok {
-				return i
-			}
-		}
-	}
-	return 0
 }
 
 // hostOnly shows an HTTP(S) URL as scheme and host, never its path or query.
@@ -240,7 +224,9 @@ func (m *Model) revisionText() string {
 
 func (m *Model) detailsPage() []string {
 	row := m.detailRow()
-	body := []string{"ID: " + output.DisplayMetadata(row.ID), "Enabled: " + enabledMark(row) + "   State: " + readiness(row), m.sourceText(row)}
+	look := lookOf(m.draft.State(), row)
+	glyph, r := look.mark(m.theme.glyph)
+	body := []string{"ID: " + output.DisplayMetadata(row.ID), "State: " + m.theme.paint(r, glyph) + " " + look.label(), m.sourceText(row)}
 	if row.Definition != nil {
 		body = append(body, m.domainsText(row), "Transport: "+transportText(row))
 		if row.SourceID == "personal" {
@@ -272,11 +258,11 @@ func (m *Model) detailsPage() []string {
 		body = append(body, prefix+text)
 	}
 	state := m.stateText(row)
-	if readiness(row) == "Review required" {
+	if look.state == rowReview {
 		state += " Run mcparcel sync to see what changed."
 	}
 	body = append(body, "", m.schemaText(row.ID), m.revisionText(), state)
-	help := "Up/Down: field   Enter: choose   Space: toggle   t: tools"
+	help := "Up/Down: field   Enter: choose   Space: on/off   t: tools"
 	if m.opts.LoadTools != nil {
 		help += "   l: connect"
 	}
@@ -320,6 +306,14 @@ func (m *Model) detailsKey(k string) tea.Cmd {
 		case itemInput:
 			m.openField(row, item.name)
 		case itemProfile:
+			if names := m.profileNames(); len(names) == 1 {
+				if err := m.draft.BindProfile(row.ID, names[0]); err != nil {
+					m.status = m.inline(err)
+					return nil
+				}
+				m.status = linkedText(names[0])
+				return nil
+			}
 			m.screen, m.profileCursor, m.status = screenProfile, 0, ""
 		case itemTools:
 			m.openTools()

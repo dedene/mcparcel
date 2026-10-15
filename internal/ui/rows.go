@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/dedene/mcparcel/internal/config"
+	"github.com/dedene/mcparcel/internal/edit"
 	"github.com/dedene/mcparcel/internal/output"
 )
 
@@ -70,10 +71,10 @@ func rowsFor(effective config.EffectiveConfig, domain, query string) []config.Ef
 	return out
 }
 
-// tabLabel reads "Design 2/3" (enabled/total), or "Design (2)" while searching.
-func tabLabel(effective config.EffectiveConfig, t tab, query string) string {
+// tabCount reads "2/3" (enabled/total), or "(2)" while searching.
+func tabCount(effective config.EffectiveConfig, t tab, query string) string {
 	if query != "" {
-		return fmt.Sprintf("%s (%d)", t.label, len(rowsFor(effective, t.id, query)))
+		return fmt.Sprintf("(%d)", len(rowsFor(effective, t.id, query)))
 	}
 	rows := rowsFor(effective, t.id, "")
 	enabled := 0
@@ -82,7 +83,7 @@ func tabLabel(effective config.EffectiveConfig, t tab, query string) string {
 			enabled++
 		}
 	}
-	return fmt.Sprintf("%s %d/%d", t.label, enabled, len(rows))
+	return fmt.Sprintf("%d/%d", enabled, len(rows))
 }
 
 func isLoopback(host string) bool {
@@ -117,40 +118,36 @@ func sourceLabel(state config.State, row config.EffectiveConnection) string {
 	return "-"
 }
 
-func readiness(row config.EffectiveConnection) string {
-	switch {
-	case !row.Available:
-		return "Unavailable"
-	case row.Enabled && row.ReviewRequired:
-		return "Review required"
-	case slices.Contains(row.Blockers, "config_required"):
-		return "Configuration required"
-	default:
-		return "Ready"
-	}
-}
-
-func enabledMark(row config.EffectiveConnection) string {
-	switch {
-	case row.Enabled && row.ReviewRequired:
-		return "[!]"
-	case row.Enabled:
-		return "[x]"
-	default:
-		return "[ ]"
-	}
-}
-
 // missingConfig names each declared input without a value or default, then the
-// credential profile when it is unbound or the bound profile is gone.
+// credential profile when it is unbound or the bound profile is gone. A profile
+// the next enable links by itself (edit.AutoProfile) is left out.
 func missingConfig(state config.State, row config.EffectiveConnection) []string {
 	inputs, profile := config.MissingConfig(state, row)
 	var out []string
 	for _, name := range inputs {
 		out = append(out, "input "+output.DisplayMetadata(name))
 	}
-	if profile {
+	if profile && (edit.AutoProfile(state, row) == "" || !enabling(row)) {
 		out = append(out, "credential profile")
 	}
 	return out
+}
+
+// autoLinks returns the profile Space links when that link is all the row
+// misses (edit.AutoProfile), else "".
+func autoLinks(state config.State, row config.EffectiveConnection) string {
+	if !enabling(row) || len(missingConfig(state, row)) > 0 {
+		return ""
+	}
+	return edit.AutoProfile(state, row)
+}
+
+// enabling reports whether Space on the row enables it: it is off, or on with
+// a review to accept.
+func enabling(row config.EffectiveConnection) bool {
+	return row.Available && (!row.Enabled || row.ReviewRequired)
+}
+
+func linkedText(profile string) string {
+	return "Linked credential profile " + output.DisplayMetadata(profile) + "."
 }

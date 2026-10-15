@@ -3,13 +3,14 @@ package ui
 import (
 	"context"
 	"errors"
-	"fmt"
 	"slices"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/dedene/mcparcel/internal/config"
+	"github.com/dedene/mcparcel/internal/edit"
 	"github.com/dedene/mcparcel/internal/output"
 )
 
@@ -25,7 +26,10 @@ const (
 	screenField   // editing one input (details.go)
 	screenProfile // choosing a credential profile (details.go)
 	screenTools
-	screenForm // personal connection form (personal.go)
+	screenForm    // personal connection form (personal.go)
+	screenFinish  // the finish step a save offers (finish.go)
+	screenJoin    // mcparcel join: the catalog and its 1Password suggestions (join.go)
+	screenPresets // mcparcel join: presets to start from
 )
 
 const (
@@ -36,8 +40,9 @@ const (
 
 type (
 	savedMsg struct {
-		state config.State
-		err   error
+		state   config.State
+		err     error
+		changed []string // connections the save changed (Draft.pendingIDs)
 	}
 	reloadedMsg struct {
 		state config.State
@@ -57,7 +62,7 @@ type Model struct {
 	ctx     context.Context
 	store   *config.Store
 	opts    Options
-	style   style
+	theme   theme
 	draft   *Draft
 	sources []output.SourceMetadata
 
@@ -78,6 +83,7 @@ type Model struct {
 	unconfirmed bool // the last save failed with config_write_failed; a reload settles it
 
 	detailID      string // connection shown by details, field, profile, tools and edit
+	pendingEnable string // connection Space turns on once the field and profile screens fill what it misses
 	detailCursor  int
 	input         inputEdit
 	profileCursor int
@@ -90,6 +96,14 @@ type Model struct {
 	loading    string                 // connection being loaded
 	loadSeq    int                    // identifies the current load; older results are ignored
 	loadCancel context.CancelFunc
+
+	finish    *finishRun     // the finish screen, while it shows
+	unoffered []string       // saved on and ready since the last finish offer
+	outcomes  finishOutcomes // what the finish step left, for Result
+
+	join *joinRun // the join screens, while they show
+
+	motion // toasts, the row flash and the spinner (motion.go)
 }
 
 func (m *Model) Init() tea.Cmd { return nil }
@@ -99,26 +113,50 @@ func (m *Model) View() tea.View {
 }
 
 func (m *Model) Result() Result {
-	return Result{Revision: m.draft.Base().Selections.Revision, Saves: m.saves, Interrupted: m.interrupted, Unconfirmed: m.unconfirmed}
+	r := Result{Revision: m.draft.Base().Selections.Revision, Saves: m.saves, Interrupted: m.interrupted, Unconfirmed: m.unconfirmed}
+	r.Started, r.SignIn, r.Failed = m.outcomes.lists()
+	return r
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	status, flash := m.status, m.flashSeq
+	cmd := m.update(msg)
+	return m, tea.Batch(cmd, m.animate(status, flash))
+}
+
+func (m *Model) update(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.clamp()
+	case tea.ColorProfileMsg:
+		m.theme = newTheme(m.opts, lipgloss.Complete(msg.Profile))
 	case savedMsg:
-		return m, m.saved(msg)
+		return m.saved(msg)
 	case reloadedMsg:
-		return m, m.reloaded(msg)
+		return m.reloaded(msg)
 	case toolsMsg:
 		m.toolsLoaded(msg)
+	case finishMsg:
+		return m.rowFinished(msg)
+	case signInURLMsg:
+		return m.signInURL(msg)
+	case signInMsg:
+		return m.signedIn(msg)
+	case profileMsg:
+		return m.profileSaved(msg)
+	case toastMsg:
+		return m.toastExpired(msg)
+	case flashMsg:
+		m.flashEnded(msg)
+	case spinMsg:
+		return m.spun()
 	case tea.PasteMsg:
 		m.paste(msg.Content)
 	case tea.KeyPressMsg:
-		return m, m.key(msg)
+		return m.key(msg)
 	}
-	return m, nil
+	return nil
 }
 
 func (m *Model) paste(text string) {
@@ -128,10 +166,15 @@ func (m *Model) paste(text string) {
 	switch m.screen {
 	case screenSearch:
 		m.search.insert(text)
+		m.jumpToMatches()
 		m.cursor, m.offset = 0, 0
 		m.clamp()
 	case screenField:
 		m.input.value.insert(text)
+	case screenJoin:
+		if m.join.editing {
+			m.join.account.insert(text)
+		}
 	case screenForm:
 		if f := m.form.current(); f.editable() {
 			f.value.insert(text)
@@ -203,15 +246,24 @@ func (m *Model) key(msg tea.KeyPressMsg) tea.Cmd {
 		return m.toolsKey(k)
 	case screenForm:
 		m.formKey(msg, k)
+	case screenFinish:
+		return m.finishKey(k)
+	case screenJoin:
+		return m.joinKey(msg, k)
+	case screenPresets:
+		return m.presetKey(k)
 	default:
 		return m.listKey(k)
 	}
 	return nil
 }
 
-// quit ends setup, canceling a running tool load first.
+// quit ends setup, canceling a running tool load or finish step first.
 func (m *Model) quit() tea.Cmd {
 	m.cancelLoad()
+	if m.finish != nil {
+		m.leaveFinish()
+	}
 	return tea.Quit
 }
 
@@ -233,8 +285,25 @@ func (m *Model) searchKey(msg tea.KeyPressMsg, k string) {
 		}
 		m.search.insert(text)
 	}
+	m.jumpToMatches()
 	m.cursor, m.offset = 0, 0
 	m.clamp()
+}
+
+// jumpToMatches moves a search with no match in the current tab to the first
+// tab, in tab order, that has one. Without matches anywhere it stays.
+func (m *Model) jumpToMatches() {
+	query := m.search.String()
+	if query == "" || len(m.rows()) > 0 {
+		return
+	}
+	effective := m.draft.Effective()
+	for i, t := range tabs(effective) {
+		if len(rowsFor(effective, t.id, query)) > 0 {
+			m.tabIndex, m.tabID = i, t.id
+			return
+		}
+	}
 }
 
 func (m *Model) listKey(k string) tea.Cmd {
@@ -265,6 +334,9 @@ func (m *Model) listKey(k string) tea.Cmd {
 		m.focus = focusList
 		if row, ok := m.selected(); ok {
 			m.toggle(row)
+			if now := m.draft.Effective().Connections[row.ID]; m.screen == screenList && (now.Enabled != row.Enabled || now.ReviewRequired != row.ReviewRequired) {
+				m.flash(row.ID)
+			}
 		}
 	case "enter":
 		switch m.focus {
@@ -348,9 +420,11 @@ func (m *Model) clamp() {
 }
 
 // toggle turns a row on or off, or accepts its review. An enable that needs
-// configuration opens details on the first missing field.
+// configuration asks for each missing item, then turns the row on (see
+// continueEnable).
 func (m *Model) toggle(row config.EffectiveConnection) {
 	var err error
+	linked := edit.AutoProfile(m.draft.State(), row)
 	switch {
 	case !row.Available && !row.Enabled:
 		m.status = unavailableText(m.draft.State(), row)
@@ -364,11 +438,12 @@ func (m *Model) toggle(row config.EffectiveConnection) {
 	}
 	switch {
 	case errors.Is(err, config.ErrConfigRequired):
-		m.openDetails(row.ID)
-		m.detailCursor = m.firstMissing(row)
-		m.status = fmt.Sprintf("%s needs: %s. Fill them in, then press Space.", rowLabel(row), strings.Join(missingConfig(m.draft.State(), row), ", "))
+		m.pendingEnable, m.detailID = row.ID, row.ID
+		m.continueEnable("")
 	case err != nil:
 		m.status = m.failure(err).Message
+	case enabling(row) && linked != "":
+		m.status = linkedText(linked)
 	default:
 		m.status = ""
 	}

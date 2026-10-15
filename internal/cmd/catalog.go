@@ -68,40 +68,61 @@ func (c *AddCmd) Run(ctx context.Context, s *Streams, opts *CommandOptions, deps
 	if err != nil {
 		return err
 	}
-	owner, repo, err := catalog.ValidateRepositoryName(c.Repository)
+	request, _, err := sourceRequest(state, c.Repository, c.Path, c.Ref)
 	if err != nil {
-		return output.NewError("invalid_repository", nil)
+		return err
 	}
-	request := config.Source{Owner: owner, Repo: repo, Path: c.Path, Ref: c.Ref}
-	if request.Path == "" {
-		request.Path = "mcparcel.json"
+	next, source, err := registerSource(ctx, deps, store, state, request)
+	if err != nil {
+		return err
+	}
+	return writeSuccess(s, opts, output.SourceMutationData{Revision: next.Selections.Revision, Source: source, Changed: next.Selections.Revision != state.Selections.Revision})
+}
+
+// sourceRequest is the source add and join ask for: the registered one for
+// owner/repo, when there is one, else a new one with the default path.
+// --path or --ref that differ from the registered source conflict.
+func sourceRequest(state config.State, repository, path, ref string) (config.Source, bool, error) {
+	owner, repo, err := catalog.ValidateRepositoryName(repository)
+	if err != nil {
+		return config.Source{}, false, output.NewError("invalid_repository", nil)
 	}
 	for _, source := range state.Local.Sources {
 		if source.Owner == owner && source.Repo == repo {
-			if c.Path != "" && c.Path != source.Path || c.Ref != "" && c.Ref != source.Ref {
-				return catalog.ErrSourceConflict
+			if path != "" && path != source.Path || ref != "" && ref != source.Ref {
+				return config.Source{}, false, catalog.ErrSourceConflict
 			}
-			request = source
-			break
+			return source, true, nil
 		}
 	}
+	request := config.Source{Owner: owner, Repo: repo, Path: path, Ref: ref}
+	if request.Path == "" {
+		request.Path = "mcparcel.json"
+	}
+	return request, false, nil
+}
+
+// registerSource fetches request and registers it, as add does. A source
+// that is already registered stays as it is (no new snapshot). It returns
+// the state after and the registered source.
+func registerSource(ctx context.Context, deps *CatalogDependencies, store *config.Store, state config.State, request config.Source) (config.State, config.Source, error) {
 	fetchCtx, cancel := context.WithTimeout(ctx, catalog.FetchTimeout)
 	defer cancel()
 	candidate, err := deps.Fetcher.Fetch(fetchCtx, request)
 	if err != nil {
-		return err
+		return config.State{}, config.Source{}, err
 	}
 	service := catalog.Service{Store: store, Fetcher: deps.Fetcher}
 	next, err := service.Register(ctx, candidate, state.Selections.Revision)
 	if err != nil {
-		return err
+		return config.State{}, config.Source{}, err
 	}
 	for _, source := range next.Local.Sources {
 		if source.ID == candidate.Source.ID {
-			return writeSuccess(s, opts, output.SourceMutationData{Revision: next.Selections.Revision, Source: source, Changed: next.Selections.Revision != state.Selections.Revision})
+			return next, source, nil
 		}
 	}
-	return catalog.ErrRepositoryMissing
+	return config.State{}, config.Source{}, catalog.ErrRepositoryMissing
 }
 
 func (c *RemoveCmd) Run(ctx context.Context, s *Streams, opts *CommandOptions) error {

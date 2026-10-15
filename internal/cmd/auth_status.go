@@ -90,12 +90,7 @@ func (c *AuthStatusCmd) Run(ctx context.Context, s *Streams, opts *CommandOption
 		writeProfileRows(&b, data.Profiles)
 		return writeSuccess(s, opts, b.String())
 	}
-	keyring := keyringFactory(paths)
-	// An unreadable health file means no history; status still answers.
-	health, _ := auth.ReadHealth(paths.StateDir)
-	// An unreadable lock file fails closed, as in the daemon.
-	locks, lockErr := auth.ReadOAuthLock(paths.StateDir)
-	now := time.Now()
+	sessions := newSessionReader(paths)
 	data := authStatusData{Items: []authStatusItem{}, Profiles: []authProfileItem{}}
 	for _, id := range ids {
 		row := effective.Connections[id]
@@ -111,9 +106,12 @@ func (c *AuthStatusCmd) Run(ctx context.Context, s *Streams, opts *CommandOption
 			// A client_credentials token lives in daemon memory only.
 			continue
 		}
-		state, err := auth.LoadOAuth(ctx, keyring, id)
-		found := err == nil
-		if err != nil && !errors.Is(err, auth.ErrNoSession) {
+		name := id
+		if c.MCP != "" {
+			name = c.MCP
+		}
+		state, report, found, err := sessions.explain(ctx, id, name, *row.Connection)
+		if err != nil {
 			if c.MCP == "" && row.Connection.Auth == nil {
 				// The listing shows an unmarked connection only when it holds
 				// an item; one the keyring cannot read is left out.
@@ -129,12 +127,6 @@ func (c *AuthStatusCmd) Run(ctx context.Context, s *Streams, opts *CommandOption
 		if c.MCP == "" && !found && row.Connection.Auth == nil {
 			continue
 		}
-		u, _ := config.LiteralText(row.Connection.Transport.HTTP.URL)
-		name := id
-		if c.MCP != "" {
-			name = c.MCP
-		}
-		report := auth.ExplainSession(auth.SessionInput{Connection: id, Name: name, URL: u, State: state, Found: found, Locked: lockErr != nil || locks[id], Health: health[id], KeepAlive: keepAliveSetting(*row.Connection), Now: now})
 		item := authStatusItem{
 			Connection: id, State: report.State, RefreshToken: state.RefreshToken != "",
 			LastRefreshAt: report.LastRefreshAt, AccessTokenExpiresAt: report.AccessTokenExpiresAt, RefreshTokenExpiresAt: report.RefreshTokenExpiresAt,
@@ -173,6 +165,38 @@ func (c *AuthStatusCmd) Run(ctx context.Context, s *Streams, opts *CommandOption
 	}
 	writeProfileRows(&b, data.Profiles)
 	return writeSuccess(s, opts, b.String())
+}
+
+// sessionReader explains stored OAuth sessions from the Keychain item, the
+// health file and the OAuth lock. auth status and the setup summary share it.
+type sessionReader struct {
+	keyring auth.Keyring
+	health  map[string]auth.ConnectionHealth
+	locks   map[string]bool
+	lockErr error
+	now     time.Time
+}
+
+func newSessionReader(paths config.Paths) sessionReader {
+	// An unreadable health file means no history; status still answers.
+	health, _ := auth.ReadHealth(paths.StateDir)
+	// An unreadable lock file fails closed, as in the daemon.
+	locks, lockErr := auth.ReadOAuthLock(paths.StateDir)
+	return sessionReader{keyring: keyringFactory(paths), health: health, locks: locks, lockErr: lockErr, now: time.Now()}
+}
+
+// explain reads id's Keychain item and explains it for an HTTP connection
+// the user calls name. found is false when no item is stored; err is any
+// other keyring failure.
+func (r sessionReader) explain(ctx context.Context, id, name string, c config.Connection) (auth.OAuthState, auth.SessionReport, bool, error) {
+	state, err := auth.LoadOAuth(ctx, r.keyring, id)
+	if err != nil && !errors.Is(err, auth.ErrNoSession) {
+		return state, auth.SessionReport{}, false, err
+	}
+	found := err == nil
+	u, _ := config.LiteralText(c.Transport.HTTP.URL)
+	report := auth.ExplainSession(auth.SessionInput{Connection: id, Name: name, URL: u, State: state, Found: found, Locked: r.lockErr != nil || r.locks[id], Health: r.health[id], KeepAlive: keepAliveSetting(c), Now: r.now})
+	return state, report, found, nil
 }
 
 // keepAliveSetting is what auth status shows for keep-alive: "off", else

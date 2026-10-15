@@ -19,10 +19,10 @@ func (m *Model) save() tea.Cmd {
 		return nil
 	}
 	m.busy, m.status = true, "Saving..."
-	ctx, store := m.ctx, m.store
+	ctx, store, changed := m.ctx, m.store, m.draft.pendingIDs()
 	return func() tea.Msg {
 		next, err := save(ctx, store)
-		return savedMsg{state: next, err: err}
+		return savedMsg{state: next, err: err, changed: changed}
 	}
 }
 
@@ -38,23 +38,24 @@ func (m *Model) saved(msg savedMsg) tea.Cmd {
 		m.refreshSources()
 		m.status = fmt.Sprintf("Saved at revision %d.", m.draft.Base().Selections.Revision)
 		m.clamp()
+		m.noteSaved(msg.changed)
 	} else if failure = m.failure(err); failure.Code == "config_write_failed" {
 		m.unconfirmed = true
 	}
 	if m.interrupted {
 		return m.quit()
 	}
-	if failure != nil {
-		switch failure.Code {
-		case "config_conflict":
-			m.screen = screenConflict
-			m.conflict = fmt.Sprintf("The configuration changed since setup loaded it. Your %s kept.", plural(m.draft.Changes(), "change is", "changes are"))
-		case "config_write_failed":
-			m.screen = screenConflict
-			m.conflict = failure.Message + " Press r to reload."
-		default:
-			m.status = failure.Message
-		}
+	switch {
+	case failure == nil:
+		m.offerFinish()
+	case failure.Code == "config_conflict":
+		m.screen = screenConflict
+		m.conflict = fmt.Sprintf("The configuration changed since setup loaded it. Your %s kept.", plural(m.draft.Changes(), "change is", "changes are"))
+	case failure.Code == "config_write_failed":
+		m.screen = screenConflict
+		m.conflict = failure.Message + " Press r to reload."
+	default:
+		m.status = failure.Message
 	}
 	return nil
 }

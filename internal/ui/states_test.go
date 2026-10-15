@@ -22,18 +22,19 @@ func TestUnavailableRowKeepsSelection(t *testing.T) {
 	h := newHarness(t, seedFixture, 120, 35)
 	h.selectTab("Other")
 	h.selectRow("local:gone")
-	h.contains("> local:gone", "[x]      Unavailable", "Personal no longer defines this connection. Your selection is kept for a future restoration.")
+	h.focused("[-] local:gone", "unavailable")
+	h.paneContains("State [-] On, unavailable", "Personal no longer defines this connection. Your selection is kept for a future restoration.")
 	h.press("enter")
-	h.contains("Enabled: [x]   State: Unavailable", "Source: Personal")
+	h.contains("State: [-] On, unavailable", "Source: Personal")
 	h.lacks("Connect and load tools", "Tools:")
 	h.press("t", "l", "e")
 	if h.m.screen != screenDetails || h.loads.calls != 0 {
 		t.Fatal(h.m.screen, h.loads.calls)
 	}
 	h.press("space")
-	h.contains("Enabled: [ ]   State: Unavailable")
+	h.contains("State: [ ] Off, unavailable")
 	h.press("space")
-	h.contains("Enabled: [ ]", "Personal no longer defines this connection. Your selection is kept for a future restoration.")
+	h.contains("State: [ ] Off, unavailable", "Personal no longer defines this connection. Your selection is kept for a future restoration.")
 	if h.m.draft.Changes() != 1 {
 		t.Fatal(h.m.draft.Changes())
 	}
@@ -47,14 +48,14 @@ func TestReviewRequiredAcceptWithSpace(t *testing.T) {
 	h := newHarness(t, seedFixture, 120, 35)
 	h.selectTab("Development")
 	h.selectRow("Reviewer")
-	h.contains("> Reviewer", "[!]      Review required")
+	h.focused("[!] Reviewer", "review")
 	h.press("enter")
 	h.contains("Transport: stdio: review-fixture (0 arguments)")
 	h.containsWrapped("Review required. Space accepts it (same as mcparcel enable " + idReview + "). Run mcparcel sync to see what changed.")
 	h.press("space")
-	h.contains("Enabled: [x]   State: Ready", "1 unsaved change")
+	h.contains("State: [x] On", "1 unsaved change")
 	h.press("space")
-	h.contains("Enabled: [ ]   State: Ready")
+	h.contains("State: [ ] Off")
 	h.press("space", "esc", "ctrl+s")
 	if sel := h.disk().Selections.Connections[idReview]; !sel.Enabled || sel.ReviewRequired {
 		t.Fatal(sel)
@@ -69,7 +70,7 @@ func TestOfflineShowsSnapshotAge(t *testing.T) {
 			return []output.SourceMetadata{{Source: state.Local.Sources[0], CacheAgeSeconds: float64(3 * 86400)}}, nil
 		}
 	})
-	h.contains("MCParcel / Setup", "1 catalog + personal")
+	h.contains("MCParcel  acmeco/mcp-catalog - aaaaaaa - synced 3d ago", "3 on - 2 need attention")
 	h.details("Design", "Figma")
 	h.contains("snapshot 3d old", "Transport: HTTP: mcp.figma.example")
 	h.press("space", "esc", "ctrl+s")
@@ -90,10 +91,13 @@ func TestConfigRequiredSeparateFromEnabled(t *testing.T) {
 	}
 	h := newHarness(t, seed, 120, 35)
 	h.selectTab("Research")
-	h.contains("> Notes", "[x]      Configuration required", "Configuration required: input workspace, credential profile.")
+	h.focused("[~] Notes", "input workspace")
+	h.contains("4 on - 3 need attention")
+	h.paneContains("State [~] On, configuration required", "Needs [*] input workspace - not set [*] 1Password team - not linked")
 	h.press("space")
-	h.contains("[ ]      Configuration required")
+	h.focused("[?] Notes", "input workspace")
+	h.paneContains("State [?] Off, configuration required")
 	compact := newHarness(t, seedFixture, 80, 24)
 	compact.selectTab("Research")
-	compact.contains("> Notes (config)", "[ ]")
+	compact.focused("[?] Notes", "input workspace")
 }

@@ -35,8 +35,10 @@ func ResolveIDs(state config.State, names []string) ([]string, error) {
 	return slices.Compact(ids), nil
 }
 
-// StageEnabled sets Enabled on the named connections. Enabling clears review
-// and requires an available connection without missing configuration.
+// StageEnabled sets Enabled on the named connections. Enabling clears review,
+// binds the local profile named like a missing credential profile
+// requirement (AutoProfile), and requires an available connection without
+// missing configuration.
 func StageEnabled(draft *config.State, names, expected []string, enabled bool) error {
 	ids, err := ResolveIDs(*draft, names)
 	if err != nil {
@@ -45,11 +47,18 @@ func StageEnabled(draft *config.State, names, expected []string, enabled bool) e
 	if !slices.Equal(ids, expected) {
 		return config.ErrConfigConflict
 	}
+	before, err := config.Resolve(*draft)
+	if err != nil {
+		return err
+	}
 	for _, id := range ids {
 		sel := draft.Selections.Connections[id]
 		sel.Enabled = enabled
 		if enabled {
 			sel.ReviewRequired = false
+			if profile := AutoProfile(*draft, before.Connections[id]); profile != "" {
+				sel.CredentialProfile = profile
+			}
 		}
 		draft.Selections.Connections[id] = sel
 	}
@@ -69,6 +78,23 @@ func StageEnabled(draft *config.State, names, expected []string, enabled bool) e
 		}
 	}
 	return nil
+}
+
+// AutoProfile returns the local profile that enabling the connection binds
+// on its own: the one whose ID equals the declared credential profile
+// requirement, when the selection has no binding or names a profile that is
+// gone. It returns "" otherwise; a valid binding is never replaced.
+func AutoProfile(state config.State, row config.EffectiveConnection) string {
+	if row.Definition == nil || row.Definition.CredentialProfile == "" {
+		return ""
+	}
+	if _, missing := config.MissingConfig(state, row); !missing {
+		return ""
+	}
+	if _, ok := state.Local.CredentialProfiles[row.Definition.CredentialProfile]; !ok {
+		return ""
+	}
+	return row.Definition.CredentialProfile
 }
 
 // CheckToolNames rejects an empty list and empty or multi-line tool names.

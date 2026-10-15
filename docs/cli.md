@@ -8,15 +8,18 @@ All commands, flags, help, messages, errors and terminal UI are English.
 ## Start and daily use
 
 ```sh
-npx mcparcel add acme/mcp-catalog
-npx mcparcel setup
+npx mcparcel join acme/mcp-catalog
 npx mcparcel list
 npx mcparcel tools paper --json
 npx mcparcel call paper.<tool> --args-file request.json --json
 ```
 
+`join` is the one line for a new teammate: it registers the catalog as `add`
+does, then walks through the 1Password account the catalog suggests, its
+presets, the setup list and the finish step (see "Joining a catalog").
 `add` registers a GitHub catalog and validates metadata. It does not enable entries,
-start servers or read 1Password. `setup` remains useful whenever selections change.
+start servers or read 1Password. `add` followed by `setup` is the manual path,
+and `setup` remains useful whenever selections change.
 1Password authentication is implicit on the first call that needs it; there is no
 mandatory `unlock` command. OAuth sign-in is explicit in this release: a call
 without a stored session returns `auth_required` with next action
@@ -30,8 +33,9 @@ Catalog README agent prompt:
 
 The initial add trusts the explicitly named source for later selected execution.
 Print repository, file and revision. Changes are applied only by explicit sync.
-A team can publish a single shell line using `add ... && setup`; agents can use
-`catalog` and `enable` without driving a terminal UI.
+A team can publish a single shell line, `mcparcel join <owner/repo>` (or
+`add ... && setup`); agents can use `catalog` and `enable` without driving a
+terminal UI.
 
 ## Command surface
 
@@ -41,15 +45,16 @@ also work via `npx mcparcel ...`. No global installation or Homebrew is required
 | Command | Contract |
 | --- | --- |
 | `add <owner/repo> [--path <file>] [--ref <ref>]` | Validate and register a source, idempotently |
+| `join <owner/repo> [--path <file>] [--ref <ref>]` | Interactive only (no `--json`). Register the source exactly as `add` does, or reuse it when it is already registered (no fetch; `sync` updates it), print `Added <owner/repo> (<commit>).` or `<owner/repo> is already added (<commit>). Run mcparcel sync to update it.` on stdout, then open setup on that catalog's join screens (see "Joining a catalog"); prints setup's summary on exit |
 | `remove <owner/repo>` | Remove local source registration; retained selections become unavailable; no remote write |
 | `catalog [--domain <id>]` | Available metadata including disabled/missing-input entries |
 | `list` | Enabled selections; clearly mark unavailable entries; no live connection |
 | `inspect <mcp>` | Effective non-secret config, origin, requirements, blockers and revision |
-| `enable <mcp>...` / `disable <mcp>...` | Atomically update selection for supplied IDs |
+| `enable <mcp>...` / `disable <mcp>...` | Atomically update selection for supplied IDs; `enable` links a credential profile requirement to the local profile with the same ID (see below) |
 | `tools <mcp> [--cached]` | Live schema discovery; `--cached` has no cache yet and always returns `schema_cache_miss` |
 | `tools enable <mcp> <tool>...` / `tools disable <mcp> <tool>...` | Change personal tool selection; cannot override source policy |
 | `call <mcp>.<tool> [key=value ...] [--args <json>] [--meta <json>]` | Invoke an enabled, allowed tool; a server's approval request during the call is shown as a prompt (see Approval prompts). The CLI checks the connection and tool policy offline first: a denied tool (`tool_denied`, exit 4; `deny` wins over `allow`) or a disabled, unreviewed, unknown or ambiguous connection fails before the runtime is contacted, so no daemon starts, no connection opens and no token is requested. The runtime checks again at admission and before dispatch |
-| `setup` | Interactive domain and connection editor (see "Domain matrix and terminal sketch"); renders on stderr, prints `Configuration saved at revision N.` or `No changes saved.` on stdout (plus `The last save could not be confirmed. Run mcparcel list to check the configuration.` after an unconfirmed save); Ctrl+C exits 130 after printing any save that already happened |
+| `setup` | Interactive domain and connection editor (see "Domain matrix and terminal sketch"); renders on stderr, prints `Configuration saved at revision N.` or `No changes saved.` on stdout (plus `The last save could not be confirmed. Run mcparcel list to check the configuration.` after an unconfirmed save); then, outside headless mode, `Sign in before first use:` and one `  mcparcel auth <mcp>` line per enabled HTTP connection marked OAuth (not `client_credentials`) whose stored sign-in reads `sign-in required` in `auth status`, and per connection the finish step left needing a sign-in, named as `auth` next actions are; a connection whose Keychain item cannot be read, or that the finish step started, is left out. Then `Could not start <mcp>, <mcp>. Run mcparcel doctor to see why.` when the finish step could not start some (in headless mode it also names those left needing a sign-in). Ctrl+C exits 130 after printing any save that already happened, without the sign-in and failure lines |
 | `sync [<owner/repo>] [--apply [--accept <mcp>...]]` | Fetch and display update; only `--apply` changes active snapshot; `--accept` unblocks named connections whose execution or auth changed |
 | `import mcporter --file <path> [--bindings <file>] [--only <id>...] [--apply]` | Preview or apply supported imports, with explicit unresolved-field report; unbound `${NAME}` in env/header values becomes `env:NAME` with an `environment_reference` warning |
 | `local add --file <definition.json>` | Add a connection object containing `id` plus catalog connection fields. `domains` declares each ID it names; `other` is reserved (omit `domains` instead). An invalid file fails `invalid_config` with `Invalid definition: <field path>: <reason>.`; any other `invalid_config` with a field error reads `Invalid configuration: <field path>: <reason>.` |
@@ -77,7 +82,7 @@ terminal attached and `runtime.approvalDialog` set; a server's approval request
 is declined at once with the `elicitation_declined` warning.
 In headless mode every command that writes configuration (`enable`, `disable`,
 `tools enable|disable`, `local`, `config input|profile`, `import --apply`,
-`add`, `remove`, `sync` with or without `--apply`) fails `config_read_only`
+`add`, `join`, `remove`, `sync` with or without `--apply`) fails `config_read_only`
 before it takes a lock or sends a request. On Linux, `tools`, `call`, `auth`
 and `runtime` in desktop mode fail `runtime_unsupported` ("No MCParcel
 configuration was found and there is no desktop session.") when there is no
@@ -86,7 +91,11 @@ display, no usable D-Bus session bus and no `config.json`; with a
 [runtime.md](runtime.md#linux-desktop-mode) and [headless.md](headless.md).
 `setup --no-input`, `setup --json` and setup without a TTY (stdin and stderr must
 be terminals, in the foreground) fail with `terminal_required` (exit 2) before
-reading any configuration, and write nothing.
+reading any configuration, and write nothing. `join` checks the same before it
+reads the configuration or fetches the catalog ("Join needs an interactive
+terminal; it does not run with --json, --no-input or without a terminal.",
+next action `Run mcparcel add <owner/repo>, then mcparcel setup in a
+terminal, or mcparcel enable <mcp>.`).
 
 `local` file updates can also change personal domain assignments; setup details
 expose the same fields and input/profile bindings. Setup never shows argument,
@@ -96,8 +105,16 @@ catalogs or edit protected policy.
 
 `enable` validates all specified entries and local prerequisites before saving;
 missing executable/auth availability is a reported runtime prerequisite, not a
-reason to resolve secrets. Missing declared inputs/profile mappings block enable
-with `config_required`. Bulk enable is all-or-nothing. Tool names may be configured
+reason to resolve secrets. When a connection declares a credential profile
+requirement and its selection has no profile, or names one that no longer exists,
+enable links it to the local profile with the same ID if there is one. It never
+replaces a valid binding and never picks a profile with another ID. Human output
+adds `Linked credential profile <profile> to <mcp>.` per linked connection after
+`Configuration saved at revision N.` (the profile ID, never its account); JSON
+adds `linkedProfiles` (`{"<canonical id>": "<profile>"}`) next to `revision`,
+omitted when nothing was linked. Missing declared inputs/profile mappings still
+block enable with `config_required`, and then nothing is linked or saved. Bulk
+enable is all-or-nothing. Tool names may be configured
 before live discovery; unknown names are marked unverified until schemas are loaded.
 
 ## Arguments and identity
@@ -334,8 +351,8 @@ Error codes distinguish `auth_required`, `auth_expired`, `config_required`,
 `auth_rate_limited` (exit 6) means 1Password refused one request; the session and
 pooled process stay, and nothing is retried within the call;
 `runtime_config_mismatch` exit 6; `auth_account_conflict` exit 3;
-`terminal_required` exit 2 (setup without an interactive terminal, or with
-`--json` or `--no-input`; the next action lists the equivalent commands);
+`terminal_required` exit 2 (setup or join without an interactive terminal, or
+with `--json` or `--no-input`; the next action lists the equivalent commands);
 `doctor_failed` exit 8 (doctor ran and at least one row failed; `data` keeps
 the rows, as for `isError`).
 Headless mode adds `config_read_only` (exit 2, "This configuration is
@@ -395,42 +412,111 @@ A connection appearing in multiple tabs has one shared selection. For example,
 context7 belongs to Development and Research without creating two processes.
 
 ```text
-+------------------------------------------------------------------------------+
-| MCParcel / Setup                                      1 catalog + personal    |
-| [Design 2/3]  Development 1/4  Research 0/4  Servers 0/2  ...                   |
-|                                                                              |
-| MCP          Enabled   Source                           Runs on              |
-| > Paper      [x]       acme/mcp-catalog                 This device          |
-|   Figma      [ ]       acme/mcp-catalog                 Remote               |
-|   Excalidraw [x]       Personal                         This device          |
-|                                                                              |
-| Paper                                                                        |
-| Connect to the Paper app on this device.                                      |
-| Configuration ready. Connection not checked.                                 |
-|                                                                              |
-| Left/Right: domain   Up/Down: MCP   Space: toggle   Enter: details              |
-| /: search   Tab: actions   A: add personal connection                          |
-| 1 unsaved change                                          [Save] [Cancel]     |
-+------------------------------------------------------------------------------+
+MCParcel  acme/mcp-catalog · a54e28f · synced 2m ago                                            2 on · 1 needs attention
+[Design 2/4]  Development 1/5   Research 0/4   Servers 0/2   Other 0/0
+
+    MCP                       Needs                      Source             │ Paper
+  ○ Excalidraw                npx                        Personal           │ Connect to the Paper app on this device.
+  ○ Figma                     sign-in                    acme/mcp-catalog   │
+  ◐ Notes                     input workspace  notes     acme/mcp-catalog   │ State   ● On
+> ● Paper                     paper                      acme/mcp-catalog   │
+                                                                            │ Needs
+                                                                            │  ◆ paper · runs on this device
+                                                                            │
+                                                                            │ Runs    This device · paper
+                                                                            │ Tools   all tools
+                                                                            │ Source  acme/mcp-catalog
+                                                                            │
+
+Space on/off   Left/Right domain   Up/Down MCP   Enter details   Ctrl+S save
+/ search   Tab actions   A add personal connection   q cancel   ? help
+
+1 unsaved change                                                                                         [Save] [Cancel]
 ```
 
-Sources and counts are illustrative. The wide layout above (columns MCP, Enabled,
-State, Source, Runs on) needs at least 100x30. Anything smaller uses a compact
-list: MCP with a state tag (`(config)`, `(review)`, `(unavailable)`), Enabled,
-Runs on and a truncated Source, one summary line and one help line ending in
-`?: help`; tabs scroll with `<` and `>`. Below 40x10 setup shows `Terminal too
-small (need 40x10). Resize, or press q.` Enabled reads `[x]` on, `[ ]` off and
-`[!]` on with review required. State is `Ready`, `Configuration required`,
-`Review required` or `Unavailable`, separate from Enabled.
+This is setup at 120x30 in a UTF-8 terminal, with Excalidraw just turned off
+and the cursor on Paper; blank list rows are trimmed. Sources and counts are
+illustrative.
+
+The header shows `MCParcel`, then, when exactly one catalog is registered, its
+name (or `owner/repo`), its 7-character commit and `synced Xm ago`; with none it
+shows `personal`, with several `N catalogs + personal`. On the right it counts,
+across all tabs, the rows that are on and, when there are any, those of them
+that need attention: on but missing configuration, under review or
+unavailable. Below it are the domain tabs, then the search line (blank until
+you search). The current tab reads `[Label on/total]` (`[Label (n)]` with
+the match count while a search is active); the tab bar keeps it whole, unless
+it alone is wider than the screen, when its label is cut. It shows `‹` and `›` (`<` and `>` in ASCII) when tabs are hidden on either
+side.
+
+From 100x30 setup uses the wide layout: the list on the left and the details
+pane on the right of a rule. Each list row starts with `> ` on the focused
+row, then a state glyph, MCP, Needs and Source; where a row runs is in the
+pane. Source is shown only
+when the connections come from two or more sources (catalogs and Personal each
+count, across all tabs); otherwise MCP and Needs share its width. The glyphs (ASCII in
+brackets):
+
+| Glyph | State |
+| --- | --- |
+| `●` (`[x]`) | on and ready |
+| `○` (`[ ]`) | off, also an unavailable row that is off |
+| `◌` (`[?]`) | off, configuration required |
+| `◐` (`[~]`) | on, configuration required |
+| `!` (`[!]`) | on, review required |
+| `✕` (`[-]`) | on, but its source no longer defines it |
+
+A row that is off and misses only a credential profile that Space links by
+itself (see Exceptional states) reads `○`, not `◌`: one Space turns it on.
+
+Needs comes from the definition's metadata and the selection only, never from
+credentials or the runtime: `review` or `unavailable` first, then each missing
+input as `input <name>`, `1Password` when the definition requires a credential
+profile, `sign-in` for HTTP with OAuth (not `client_credentials`), and the base
+name of a stdio connection's command (`npx`, `docker`, `uvx`, ...; `local
+command` when an input sets it). Setup cannot tell whether you already signed
+in, so `sign-in` stays listed. The list shows what is still open before what
+is done (a linked profile), so `sign-in` comes before a linked `1Password`.
+A need that does not fit is cut with `...` and ends the column; one with
+fewer than six cells left is not shown.
+
+The details pane takes three eighths of the width, kept between 40 and 60
+columns including the rule, and follows the cursor. It shows the label, the
+description (up to 3 lines), the state (`● On`, `◌ Off, configuration
+required`, ...), Needs as a checklist, Runs (where it runs and the command or
+host), Tools and, when the list shows Source, the source (a catalog row adds
+its commit and `synced Xm ago`, unless the header already shows the only
+catalog's). Last comes the state line where it adds something: why a row is
+unavailable, how to accept a review, or that Space links a profile. In the
+checklist `✓` (`[+]`) marks a set input or a linked profile (`linked`, or
+`linked to <profile>` when its name differs from the requirement), including
+one Space will link; `◆` (`[*]`) marks what is still
+missing and what setup cannot check offline (a sign-in, a local command).
+Enter opens the full details page for editing.
+
+Below 100 columns or 30 rows setup uses the compact list: glyph, MCP and as
+many needs as fit, open ones first. Under the list come one summary line (the
+focused row's state line), the status line and one help line; a save
+conflict's message takes the summary and status lines, and the help line
+shows its keys. In both layouts every column ends in
+two spaces, so truncated text never runs into the next column. Below 40x10
+setup shows `Terminal too small (need 40x10). Resize, or press q.`
+
+Help lines show each key as a chip followed by a dim label; without color they
+read `Space on/off   Enter details`. The last hint of a line (`? help`, `Esc back`, ...) is always kept; a hint
+before it that does not fit is dropped whole, so the compact list drops
+`Ctrl+S save` below 62 columns and `/ search` below 48; the keys still work.
 
 Keys (`?` shows them in setup; letters match either case):
 
 | Where | Keys |
 | --- | --- |
-| List | Left/Right: domain. Up/Down: MCP; PgUp/PgDn, Home/End. Space: toggle. Enter: details. `/`: search. Tab/Shift+Tab: focus `[Save]`/`[Cancel]`, Enter activates. `A`: add a personal connection. Ctrl+S: save. `q` or Esc: cancel (Esc clears an active search first). `?`: help. Ctrl+C: quit now, discard unsaved changes, exit 130. |
-| Search | Typing filters label, ID and description in every tab (the help lines show these keys while searching). Backspace, Ctrl+U. Enter or Down: back to the list, filter kept. Esc: clear. |
-| Details | Up/Down: field. Enter: edit or choose. Space: toggle. `t`: tools. `l`: Connect and load tools. `e`: edit (personal only). Esc: back. |
-| Tools | Up/Down. Space: toggle. `l`: Connect and load tools. Esc: back (cancels a running load). |
+| List | Left/Right: domain. Up/Down: MCP; PgUp/PgDn, Home/End. Space: on/off (on a row that misses configuration it asks for it first, see Exceptional states). Enter: details. `/`: search. Tab/Shift+Tab: focus `[Save]`/`[Cancel]`, Enter activates. `A`: add a personal connection. Ctrl+S: save. `q` or Esc: cancel (Esc clears an active search first). `?`: help. Ctrl+C: quit now, discard unsaved changes, exit 130. |
+| Search | Typing filters label, ID and description in every tab (the help lines show these keys while searching); after each edit, when the current tab has no match it moves to the first tab, in tab order, that has one; with no match anywhere it stays. Backspace, Ctrl+U. Enter or Down: back to the list, filter kept. Esc: clear. |
+| Details | Up/Down: field. Enter: edit or choose; on Credential profile with exactly one local profile it links that one without the picker (`Linked credential profile <p>.`). Space: on/off. `t`: tools. `l`: Connect and load tools. `e`: edit (personal only). Esc: back. |
+| Tools | Up/Down. Space: on/off. `l`: Connect and load tools. Esc: back (cancels a running load). |
+| Finish | On the offer: Enter starts, Esc (or `q`) later. While it runs: Enter signs in to the connection asked for, `s` skips that sign-in (also one waiting for the browser), Up/Down scroll the page when it does not fit (the sign-in URL included), Esc (or `q`) stops. When everything has settled: `r` retries the failed ones, Enter or Esc: done. |
+| Join | Intro: Enter uses the suggested 1Password account, `e` types another one (Enter uses it, Esc goes back), Esc skips 1Password for now; with nothing to ask, Enter continues. Presets: Up/Down, Space picks or unpicks (on Start empty it clears the picks), Enter continues to the list (on Start empty, without the picks). `q` (and Esc where it does not skip) quits. |
 | Form or field | Typing, Backspace, Ctrl+U, paste (control characters stripped). Tab/Shift+Tab: next or previous field. Enter: apply. Esc: discard. |
 | Conflict | `r`: reload and reapply. Esc: back to the draft. |
 | Confirm | `y`/`n` (default N; Enter and Esc mean N). |
@@ -439,20 +525,25 @@ Every setup action has a non-interactive command, and both run the same code:
 
 | Setup action | Command |
 | --- | --- |
-| Space: off to on | `enable <mcp>` |
+| Space: off to on (links the local profile with the requirement's ID, as `enable` does) | `enable <mcp>` |
+| Space on a row that misses configuration | `config input set` per missing input and `config profile bind` when needed, then `enable <mcp>` |
 | Space: on to off | `disable <mcp>` |
-| Space on `[!]` | `enable <mcp>` (accepts, like `sync --apply --accept <mcp>`) |
+| Space on a `!` row | `enable <mcp>` (accepts like `sync --apply --accept <mcp>`; only `enable` also links the local profile with the requirement's ID) |
 | Set an input | `config input set <mcp> <name> <value>` |
 | Choose a credential profile | `config profile bind <mcp> <profile>` |
 | Toggle a tool | `tools enable <mcp> <tool>` / `tools disable <mcp> <tool>` |
 | Connect and load tools | `tools <mcp>` |
+| Finish: start a connection and load its tools | `tools <mcp>` |
+| Finish: sign in | `auth <mcp>` (the same offline refusals first; the URL shows on screen, not on stderr) |
+| Join: use the suggested or a typed 1Password account | `config profile set <requirement ID> --file <profile.json>` with `{"mode":"desktop","account":"<account>"}` |
+| Join: presets | `enable <mcp>` per connection, skipping those already on and those that miss configuration |
 | Add a personal connection | `local add --file <definition.json>` |
 | Edit a personal connection | `local update <id> --file <definition.json>` |
 | Browse, search | `catalog [--domain <id>]`, `list`, `inspect <mcp>` |
 
 Not in setup, shown as hints: `add` (no catalog), `config profile set` (no
-profile yet), `auth <mcp>` (sign-in needed), `sync` (review details) and
-`local remove` (personal details).
+profile yet), `auth <mcp>` (a sign-in the finish step did not do), `sync`
+(review details) and `local remove` (personal details).
 
 Details show the source with snapshot commit and age, domains, transport
 (`stdio: <command> (N arguments)` or `HTTP: <host>`), inputs (`url` inputs, and
@@ -479,18 +570,158 @@ changed elsewhere is dropped (`changed elsewhere`), as is a change that no
 longer applies, so setup never overwrites a newer CLI edit or enables a
 definition you have not seen.
 
-Setup never contacts GitHub, starts the runtime or reads credentials while you
-browse, edit or save. Only `Connect and load tools` contacts the runtime, and
-credentials may then be requested. Connect needs the saved configuration: the
+Setup never contacts GitHub (join fetches the catalog before setup opens),
+starts the runtime or reads credentials while you
+browse, edit or save. Only `Connect and load tools` and the finish step, each
+started by an explicit key, contact the runtime, and credentials may then be
+requested. Connect needs the saved configuration: the
 connection must be saved enabled and ready with no unsaved change to it (tool
 toggles excepted). Loaded tools are kept for the session only; the daemon hides
 disabled and source-denied tools, so a disabled tool that is not loaded shows as
 `(disabled)`. New tool names are added with `tools disable`.
 
-Keyboard-only navigation, visible focus (`>` on the focused row and button,
-brackets on the active tab) and plain ASCII are always used; color (when
-`NO_COLOR` is unset and `TERM` is set and not `dumb`) only adds reverse video
-and bold. No mouse.
+The finish step. A save that turns connections on, or changes connections
+that are on (tool toggles aside), offers to start them: `Start N servers
+now?` with each one's label and Needs, `Enter start   Esc later`. The offer
+itself contacts nothing. Esc returns to where you saved; the connections are
+offered again with the next save, and the summary on exit lists any sign-in
+they still need. Enter opens the finish screen: `MCParcel  Finishing setup`
+with `k of n ready` on the right, then one line per connection, in label
+order, that never moves:
+
+```text
+MCParcel  Finishing setup                                   2 of 5 ready
+Opening your browser to sign in to Front. If it does not open, visit:
+https://auth.example/authorize?client_id=...
+
+  ✓ Context7    started · 2 tools
+  ⠋ Excalidraw  starting...
+  ⠋ Front       waiting for browser sign-in...
+  ◐ Notion      queued for sign-in
+  ✕ Maestro     Could not connect to the MCP server.
+
+s skip sign-in   Esc stop
+```
+
+Each connection first checks its stored sign-in as `auth status` does, then
+starts and loads its tools as `tools <mcp>` does, at most three at a time; a
+slow or failing one never holds up the others. One that needs a browser
+sign-in (its stored sign-in is missing, or its server asks for one) lines up
+for it instead. Sign-ins run one at a time, in the order they were found:
+the one asked for shows `> ◐ Front  needs sign-in` and `Enter sign in to
+Front   s skip   Esc stop`. Enter signs in as `auth <mcp>` does (the same
+offline refusals first) and opens the browser; the URL shows above the list
+in case the browser does not open (`To sign in to Front, open this URL in a
+browser:` where none can open). Then its tools load and the line reads
+`signed in · N tools`. `s` skips a sign-in, also one that is waiting for the
+browser. In headless mode, or for a connection with no browser sign-in (a
+1Password failure also returns `auth_required`), the line reads `run
+mcparcel auth <mcp>` and nothing lines up. A failure shows its message after
+`✕`; `r` retries the failed ones once everything has settled. Esc stops:
+every running start and sign-in is canceled, and a connection in line for a
+sign-in counts as skipped, a connection still starting as stopped (no
+outcome, whatever an earlier run found). When the screen is too short, Up/Down
+scroll it whole, the sign-in URL included. A connection waiting for a free
+slot shows the spinner's first frame, still. Done (Enter) returns to where you
+saved, with `k of n ready.` in the status; the list and details then say what
+the step found for each connection that is on (`Not started.` with the reason,
+`Started this session, N tools.`, or `Needs a sign-in: run mcparcel auth
+<mcp>.`), for this session only, and the tools screen adds the failure's
+next step. The summary on exit lists only what is left:
+`mcparcel auth <mcp>` for each skipped sign-in, and the connections that
+failed, with `mcparcel doctor`; a connection whose sign-in failed is listed
+once, under the sign-in it still needs. The glyphs: a spinner while it works (its
+first frame, still, without animation), `✓` (`[+]`) started, `◐` (`[~]`) a
+sign-in still to do, `✕` (`[-]`) failed and `○` (`[ ]`) stopped.
+
+Joining a catalog. `mcparcel join <owner/repo>` opens setup on two screens
+before the list. The intro names the catalog (`Team · owner/repo · a54e28f`)
+and its number of servers, then asks about each credential profile
+requirement whose `suggest` names a 1Password account (catalog.md, "Joining
+a catalog"), that at least one server uses and that has no local profile with
+its ID yet, one at a time, the most used first (`(1 of 2)` when there are
+several):
+
+```text
+MCParcel / Join
+Zenjoy · zenjoy/prompt-engineering-club · a54e28f
+25 MCP servers picked by the team.
+
+This catalog asks for 1Password access to MCP Integrations.
+Use this 1Password account? The catalog suggests it.
+Account: zenjoy.1password.com
+8 servers use it. Nothing is read from 1Password until a server starts.
+
+Enter use it   e use another account   Esc skip 1Password for now
+```
+
+Enter saves the local profile with that ID right away, in its own revisioned
+update: `{"mode":"desktop","account":"<account>"}` and nothing else, as
+`config profile set` would. `e` takes another account, which must follow the
+same rule as a suggestion (a 1Password sign-in address such as
+`example.1password.com`); it is trimmed, lowercased and stripped of
+`https://` and a trailing `/` first. Esc creates nothing. A requirement that
+already has a local profile is not asked about, and a profile with that ID
+that appears elsewhere while the question shows is kept, never replaced. The
+intro lists it instead: `✓ 1Password for <name>: already set up` when it is
+the suggested one, else `! 1Password for <name>: uses your profile <id>
+(<mode>, <account>), not the suggested <account>`, since the catalog's
+connections link to it by name. A requirement without a suggestion and
+without a local profile reads `◆ 1Password for <name>: not set up. Add it with
+mcparcel config profile set <id>.` Where the 1Password desktop app cannot
+read secrets (not macOS, or headless mode), a suggestion is such a note too,
+pointing at a service-account profile, and is never asked about. The catalog cannot choose a token, a
+reference or a service account, and nothing reads 1Password here. Turning on
+a connection that needs the profile then links it as `enable` does.
+
+When the catalog has presets, the next screen asks `What do you work on?
+Pick any. You can change everything on the next screen.`, with one row per
+preset (its label, the labels of its servers and their count), then `Start
+empty`, and `N servers selected` below (on `Start empty` with presets picked,
+the help reads `Enter start empty, without the picks`). Enter turns on the picked presets'
+connections in the draft through the same path as Space, and opens the list
+on the first one: one that is already on, or under review, stays as it is,
+and one that misses configuration stays off (the status counts them, and
+Space on its row asks for what it misses). Nothing of this is saved until
+Ctrl+S; then the finish step offers to start them as after any save. Quitting
+before a save (`q`, Esc or Ctrl+C) writes nothing beyond the source
+registration and a profile you confirmed.
+
+Setup is keyboard-only; there is no mouse. Focus is visible without color:
+`>` before the focused row and button, and brackets around the current tab.
+With color the focused row and button are also in reverse video, and the
+current tab is a bold reverse pill.
+
+Setup draws characters beyond ASCII (the state glyphs, `·` separators, `‹` and
+`›`, the pane's `│` rule, the checklist marks and the spinner) only in a UTF-8
+locale: the first non-empty value of `LC_ALL`, `LC_CTYPE` and `LANG` contains
+`UTF-8` or `utf8` in any case, and `TERM` is not `dumb`. Otherwise every screen
+is plain ASCII: the bracketed marks above, ` - ` separators, `<` and `>`, a `|`
+rule and a `|/-\` spinner. The Marks legend on the help page (`?`) uses the
+same set. Catalog text (labels, descriptions, names) with characters beyond
+ASCII is shown escaped as a quoted ASCII string in both modes.
+
+Color is on when `NO_COLOR` is empty or unset and `TERM` is set and not
+`dumb`. It uses the terminal's own 16-color palette, so it follows the
+terminal's theme: green for on and ready (the header's on-count only when at
+least one row is), amber for what needs attention (a
+review, a missing input, a profile still to link, the header's attention
+count), red for unavailable, blue for 1Password, violet for sign-in and grey
+for secondary text. 256-color and truecolor terminals get finer greys. Color
+only adds styling: the text is the same without it, so every state reads the
+same.
+
+Status messages are toasts: they clear after about 3 seconds, errors included.
+A busy status (`Saving...`) and the prompt of a pending enable stay until they
+are replaced. Animation is on when color is on and `MCPARCEL_REDUCE_MOTION` is
+empty or unset. Then a toast dims for 300 ms before it clears; a row you turn
+on, turn off or accept with Space in the list, or that a pending enable turns
+on, flashes for about 180 ms (green when on, dim when off); and `Connecting to
+<mcp>...` on the tools screen and each finish line that is starting or signing
+in have a spinner. Nothing moves while the screen is idle, nor while the
+finish screen only waits for you. With animation off nothing animates: toasts
+clear without dimming, rows do not flash and the spinner is a static
+`Loading...` (on the finish screen, its first frame).
 
 ## Exceptional states
 
@@ -498,32 +729,49 @@ and bold. No mouse.
   Press A to add a personal connection.`
 - No results: `No MCPs match "x" in Design. Esc clears the search.` Tabs show
   match counts and Other stays visible.
-- Offline: setup never goes online. The header reads `1 catalog + personal` and
-  details show the snapshot age. A failed connect says `Could not connect.
-  Configured MCPs on this device still work.`
-- Missing input/profile: `Configuration required`, separate from Enabled. Space
-  on such a row opens details on the first missing field: `Paper needs: input
-  workspace, credential profile. Fill them in, then press Space.`
-- Source removal: `Unavailable`; `<source> no longer defines this connection.
-  Your selection is kept for a future restoration.` It can only be turned off
-  (Space turns it off, also when it is marked `[!]`).
-- Review required in setup: `[!]`; details show the transport and profile name
-  plus `Space accepts it (same as mcparcel enable <id>). Run mcparcel sync to see
+- Offline: setup never goes online. With one catalog the header shows its
+  snapshot age; the details pane and page show it for every catalog row. A
+  failed connect says `Could not connect. Configured MCPs on this device still
+  work.`
+- Missing input/profile: `◌` (`◐` when on) with the missing items in Needs. One
+  Space turns an off row on (on a `◐` row it turns it off). Setup asks for each missing item in turn, with
+  `Paper needs: input workspace, credential profile. Esc keeps it off.` (`Esc
+  leaves it unchanged.` for a `!` row): a missing input opens its field
+  editor; a missing credential profile is linked to the local profile with the requirement's ID without asking (as `enable`
+  does, so it is not listed as missing), else to the only local profile, else the
+  picker opens with two or more, or the `config profile set` hint with none.
+  After each fill setup checks again; when nothing is missing it turns the row
+  on and returns to the list on that row with `Paper is on.`, led by `Linked
+  credential profile work.` when it linked one. Esc on the field or profile
+  screen returns to the list with `Paper stays off.` (`Paper is unchanged.` for
+  a `!` row). Opening details another way ends the pending enable, so a later
+  edit there never turns the row on. When only a profile that Space will link is
+  missing, the row reads ready (`○`, with `1Password` in Needs) and the state
+  line `Space turns it on and links credential profile team.`
+- Source removal: `✕` (`○` once off) with `unavailable` in Needs; `<source> no
+  longer defines this connection. Your selection is kept for a future
+  restoration.` It can only be turned off
+  (Space turns it off, also when it is under review).
+- Review required in setup: `!` (`[!]` in ASCII) with `review` in Needs;
+  details show the transport and profile name plus `Space accepts it (same as mcparcel enable <id>). Run mcparcel sync to see
   what changed.`
 - Save conflict: `The configuration changed since setup loaded it. Your N
-  changes are kept.` with `r: reload and reapply   Esc: back`. After reload:
+  changes are kept.` with `r reload and reapply   Esc back`. After reload:
   `Reloaded at revision M. Reapplied K changes. Dropped (changed elsewhere):
   enable Paper.` A durable save that was not confirmed (`config_write_failed`)
   shows its message plus `Press r to reload.` Reload lists changes the newer
   configuration already holds as `Already in the configuration: enable Paper.`;
   when they came from the unconfirmed save, it counts as saved.
 - New catalog version: review via sync; no silent command/credential changes.
-  An enabled connection whose execution or auth fields changed shows `Review
-  required` and cannot be called until accepted with `sync --apply --accept <mcp>`
-  or `enable <mcp>`. The diff names every changed field.
+  An enabled connection whose execution or auth fields changed shows `!` and
+  `review` (details: `On, review required`) and cannot be called until
+  accepted with `sync --apply --accept <mcp>` or `enable <mcp>`. The diff names every changed field. Only `enable` links
+  the local profile with a newly required credential profile's ID; before
+  `sync --apply --accept`, run `config profile bind <mcp> <profile>`.
 - Expired auth: metadata still available; first protected call initiates auth
   (OAuth: returns `auth_required` pointing at `auth <mcp>`). In setup it appears
-  only after an explicit Connect, with `mcparcel auth <id>`.
+  only after an explicit Connect, with `mcparcel auth <id>`, or on the finish
+  screen, which lines the connection up for a sign-in.
 - No-input agents: receive an actionable structured auth error instead of a prompt;
   a server's approval request is declined with the "no prompt was possible" notice.
 
