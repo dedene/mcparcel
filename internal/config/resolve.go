@@ -22,6 +22,64 @@ type EffectiveConfig struct {
 	Aliases         map[string]string              `json:"aliases"`
 	Domains         map[string]Domain              `json:"domains"`
 	SourceRevisions map[string]string              `json:"sourceRevisions"`
+	// Catalogs holds, per registered GitHub source ID, what joining that
+	// catalog offers. Personal definitions have no entry.
+	Catalogs map[string]EffectiveCatalog `json:"catalogs"`
+}
+
+// EffectiveCatalog is what a catalog offers a teammate who joins it, with
+// canonical connection IDs. A suggestion is only a proposal: the teammate
+// confirms it before a profile is created.
+type EffectiveCatalog struct {
+	Name string `json:"name,omitempty"`
+	// Presets in catalog order.
+	Presets []EffectivePreset `json:"presets"`
+	// Requirements are the catalog's credential profiles, sorted by ID.
+	Requirements []EffectiveRequirement `json:"requirements"`
+}
+type EffectivePreset struct {
+	ID          string   `json:"id"`
+	Label       string   `json:"label"`
+	Description string   `json:"description,omitempty"`
+	Connections []string `json:"connections"`
+}
+
+// EffectiveRequirement is a catalog's credential profile requirement. Its ID
+// is also the local profile name that links to it automatically (see
+// edit.AutoProfile); Connections are the canonical IDs that declare it.
+type EffectiveRequirement struct {
+	ID          string             `json:"id"`
+	Description string             `json:"description,omitempty"`
+	Suggest     *ProfileSuggestion `json:"suggest,omitempty"`
+	Connections []string           `json:"connections"`
+}
+
+// joinOffer builds a catalog's EffectiveCatalog; canonical maps a catalog
+// connection ID to its canonical ID.
+func joinOffer(cat Catalog, canonical func(string) string) EffectiveCatalog {
+	out := EffectiveCatalog{Name: cat.Name, Presets: []EffectivePreset{}, Requirements: []EffectiveRequirement{}}
+	for _, p := range cat.Presets {
+		ids := make([]string, len(p.Connections))
+		for i, id := range p.Connections {
+			ids[i] = canonical(id)
+		}
+		out.Presets = append(out.Presets, EffectivePreset{ID: p.ID, Label: p.Label, Description: p.Description, Connections: ids})
+	}
+	for _, id := range sortedKeys(cat.CredentialProfiles) {
+		r := cat.CredentialProfiles[id]
+		row := EffectiveRequirement{ID: id, Description: r.Description, Connections: []string{}}
+		if r.Suggest != nil {
+			s := *r.Suggest
+			row.Suggest = &s
+		}
+		for _, c := range sortedKeys(cat.Connections) {
+			if cat.Connections[c].CredentialProfile == id {
+				row.Connections = append(row.Connections, canonical(c))
+			}
+		}
+		out.Requirements = append(out.Requirements, row)
+	}
+	return out
 }
 
 func cloneConnection(c Connection) Connection {
@@ -41,7 +99,7 @@ func Resolve(state State) (EffectiveConfig, error) {
 	state.Local, _ = DecodeLocal(b)
 	b, _ = json.Marshal(state.Selections)
 	state.Selections, _ = DecodeSelections(b)
-	out := EffectiveConfig{Revision: state.Selections.Revision, Connections: map[string]EffectiveConnection{}, Aliases: state.Local.Aliases, Domains: map[string]Domain{"other": {Label: "Other"}}, SourceRevisions: map[string]string{}}
+	out := EffectiveConfig{Revision: state.Selections.Revision, Connections: map[string]EffectiveConnection{}, Aliases: state.Local.Aliases, Domains: map[string]Domain{"other": {Label: "Other"}}, SourceRevisions: map[string]string{}, Catalogs: map[string]EffectiveCatalog{}}
 	visit := func(cat Catalog, source, owner, repo string) error {
 		for id, d := range cat.Domains {
 			if _, ok := out.Domains[id]; !ok {
@@ -139,6 +197,10 @@ func Resolve(state State) (EffectiveConfig, error) {
 			return EffectiveConfig{}, err
 		}
 		out.SourceRevisions[src.ID] = src.Commit
+		out.Catalogs[src.ID] = joinOffer(state.Catalogs[src.ID], func(id string) string {
+			canonical, _ := CanonicalGitHub(src.Owner, src.Repo, id)
+			return canonical
+		})
 	}
 	if err := visit(state.Personal, "personal", "", ""); err != nil {
 		return EffectiveConfig{}, err

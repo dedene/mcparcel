@@ -394,6 +394,10 @@ func checkRequired(v any, typ reflect.Type, path string) error {
 			required = []string{"kind", "description"}
 		case reflect.TypeFor[Domain]():
 			required = []string{"label"}
+		case reflect.TypeFor[ProfileSuggestion]():
+			required = []string{"mode", "account"}
+		case reflect.TypeFor[Preset]():
+			required = []string{"id", "label", "connections"}
 		case reflect.TypeFor[InputRef]():
 			required = []string{"input"}
 		case reflect.TypeFor[SecretRef]():

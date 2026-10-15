@@ -143,3 +143,74 @@ func TestFetchInvalidUTF8PreservesSnapshot(t *testing.T) {
 		t.Fatalf("snapshot rewritten: %v", err)
 	}
 }
+
+// A catalog for a newer MCParcel can use fields this build rejects. Fetch
+// still calls it invalid, but keeps its minVersion so add and sync can say an
+// upgrade is needed instead.
+func TestFetchKeepsMinVersionOfUndecodableCatalog(t *testing.T) {
+	for _, c := range []struct{ raw, min string }{
+		{`{"schemaVersion":1,"minVersion":"9.0.0","futureField":{"x":1},"connections":{}}`, "9.0.0"},
+		{`{"schemaVersion":1,"futureField":{"x":1},"connections":{}}`, ""},
+		{`{"schemaVersion":1,"minVersion":"9.0.0","connections":{"x":{"transport":{"type":"grpc"}}}}`, "9.0.0"},
+	} {
+		rig := newFetchRig()
+		raw := []byte(c.raw)
+		hash := blobHash(raw)
+		entry := rig.tree["tree"].([]any)[0].(map[string]any)
+		entry["sha"], entry["size"] = hash, len(raw)
+		rig.blob = map[string]any{"sha": hash, "size": len(raw), "encoding": "base64", "content": base64.StdEncoding.EncodeToString(raw)}
+		got, err := (&GitHub{Public: rig}).Fetch(t.Context(), initialSource())
+		var invalid *InvalidCatalogError
+		if !errors.Is(err, ErrContentInvalid) || !errors.As(err, &invalid) || invalid.MinVersion != c.min || !reflect.DeepEqual(got, Snapshot{}) {
+			t.Fatalf("%s: %+v %v", c.raw, got, err)
+		}
+	}
+}
+
+// Presets and suggestions survive fetch, the saved snapshot and a read of the
+// configuration, and resolve to canonical connection IDs.
+func TestFetchKeepsJoinFields(t *testing.T) {
+	root, err := os.MkdirTemp("", "join-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(root); err != nil {
+			t.Error(err)
+		}
+	})
+	env := map[string]string{"HOME": root + "/home", "XDG_CONFIG_HOME": root + "/config", "XDG_DATA_HOME": root + "/data", "XDG_CACHE_HOME": root + "/cache", "XDG_STATE_HOME": root + "/state", "MCPARCEL_RUNTIME_DIR": root + "/run"}
+	paths, err := config.ResolvePaths(func(key string) string { return env[key] }, env["HOME"], root, os.Getuid())
+	if err != nil {
+		t.Fatal(err)
+	}
+	rig := newFetchRig()
+	raw := []byte(`{"schemaVersion":1,"minVersion":"0.2.0","credentialProfiles":{"team":{"suggest":{"mode":"desktop","account":"fixture.1password.com"}}},` +
+		`"presets":[{"id":"writer","label":"Writer","connections":["paper"]}],"connections":{"paper":{"credentialProfile":"team","transport":{"type":"http","url":"https://paper.example.invalid/mcp"}}}}`)
+	hash := blobHash(raw)
+	entry := rig.tree["tree"].([]any)[0].(map[string]any)
+	entry["sha"], entry["size"] = hash, len(raw)
+	rig.blob = map[string]any{"sha": hash, "size": len(raw), "encoding": "base64", "content": base64.StdEncoding.EncodeToString(raw)}
+	github := &GitHub{Public: rig}
+	snapshot, err := github.Fetch(t.Context(), initialSource())
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := &Service{Store: config.NewStore(paths), Fetcher: github}
+	if _, err = service.Register(t.Context(), snapshot, 0); err != nil {
+		t.Fatal(err)
+	}
+	state, err := config.ReadState(t.Context(), paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	effective, err := config.Resolve(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	offer := effective.Catalogs[snapshot.Source.ID]
+	if len(offer.Presets) != 1 || !reflect.DeepEqual(offer.Presets[0].Connections, []string{"github:fixture-owner/fixture.repo#paper"}) ||
+		len(offer.Requirements) != 1 || offer.Requirements[0].Suggest == nil || offer.Requirements[0].Suggest.Account != "fixture.1password.com" {
+		t.Fatalf("%+v", offer)
+	}
+}

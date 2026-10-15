@@ -41,6 +41,15 @@
         "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
       }
     },
+    "presets": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Preset"
+      },
+      "minItems": 1,
+      "maxItems": 32,
+      "$comment": "Preset IDs are unique and every connection ID is declared in this catalog; MCParcel validates both."
+    },
     "connections": {
       "type": "object",
       "additionalProperties": {
@@ -57,6 +66,55 @@
     "connections"
   ],
   "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "presets"
+        ]
+      },
+      "then": {
+        "required": [
+          "minVersion"
+        ],
+        "properties": {
+          "minVersion": {
+            "$ref": "#/$defs/JoinMinVersion"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "credentialProfiles"
+        ],
+        "properties": {
+          "credentialProfiles": {
+            "not": {
+              "additionalProperties": {
+                "not": {
+                  "required": [
+                    "suggest"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "minVersion"
+        ],
+        "properties": {
+          "minVersion": {
+            "$ref": "#/$defs/JoinMinVersion"
+          }
+        }
+      }
+    }
+  ],
   "$defs": {
     "InputRef": {
       "type": "object",
@@ -200,9 +258,61 @@
       "properties": {
         "description": {
           "type": "string"
+        },
+        "suggest": {
+          "$ref": "#/$defs/ProfileSuggestion"
         }
       },
       "required": [],
+      "additionalProperties": false
+    },
+    "ProfileSuggestion": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "const": "desktop"
+        },
+        "account": {
+          "$ref": "#/$defs/Account"
+        }
+      },
+      "required": [
+        "mode",
+        "account"
+      ],
+      "additionalProperties": false
+    },
+    "Preset": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "label": {
+          "type": "string",
+          "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "description": {
+          "type": "string",
+          "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$",
+          "maxLength": 200
+        },
+        "connections": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "connections"
+      ],
       "additionalProperties": false
     },
     "ToolPolicy": {
@@ -640,6 +750,17 @@
     "Identifier": {
       "type": "string",
       "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "Account": {
+      "type": "string",
+      "pattern": "^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$",
+      "maxLength": 253,
+      "$comment": "A 1Password sign-in address, such as example.1password.com."
+    },
+    "JoinMinVersion": {
+      "type": "string",
+      "pattern": "^(?:[1-9]\\d*|0\\.(?:[2-9]|[1-9]\\d+))\\.",
+      "$comment": "0.2.0 or newer, a 0.2.0 prerelease included: the first version that knows presets and suggest."
     },
     "EnvName": {
       "type": "string",

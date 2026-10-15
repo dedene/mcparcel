@@ -85,10 +85,11 @@ func TestCatalogMinVersionDecode(t *testing.T) {
 }
 
 func TestPersonalRejectsMinVersion(t *testing.T) {
-	personal, err := config.DecodePersonal([]byte(`{"schemaVersion":1,"minVersion":"0.1.0","connections":{}}`))
-	if err != nil {
-		t.Fatal(err)
+	_, err := config.DecodePersonal([]byte(`{"schemaVersion":1,"minVersion":"0.1.0","connections":{}}`))
+	if !errors.Is(err, config.ErrConfig) || config.FieldReason(err) != "personal.minVersion: allowed only in a GitHub catalog" {
+		t.Fatal(err, config.FieldReason(err))
 	}
+	personal := config.Personal{SchemaVersion: 1, MinVersion: "0.1.0", Connections: map[string]config.Connection{}}
 	state := config.State{Personal: personal, Local: config.Local{SchemaVersion: 1}, Selections: config.Selections{SchemaVersion: 1, Connections: map[string]config.Selection{}}, Catalogs: map[string]config.Catalog{}}
 	err = config.ValidateState(state)
 	if !errors.Is(err, config.ErrConfig) || config.FieldReason(err) != "personal.minVersion: allowed only in a GitHub catalog" {

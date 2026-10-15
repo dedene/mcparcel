@@ -54,7 +54,7 @@ func PlanImport(state State, report ImportReport, only []string) (ImportReport, 
 				block(path+".credentialProfile", "missing_profile")
 			}
 			requirement := out.Definitions.CredentialProfiles[profile]
-			if old, exists := current.Personal.CredentialProfiles[profile]; exists && old.Description != "" && old != requirement {
+			if old, exists := current.Personal.CredentialProfiles[profile]; exists && old.Description != "" && !reflect.DeepEqual(old, requirement) {
 				block(path+".credentialProfile", "requirement_conflict")
 			}
 		}
@@ -96,7 +96,7 @@ func validateImportReport(report ImportReport) (ImportReport, error) {
 	if err != nil {
 		return ImportReport{}, ErrConfig
 	}
-	out.Definitions, err = DecodeCatalog(data)
+	out.Definitions, err = DecodePersonal(data)
 	if err != nil {
 		return ImportReport{}, ErrConfig
 	}

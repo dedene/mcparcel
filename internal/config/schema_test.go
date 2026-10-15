@@ -198,6 +198,7 @@ func TestSchemaCorpus(t *testing.T) {
 			{"catalog", "Identifier", identifier.String()},
 			{"catalog", "EnvName", envName.String()},
 			{"catalog", "HeaderName", headerName.String()},
+			{"catalog", "Account", accountGrammar.String()},
 			{"config", "Identifier", identifier.String()},
 			{"config", "Owner", ownerGrammar.String()},
 			{"config", "Repo", repoGrammar.String()},
@@ -238,7 +239,7 @@ func TestSchemaRejectsUnknownAndDuplicate(t *testing.T) {
 }
 
 func TestSchemaSemanticBoundary(t *testing.T) {
-	remaining := map[string]bool{"undeclared-input": true, "invalid-duration": true, "http-consent": true, "sa-file-unclean-parent": true}
+	remaining := map[string]bool{"undeclared-input": true, "invalid-duration": true, "http-consent": true, "sa-file-unclean-parent": true, "preset-duplicate-id": true, "preset-undeclared-connection": true}
 	for _, c := range schemaCases(t) {
 		if remaining[c.Name] {
 			if !c.SyntaxValid || !c.SchemaValid || c.GoValid || c.Path == "" {
@@ -323,6 +324,8 @@ func TestSchemaFieldCoverage(t *testing.T) {
 		{reflect.TypeFor[Domain](), catalog.Defs["Domain"], nil, nil},
 		{reflect.TypeFor[Input](), catalog.Defs["Input"], nil, nil},
 		{reflect.TypeFor[ProfileRequirement](), catalog.Defs["ProfileRequirement"], nil, nil},
+		{reflect.TypeFor[ProfileSuggestion](), catalog.Defs["ProfileSuggestion"], nil, nil},
+		{reflect.TypeFor[Preset](), catalog.Defs["Preset"], nil, nil},
 		{reflect.TypeFor[ToolPolicy](), catalog.Defs["ToolPolicy"], nil, nil},
 		{reflect.TypeFor[Lifecycle](), catalog.Defs["Lifecycle"], nil, nil},
 		{reflect.TypeFor[OAuth](), catalog.Defs["OAuth"], nil, nil},

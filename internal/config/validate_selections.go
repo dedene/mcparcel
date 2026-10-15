@@ -56,12 +56,9 @@ func ValidateState(state State) error {
 	if err != nil {
 		return fieldError("personal", "invalid configuration")
 	}
-	personal, err := DecodeCatalog(personalData)
+	personal, err := DecodePersonal(personalData)
 	if err != nil {
 		return err
-	}
-	if personal.MinVersion != "" {
-		return fieldError("personal.minVersion", "allowed only in a GitHub catalog")
 	}
 	selectionsData, err := json.Marshal(state.Selections)
 	if err != nil {

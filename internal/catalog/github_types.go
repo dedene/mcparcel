@@ -31,6 +31,15 @@ var (
 	ErrLocalBindings     = errors.New("catalog update conflicts with local bindings")
 )
 
+// InvalidCatalogError is ErrContentInvalid for a fetched catalog file that
+// this build cannot accept. MinVersion is the file's minVersion when that one
+// field could still be read, so the caller can report that the catalog needs
+// a newer MCParcel instead of calling it invalid.
+type InvalidCatalogError struct{ MinVersion string }
+
+func (e *InvalidCatalogError) Error() string        { return ErrContentInvalid.Error() }
+func (e *InvalidCatalogError) Is(target error) bool { return target == ErrContentInvalid }
+
 type APIResponse struct {
 	Status int         `json:"-"`
 	Header http.Header `json:"-"`

@@ -58,7 +58,7 @@ func cloneState(state State) (State, error) {
 	if e != nil {
 		return State{}, e
 	}
-	out.Personal, e = DecodeCatalog(b)
+	out.Personal, e = DecodePersonal(b)
 	if e != nil {
 		return State{}, e
 	}

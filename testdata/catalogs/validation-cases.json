@@ -2373,5 +2373,145 @@
     "schemaValid": true,
     "goValid": false,
     "path": "credentialProfiles.agent.tokenFile"
+  },
+  {
+    "name": "join-valid",
+    "document": "catalog",
+    "raw": "{\"schemaVersion\":1,\"minVersion\":\"0.2.0\",\"credentialProfiles\":{\"team\":{\"description\":\"Team fixture credentials\",\"suggest\":{\"mode\":\"desktop\",\"account\":\"fixture.1password.com\"}}},\"presets\":[{\"id\":\"developer\",\"label\":\"Developer\",\"description\":\"Code tools\",\"connections\":[\"paper\",\"docs\"]}],\"connections\":{\"paper\":{\"transport\":{\"type\":\"stdio\",\"command\":\"fixture\"}},\"docs\":{\"credentialProfile\":\"team\",\"transport\":{\"type\":\"http\",\"url\":\"https://docs.fixture.invalid/mcp\"}}}}",
+    "syntaxValid": true,
+    "schemaValid": true,
+    "goValid": true
+  },
+  {
+    "name": "join-prerelease-floor",
+    "document": "catalog",
+    "raw": "{\"schemaVersion\":1,\"minVersion\":\"0.2.0-rc.1\",\"credentialProfiles\":{\"team\":{\"description\":\"Team fixture credentials\",\"suggest\":{\"mode\":\"desktop\",\"account\":\"fixture.1password.com\"}}},\"presets\":[{\"id\":\"developer\",\"label\":\"Developer\",\"description\":\"Code tools\",\"connections\":[\"paper\",\"docs\"]}],\"connections\":{\"paper\":{\"transport\":{\"type\":\"stdio\",\"command\":\"fixture\"}},\"docs\":{\"credentialProfile\":\"team\",\"transport\":{\"type\":\"http\",\"url\":\"https://docs.fixture.invalid/mcp\"}}}}",
+    "syntaxValid": true,
+    "schemaValid": true,
+    "goValid": true
+  },
+  {
+    "name": "join-presets-only",
+    "document": "catalog",
+    "raw": "{\"schemaVersion\":1,\"minVersion\":\"0.2.0\",\"credentialProfiles\":{\"team\":{\"description\":\"Team fixture credentials\"}},\"presets\":[{\"id\":\"developer\",\"label\":\"Developer\",\"description\":\"Code tools\",\"connections\":[\"paper\",\"docs\"]}],\"connections\":{\"paper\":{\"transport\":{\"type\":\"stdio\",\"command\":\"fixture\"}},\"docs\":{\"credentialProfile\":\"team\",\"transport\":{\"type\":\"http\",\"url\":\"https://docs.fixture.invalid/mcp\"}}}}",
+    "syntaxValid": true,
+    "schemaValid": true,
+    "goValid": true
+  },
+  {
+    "name": "join-suggest-only",
+    "document": "catalog",
+    "raw": "{\"schemaVersion\":1,\"minVersion\":\"0.2.0\",\"credentialProfiles\":{\"team\":{\"description\":\"Team fixture credentials\",\"suggest\":{\"mode\":\"desktop\",\"account\":\"fixture.1password.com\"}}},\"connections\":{\"paper\":{\"transport\":{\"type\":\"stdio\",\"command\":\"fixture\"}},\"docs\":{\"credentialProfile\":\"team\",\"transport\":{\"type\":\"http\",\"url\":\"https://docs.fixture.invalid/mcp\"}}}}",
+    "syntaxValid": true,
+    "schemaValid": true,
+    "goValid": true
+  },
+  {
+    "name": "join-without-minversion",
+    "document": "catalog",
+    "raw": "{\"schemaVersion\":1,\"credentialProfiles\":{\"team\":{\"description\":\"Team fixture credentials\",\"suggest\":{\"mode\":\"desktop\",\"account\":\"fixture.1password.com\"}}},\"presets\":[{\"id\":\"developer\",\"label\":\"Developer\",\"description\":\"Code tools\",\"connections\":[\"paper\",\"docs\"]}],\"connections\":{\"paper\":{\"transport\":{\"type\":\"stdio\",\"command\":\"fixture\"}},\"docs\":{\"credentialProfile\":\"team\",\"transport\":{\"type\":\"http\",\"url\":\"https://docs.fixture.invalid/mcp\"}}}}",
+    "syntaxValid": true,
+    "schemaValid": false,
+    "goValid": false,
+    "path": "minVersion"
+  },
+  {
+    "name": "join-old-minversion",
+    "document": "catalog",
+    "raw": "{\"schemaVersion\":1,\"minVersion\":\"0.1.0\",\"credentialProfiles\":{\"team\":{\"description\":\"Team fixture credentials\",\"suggest\":{\"mode\":\"desktop\",\"account\":\"fixture.1password.com\"}}},\"presets\":[{\"id\":\"developer\",\"label\":\"Developer\",\"description\":\"Code tools\",\"connections\":[\"paper\",\"docs\"]}],\"connections\":{\"paper\":{\"transport\":{\"type\":\"stdio\",\"command\":\"fixture\"}},\"docs\":{\"credentialProfile\":\"team\",\"transport\":{\"type\":\"http\",\"url\":\"https://docs.fixture.invalid/mcp\"}}}}",
+    "syntaxValid": true,
+    "schemaValid": false,
+    "goValid": false,
+    "path": "minVersion"
+  },
+  {
+    "name": "suggest-service-account",
+    "document": "catalog",
+    "raw": "{\"schemaVersion\":1,\"minVersion\":\"0.2.0\",\"credentialProfiles\":{\"team\":{\"description\":\"Team fixture credentials\",\"suggest\":{\"mode\":\"service-account\",\"account\":\"fixture.1password.com\"}}},\"presets\":[{\"id\":\"developer\",\"label\":\"Developer\",\"description\":\"Code tools\",\"connections\":[\"paper\",\"docs\"]}],\"connections\":{\"paper\":{\"transport\":{\"type\":\"stdio\",\"command\":\"fixture\"}},\"docs\":{\"credentialProfile\":\"team\",\"transport\":{\"type\":\"http\",\"url\":\"https://docs.fixture.invalid/mcp\"}}}}",
+    "syntaxValid": true,
+    "schemaValid": false,
+    "goValid": false,
+    "path": "credentialProfiles.team.suggest.mode"
+  },
+  {
+    "name": "suggest-token",
+    "document": "catalog",
+    "raw": "{\"schemaVersion\":1,\"minVersion\":\"0.2.0\",\"credentialProfiles\":{\"team\":{\"description\":\"Team fixture credentials\",\"suggest\":{\"mode\":\"desktop\",\"account\":\"fixture.1password.com\",\"token\":\"hidden-value\"}}},\"presets\":[{\"id\":\"developer\",\"label\":\"Developer\",\"description\":\"Code tools\",\"connections\":[\"paper\",\"docs\"]}],\"connections\":{\"paper\":{\"transport\":{\"type\":\"stdio\",\"command\":\"fixture\"}},\"docs\":{\"credentialProfile\":\"team\",\"transport\":{\"type\":\"http\",\"url\":\"https://docs.fixture.invalid/mcp\"}}}}",
+    "syntaxValid": true,
+    "schemaValid": false,
+    "goValid": false,
+    "path": "credentialProfiles.team.suggest.token"
+  },
+  {
+    "name": "suggest-bootstrap-ref",
+    "document": "catalog",
+    "raw": "{\"schemaVersion\":1,\"minVersion\":\"0.2.0\",\"credentialProfiles\":{\"team\":{\"description\":\"Team fixture credentials\",\"suggest\":{\"mode\":\"desktop\",\"account\":\"fixture.1password.com\",\"bootstrapRef\":\"op://fixture/item/token\"}}},\"presets\":[{\"id\":\"developer\",\"label\":\"Developer\",\"description\":\"Code tools\",\"connections\":[\"paper\",\"docs\"]}],\"connections\":{\"paper\":{\"transport\":{\"type\":\"stdio\",\"command\":\"fixture\"}},\"docs\":{\"credentialProfile\":\"team\",\"transport\":{\"type\":\"http\",\"url\":\"https://docs.fixture.invalid/mcp\"}}}}",
+    "syntaxValid": true,
+    "schemaValid": false,
+    "goValid": false,
+    "path": "credentialProfiles.team.suggest.bootstrapRef"
+  },
+  {
+    "name": "suggest-account-name",
+    "document": "catalog",
+    "raw": "{\"schemaVersion\":1,\"minVersion\":\"0.2.0\",\"credentialProfiles\":{\"team\":{\"description\":\"Team fixture credentials\",\"suggest\":{\"mode\":\"desktop\",\"account\":\"Fixture account\"}}},\"presets\":[{\"id\":\"developer\",\"label\":\"Developer\",\"description\":\"Code tools\",\"connections\":[\"paper\",\"docs\"]}],\"connections\":{\"paper\":{\"transport\":{\"type\":\"stdio\",\"command\":\"fixture\"}},\"docs\":{\"credentialProfile\":\"team\",\"transport\":{\"type\":\"http\",\"url\":\"https://docs.fixture.invalid/mcp\"}}}}",
+    "syntaxValid": true,
+    "schemaValid": false,
+    "goValid": false,
+    "path": "credentialProfiles.team.suggest.account"
+  },
+  {
+    "name": "preset-empty-list",
+    "document": "catalog",
+    "raw": "{\"schemaVersion\":1,\"minVersion\":\"0.2.0\",\"credentialProfiles\":{\"team\":{\"description\":\"Team fixture credentials\",\"suggest\":{\"mode\":\"desktop\",\"account\":\"fixture.1password.com\"}}},\"presets\":[],\"connections\":{\"paper\":{\"transport\":{\"type\":\"stdio\",\"command\":\"fixture\"}},\"docs\":{\"credentialProfile\":\"team\",\"transport\":{\"type\":\"http\",\"url\":\"https://docs.fixture.invalid/mcp\"}}}}",
+    "syntaxValid": true,
+    "schemaValid": false,
+    "goValid": false,
+    "path": "presets"
+  },
+  {
+    "name": "preset-duplicate-id",
+    "document": "catalog",
+    "raw": "{\"schemaVersion\":1,\"minVersion\":\"0.2.0\",\"credentialProfiles\":{\"team\":{\"description\":\"Team fixture credentials\",\"suggest\":{\"mode\":\"desktop\",\"account\":\"fixture.1password.com\"}}},\"presets\":[{\"id\":\"dev\",\"label\":\"A\",\"connections\":[\"paper\"]},{\"id\":\"dev\",\"label\":\"B\",\"connections\":[\"docs\"]}],\"connections\":{\"paper\":{\"transport\":{\"type\":\"stdio\",\"command\":\"fixture\"}},\"docs\":{\"credentialProfile\":\"team\",\"transport\":{\"type\":\"http\",\"url\":\"https://docs.fixture.invalid/mcp\"}}}}",
+    "syntaxValid": true,
+    "schemaValid": true,
+    "goValid": false,
+    "path": "presets[1].id"
+  },
+  {
+    "name": "preset-undeclared-connection",
+    "document": "catalog",
+    "raw": "{\"schemaVersion\":1,\"minVersion\":\"0.2.0\",\"credentialProfiles\":{\"team\":{\"description\":\"Team fixture credentials\",\"suggest\":{\"mode\":\"desktop\",\"account\":\"fixture.1password.com\"}}},\"presets\":[{\"id\":\"dev\",\"label\":\"Dev\",\"connections\":[\"slack\"]}],\"connections\":{\"paper\":{\"transport\":{\"type\":\"stdio\",\"command\":\"fixture\"}},\"docs\":{\"credentialProfile\":\"team\",\"transport\":{\"type\":\"http\",\"url\":\"https://docs.fixture.invalid/mcp\"}}}}",
+    "syntaxValid": true,
+    "schemaValid": true,
+    "goValid": false,
+    "path": "presets[0].connections[0]"
+  },
+  {
+    "name": "preset-duplicate-connection",
+    "document": "catalog",
+    "raw": "{\"schemaVersion\":1,\"minVersion\":\"0.2.0\",\"credentialProfiles\":{\"team\":{\"description\":\"Team fixture credentials\",\"suggest\":{\"mode\":\"desktop\",\"account\":\"fixture.1password.com\"}}},\"presets\":[{\"id\":\"dev\",\"label\":\"Dev\",\"connections\":[\"paper\",\"paper\"]}],\"connections\":{\"paper\":{\"transport\":{\"type\":\"stdio\",\"command\":\"fixture\"}},\"docs\":{\"credentialProfile\":\"team\",\"transport\":{\"type\":\"http\",\"url\":\"https://docs.fixture.invalid/mcp\"}}}}",
+    "syntaxValid": true,
+    "schemaValid": false,
+    "goValid": false,
+    "path": "presets[0].connections[1]"
+  },
+  {
+    "name": "preset-no-connections",
+    "document": "catalog",
+    "raw": "{\"schemaVersion\":1,\"minVersion\":\"0.2.0\",\"credentialProfiles\":{\"team\":{\"description\":\"Team fixture credentials\",\"suggest\":{\"mode\":\"desktop\",\"account\":\"fixture.1password.com\"}}},\"presets\":[{\"id\":\"dev\",\"label\":\"Dev\",\"connections\":[]}],\"connections\":{\"paper\":{\"transport\":{\"type\":\"stdio\",\"command\":\"fixture\"}},\"docs\":{\"credentialProfile\":\"team\",\"transport\":{\"type\":\"http\",\"url\":\"https://docs.fixture.invalid/mcp\"}}}}",
+    "syntaxValid": true,
+    "schemaValid": false,
+    "goValid": false,
+    "path": "presets[0].connections"
+  },
+  {
+    "name": "preset-empty-label",
+    "document": "catalog",
+    "raw": "{\"schemaVersion\":1,\"minVersion\":\"0.2.0\",\"credentialProfiles\":{\"team\":{\"description\":\"Team fixture credentials\",\"suggest\":{\"mode\":\"desktop\",\"account\":\"fixture.1password.com\"}}},\"presets\":[{\"id\":\"dev\",\"label\":\"\",\"connections\":[\"paper\"]}],\"connections\":{\"paper\":{\"transport\":{\"type\":\"stdio\",\"command\":\"fixture\"}},\"docs\":{\"credentialProfile\":\"team\",\"transport\":{\"type\":\"http\",\"url\":\"https://docs.fixture.invalid/mcp\"}}}}",
+    "syntaxValid": true,
+    "schemaValid": false,
+    "goValid": false,
+    "path": "presets[0].label"
   }
 ]

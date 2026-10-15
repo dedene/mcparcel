@@ -9,8 +9,34 @@ import (
 	"time"
 )
 
-func DecodePersonal(data []byte) (Personal, error) { return DecodeCatalog(data) }
+// DecodePersonal decodes personal.json: a catalog without the fields only a
+// GitHub catalog may have (see personalOnly).
+func DecodePersonal(data []byte) (Personal, error) {
+	c, err := decodeCatalog(data)
+	if err != nil {
+		return Personal{}, err
+	}
+	if err = personalOnly(c); err != nil {
+		return Personal{}, err
+	}
+	return c, nil
+}
+
+// DecodeCatalog decodes a GitHub catalog; one that uses join fields
+// (presets, credential profile suggestions) must also require a version that
+// knows them.
 func DecodeCatalog(data []byte) (Catalog, error) {
+	c, err := decodeCatalog(data)
+	if err != nil {
+		return Catalog{}, err
+	}
+	if err = checkJoinMinVersion(c); err != nil {
+		return Catalog{}, err
+	}
+	return c, nil
+}
+
+func decodeCatalog(data []byte) (Catalog, error) {
 	var c Catalog
 	if err := decodeStrict(data, &c, "catalog"); err != nil {
 		return Catalog{}, err
@@ -39,6 +65,11 @@ func DecodeCatalog(data []byte) (Catalog, error) {
 		if !identifier.MatchString(id) {
 			return Catalog{}, fieldError("credentialProfiles", "invalid identifier")
 		}
+		if s := c.CredentialProfiles[id].Suggest; s != nil {
+			if err := validateSuggestion(*s, "credentialProfiles."+id+".suggest"); err != nil {
+				return Catalog{}, err
+			}
+		}
 	}
 	for _, id := range sortedKeys(c.Connections) {
 		if !identifier.MatchString(id) {
@@ -55,6 +86,9 @@ func DecodeCatalog(data []byte) (Catalog, error) {
 			return Catalog{}, err
 		}
 		c.Connections[id] = conn
+	}
+	if err := validatePresets(c.Presets, c.Connections); err != nil {
+		return Catalog{}, err
 	}
 	return c, nil
 }

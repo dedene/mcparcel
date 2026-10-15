@@ -12,8 +12,27 @@ type (
 )
 
 type (
+	// ProfileRequirement is a credential profile a catalog's connections
+	// need. Suggest is a GitHub catalog's proposal for the local profile that
+	// meets it; the teammate confirms it before anything is created.
 	ProfileRequirement struct {
-		Description string `json:"description,omitempty"`
+		Description string             `json:"description,omitempty"`
+		Suggest     *ProfileSuggestion `json:"suggest,omitempty"`
+	}
+	// ProfileSuggestion names a mode that needs no secret (only desktop) and
+	// the 1Password account's sign-in address. Never a token, reference or
+	// service account.
+	ProfileSuggestion struct {
+		Mode    string `json:"mode"`
+		Account string `json:"account"`
+	}
+	// Preset is a named starting selection, such as a role: connection IDs of
+	// the same catalog, in the catalog's order.
+	Preset struct {
+		ID          string   `json:"id"`
+		Label       string   `json:"label"`
+		Description string   `json:"description,omitempty"`
+		Connections []string `json:"connections"`
 	}
 	ToolPolicy struct {
 		Allow *[]string `json:"allow,omitempty"`
@@ -72,6 +91,12 @@ type Catalog struct {
 	Name               string                        `json:"name,omitempty"`
 	Domains            map[string]Domain             `json:"domains,omitempty"`
 	CredentialProfiles map[string]ProfileRequirement `json:"credentialProfiles,omitempty"`
-	Connections        map[string]Connection         `json:"connections"`
+	// Presets are offered when joining, in this order. GitHub catalogs only.
+	Presets     []Preset              `json:"presets,omitempty"`
+	Connections map[string]Connection `json:"connections"`
 }
+
+// Profile is the local profile a teammate gets by accepting the suggestion.
+func (s ProfileSuggestion) Profile() Profile { return Profile{Mode: s.Mode, Account: s.Account} }
+
 type Personal = Catalog

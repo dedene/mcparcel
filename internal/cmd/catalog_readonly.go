@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 
 	"github.com/dedene/mcparcel/internal/catalog"
 	"github.com/dedene/mcparcel/internal/config"
@@ -24,12 +25,20 @@ func catalogDependencies() (*CatalogDependencies, error) {
 
 // minVersionFetcher refuses a fetched catalog whose minVersion is above this
 // build (catalog_requires_upgrade), for add and for sync preview and apply;
-// a sync source that fails keeps its saved snapshot. A development build,
-// whose version is not semver, never refuses.
+// a sync source that fails keeps its saved snapshot. That includes a catalog
+// this build cannot decode, such as one with fields added after it, as long
+// as its minVersion can be read. A development build, whose version is not
+// semver, never refuses.
 type minVersionFetcher struct{ catalog.Fetcher }
 
 func (f minVersionFetcher) Fetch(ctx context.Context, source config.Source) (catalog.Snapshot, error) {
 	snapshot, err := f.Fetcher.Fetch(ctx, source)
+	var invalid *catalog.InvalidCatalogError
+	if errors.As(err, &invalid) && invalid.MinVersion != "" {
+		if newer := config.CheckMinVersion(config.Catalog{MinVersion: invalid.MinVersion}, version); newer != nil {
+			return catalog.Snapshot{}, newer
+		}
+	}
 	if err != nil {
 		return snapshot, err
 	}

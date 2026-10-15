@@ -5,6 +5,8 @@ import (
 	"errors"
 	"regexp"
 	"strings"
+
+	"github.com/dedene/mcparcel/internal/jsonutil"
 )
 
 // semverPattern is the Semantic Versioning 2.0.0 grammar: core, prerelease
@@ -56,6 +58,27 @@ func CheckMinVersion(cat Catalog, current string) error {
 		return &CatalogNewerError{Min: cat.MinVersion, Current: current}
 	}
 	return nil
+}
+
+// PeekMinVersion reads only a catalog's top-level minVersion and ignores
+// every other field, so a catalog written for a newer MCParcel, with fields
+// this build does not know, can still say which version it needs. It runs
+// before the strict decode. It returns "" when data is not one JSON object
+// within the size limit or minVersion is absent or not a valid version.
+func PeekMinVersion(data []byte) string {
+	if len(data) > maxConfigBytes {
+		return ""
+	}
+	v, err := jsonutil.Decode(data)
+	if err != nil {
+		return ""
+	}
+	obj, _ := v.(map[string]any)
+	text, _ := obj["minVersion"].(string)
+	if !validMinVersion(text) {
+		return ""
+	}
+	return text
 }
 
 // compareNumeric compares digit strings without leading zeros of any length.

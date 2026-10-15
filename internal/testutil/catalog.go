@@ -68,7 +68,26 @@ func (a *CatalogAPI) SetSnapshot(snapshot catalog.Snapshot) error {
 	if _, err = config.DecodeCatalog(raw); err != nil {
 		return catalog.ErrContentInvalid
 	}
-	source := local.Sources[0]
+	a.setFile(local.Sources[0], raw)
+	return nil
+}
+
+// SetCatalogFile serves raw as the catalog file of source without checking
+// it, such as a catalog written for a newer MCParcel.
+func (a *CatalogAPI) SetCatalogFile(source config.Source, raw []byte) error {
+	data, err := json.Marshal(config.Local{SchemaVersion: 1, Sources: []config.Source{source}})
+	if err != nil {
+		return catalog.ErrContentInvalid
+	}
+	local, err := config.DecodeLocal(data)
+	if err != nil || catalog.ValidateCatalogPath(source.Path) != nil {
+		return catalog.ErrContentInvalid
+	}
+	a.setFile(local.Sources[0], raw)
+	return nil
+}
+
+func (a *CatalogAPI) setFile(source config.Source, raw []byte) {
 	base := "/repos/" + url.PathEscape(source.Owner) + "/" + url.PathEscape(source.Repo)
 	responses := make(map[string]catalog.APIResponse)
 	set := func(endpoint string, value any) {
@@ -102,7 +121,6 @@ func (a *CatalogAPI) SetSnapshot(snapshot catalog.Snapshot) error {
 	for endpoint, response := range responses {
 		a.responses[endpoint] = response
 	}
-	return nil
 }
 
 func (a *CatalogAPI) Requests() []string {

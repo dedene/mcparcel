@@ -81,7 +81,7 @@ func readStateUnlocked(paths Paths) (State, error) {
 	local := Local{SchemaVersion: 1, CredentialProfiles: map[string]Profile{}, Aliases: map[string]string{}}
 	data, err := readConfig(paths.PersonalFile)
 	if err == nil {
-		personal, err = DecodeCatalog(data)
+		personal, err = DecodePersonal(data)
 	}
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return State{}, err

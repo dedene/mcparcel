@@ -69,7 +69,7 @@ func ImportMcporter(raw []byte, bindings map[string]CredentialBinding) (ImportRe
 			}
 			data, e := json.Marshal(cat)
 			if e == nil {
-				cat, e = DecodeCatalog(data)
+				cat, e = DecodePersonal(data)
 			}
 			addedBytes := 0
 			if e == nil {
@@ -103,7 +103,7 @@ func ImportMcporter(raw []byte, bindings map[string]CredentialBinding) (ImportRe
 	if err != nil {
 		return ImportReport{}, ErrConfig
 	}
-	report.Definitions, err = DecodeCatalog(data)
+	report.Definitions, err = DecodePersonal(data)
 	if err != nil {
 		return ImportReport{}, ErrConfig
 	}

@@ -63,7 +63,7 @@ func checkFilesUnlocked(paths Paths) FileReport {
 		return err
 	})
 	ok = check("personal.json", configPath(paths.PersonalFile, paths.ConfigDir, "personal.json"), func(data []byte) error {
-		_, err := DecodeCatalog(data)
+		_, err := DecodePersonal(data)
 		return err
 	}) && ok
 	ok = check("selections.json", configPath(paths.SelectionsFile, paths.ConfigDir, "selections.json"), func(data []byte) error {

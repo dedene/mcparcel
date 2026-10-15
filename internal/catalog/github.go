@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"reflect"
@@ -455,12 +456,19 @@ func (g *GitHub) Fetch(ctx context.Context, source config.Source) (Snapshot, err
 	if !utf8.Valid(raw) {
 		return Snapshot{}, ErrContentInvalid
 	}
+	// Read minVersion before the strict decode: a catalog for a newer
+	// MCParcel may use fields this build rejects.
+	minVersion := config.PeekMinVersion(raw)
 	catalog, err := config.DecodeCatalog(raw)
 	if err != nil {
-		return Snapshot{}, ErrContentInvalid
+		return Snapshot{}, &InvalidCatalogError{MinVersion: minVersion}
 	}
 	source.ID = "github-" + strconv.FormatUint(metadata.ID, 10)
 	source.RepositoryID = metadata.ID
 	source.Commit = commit.SHA
-	return validateSnapshot(Snapshot{Source: source, Catalog: catalog})
+	snapshot, err := validateSnapshot(Snapshot{Source: source, Catalog: catalog})
+	if errors.Is(err, ErrContentInvalid) {
+		return Snapshot{}, &InvalidCatalogError{MinVersion: minVersion}
+	}
+	return snapshot, err
 }

@@ -87,7 +87,9 @@ unions and unsupported schema versions are errors. No ignored config fields.
 
 | Field | Contract |
 | --- | --- |
-| `minVersion` | Optional, top level, GitHub catalogs only (personal.json rejects it: `personal.minVersion: allowed only in a GitHub catalog`). A semantic version without build metadata, such as `0.2.0`. `add` and `sync` (preview and `--apply`) refuse a fetched catalog that needs a newer MCParcel with `catalog_requires_upgrade` (exit 4) and keep the saved snapshot. Prerelease builds rank below their release (`0.1.0-rc.1` < `0.1.0`); build metadata is ignored; a development build (a version that is not semver) never refuses. Reading the configuration never refuses: a saved snapshot above the running version, after a rollback, keeps working, and `doctor` reports it (`version.catalog`) |
+| `minVersion` | Optional, top level, GitHub catalogs only (personal.json rejects it: `personal.minVersion: allowed only in a GitHub catalog`). A semantic version without build metadata, such as `0.2.0`. `add` and `sync` (preview and `--apply`) refuse a fetched catalog that needs a newer MCParcel with `catalog_requires_upgrade` (exit 4) and keep the saved snapshot. Prerelease builds rank below their release (`0.1.0-rc.1` < `0.1.0`); build metadata is ignored; a development build (a version that is not semver) never refuses. Reading the configuration never refuses on `minVersion` alone: a saved snapshot above the running version, after a rollback, keeps working, and `doctor` reports it (`version.catalog`). A snapshot that uses fields the running version does not know (such as `presets` or `suggest` under `0.1.0`) cannot be read at all, so rolling back below such a catalog's `minVersion` first needs `mcparcel remove <owner/repo>` |
+| `credentialProfiles.<id>.suggest` | Optional, GitHub catalogs only, needs `minVersion` `0.2.0` or newer. `{mode: "desktop", account: "<sign-in address>"}`: the local profile the catalog proposes for this requirement. See [Joining a catalog](#joining-a-catalog-suggestions-and-presets) |
+| `presets` | Optional, GitHub catalogs only, needs `minVersion` `0.2.0` or newer. Ordered array of 1 to 32 `{id, label, description?, connections}` offered as starting selections when a teammate joins. See [Joining a catalog](#joining-a-catalog-suggestions-and-presets) |
 | `connections.<id>.label`, `description` | Optional display strings; label defaults to ID |
 | `domains` | Optional array of declared IDs; empty appears under Other |
 | `inputs` | Map of local, non-secret values: `kind` = `string`, `path` or `url`, optional `default`, required `description` |
@@ -162,6 +164,84 @@ definition (`env:` references are personal-only):
 }
 ```
 
+## Joining a catalog: suggestions and presets
+
+Two optional fields help a new teammate get started. Both are GitHub catalog
+fields: personal.json rejects them (`personal.presets: allowed only in a GitHub
+catalog`, and the same for `personal.credentialProfiles.<id>.suggest`).
+
+```json
+{
+  "schemaVersion": 1,
+  "minVersion": "0.2.0",
+  "credentialProfiles": {
+    "team": {
+      "description": "MCP Integrations vault",
+      "suggest": {"mode": "desktop", "account": "example.1password.com"}
+    }
+  },
+  "presets": [
+    {"id": "developer", "label": "Developer", "description": "Library docs", "connections": ["docs"]},
+    {"id": "support", "label": "Support", "connections": ["docs", "inbox"]}
+  ],
+  "connections": {
+    "docs": {"transport": {"type": "http", "url": "https://docs.example.invalid/mcp"}},
+    "inbox": {
+      "credentialProfile": "team",
+      "transport": {
+        "type": "http",
+        "url": "https://inbox.example.invalid/mcp",
+        "headers": {"Authorization": {"secret": "op://example-vault/inbox/token", "prefix": "Bearer "}}
+      }
+    }
+  }
+}
+```
+
+`suggest` proposes the local profile for a credential requirement. `mode` must
+be `desktop`, the only mode that needs no secret: a suggestion never carries a
+token, an `op://` reference, a `bootstrapRef` or a service-account mode, and
+any other mode or extra field is rejected. `account` is the 1Password sign-in
+address: a lowercase host name with at least two labels, each 1 to 63 letters,
+digits or hyphens that do not start or end with a hyphen, 253 characters at
+most (`example.1password.com`, `team.1password.eu`). An account ID or email
+address is rejected.
+
+`presets` are named starting selections, such as roles, shown in catalog order.
+Each `id` is an identifier, unique among the presets. `label` is required, at
+most 64 characters; `description` is optional, at most 200; neither may contain
+control characters such as newlines. `connections` lists 1 or more connection
+IDs of this catalog, without duplicates.
+
+Consent: the catalog suggests, the teammate confirms. Nothing is created or
+enabled from the catalog alone. A teammate who accepts a suggestion gets a
+local profile whose name is the requirement ID, so it links to every
+connection that declares that requirement; they can pick another account or
+skip 1Password instead. Picking presets only fills the list the teammate then
+reviews before saving. A catalog can never choose a token or an account
+without the user agreeing. A local profile that already has the requirement's
+ID is kept and links to the catalog's connections by name; `join` shows its
+mode and account when they differ from the suggestion. A suggestion no
+connection uses is not asked about. The desktop app reads 1Password on macOS
+only: elsewhere `join` shows a suggestion as a note pointing at a
+service-account profile instead of asking.
+
+`mcparcel join <owner/repo>` is where both show up ([cli.md](cli.md), "Joining
+a catalog"): it asks about each suggestion whose requirement has no local
+profile yet, then offers the presets, before the setup list.
+
+A catalog that uses either field must set `minVersion` to `0.2.0` or newer (a
+`0.2.0` prerelease such as `0.2.0-rc.1` also counts); otherwise it fails
+validation with `minVersion: 0.2.0 or newer required by presets` (or
+`by credentialProfiles.<id>.suggest`). MCParcel `0.1.0` does not know these
+fields and rejects the whole catalog as `invalid_catalog`, so every teammate
+must upgrade to `0.2.0` before the team catalog starts using them, and cannot
+go back to `0.1.0` while a saved snapshot uses them (`remove` the catalog
+first). From `0.2.0`
+on, MCParcel reads `minVersion` before the strict check: a catalog that uses
+fields from a later release and sets `minVersion` accordingly gets
+`catalog_requires_upgrade`, not `invalid_catalog`.
+
 ## Source registration and immutable revisions
 
 `add owner/repo` resolves the default branch through GitHub, reads `mcparcel.json`
@@ -197,9 +277,12 @@ A failed source retains its previous snapshot and gives a nonzero overall exit c
 Changed connection execution/auth config invalidates the connection and its schema
 cache. If that connection is enabled, apply also puts it in `review_required`:
 it stays selected but cannot be called until the user accepts it by ID with
-`sync --apply --accept <id>` or `enable <id>`. Execution/auth config means
-transport type, command, args, env, cwd, inheritEnv, URL, headers, HTTP mode,
-insecure-HTTP policy, `auth`, `credentialProfile`, and any widening of `toolPolicy`.
+`sync --apply --accept <id>` or `enable <id>`. When the change adds a
+credential profile requirement, only `enable` links the local profile with
+that ID; `sync --apply --accept` needs `config profile bind` first.
+Execution/auth config means transport type, command, args, env, cwd,
+inheritEnv, URL, headers, HTTP mode, insecure-HTTP policy, `auth`,
+`credentialProfile`, and any widening of `toolPolicy`.
 Label, description and domain changes do not block. This keeps an unattended
 `sync --apply` from running a changed command or sending a secret to a changed
 endpoint. It is not access control: whoever can change the catalog's tracked
@@ -312,9 +395,18 @@ configuration fails with `invalid_config` ([migration.md](migration.md)).
 
 Selections bind a catalog's `team` requirement to that local profile ID. Different
 catalogs can use different profiles/accounts without trusting a catalog to choose
-a bootstrap token or broaden vault access. Setup sets missing inputs and binds an
-existing profile when an entry is enabled; profiles are created with `config
-profile set`. Setup does not read any secret or open an auth prompt.
+a bootstrap token or broaden vault access. Enabling a connection, with `enable` or
+with Space in setup, links its requirement to the local profile with the same ID
+when the selection has no profile or names one that no longer exists. A catalog
+only names the requirement: the linked profile is one you created with `config
+profile set`, a binding you made is never replaced, and no profile is ever
+created. A requirement with no profile of that ID stays `config_required` until
+you bind one with `config profile bind`, or choose one in setup. In setup, one
+Space on such an entry also asks for missing inputs and binds an existing profile
+([cli.md](cli.md#exceptional-states)). Setup reads no secret and opens no auth
+prompt while you browse, edit or save. After it exits it checks the stored
+sign-in of each enabled OAuth connection, as `auth status` does, which reads
+that connection's Keychain (or Secret Service) item.
 
 `config.json` also holds `schemaVersion: 1`, `sources` (registration records),
 `aliases` (short-name → canonical-ID) and optional `runtime` defaults. Local domain
