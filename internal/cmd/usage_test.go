@@ -143,6 +143,7 @@ func TestUnknownConnectionSuggestsClosest(t *testing.T) {
 // words and points at setup.
 func TestFreshInstallConfigRequired(t *testing.T) {
 	paths := metadataEnv(t)
+	desktopSessionIs(t, true) // a Linux CI container has no display
 	code, stdout, stderr := run(t, "call", "nope.x", "--json")
 	e := envelopeError(t, stdout)
 	if code != 2 || stderr != "" || e.Code != "config_required" || e.Message != "No connections are set up yet." || e.NextAction != "Run mcparcel setup, or mcparcel add <owner/repo>." {
@@ -176,6 +177,7 @@ func TestContextualFailureNamesDisabledConnection(t *testing.T) {
 // and suggest only those.
 func TestUnavailableConnectionIsNotMissing(t *testing.T) {
 	paths, _, _ := metadataSeed(t)
+	desktopSessionIs(t, true)
 	for name, argv := range map[string][]string{
 		"removed":       {"call", "removed.search"},
 		"local:removed": {"enable", "local:removed"},
@@ -208,6 +210,7 @@ func TestUnavailableConnectionIsNotMissing(t *testing.T) {
 // A generic config_required names the connection the command line gave.
 func TestConfigRequiredNamesTheConnection(t *testing.T) {
 	paths, _, _ := metadataSeed(t)
+	desktopSessionIs(t, true)
 	code, stdout, stderr := run(t, "call", "missing.search", "--json")
 	e := envelopeError(t, stdout)
 	if code != 2 || stderr != "" || e.Code != "config_required" || e.Details == nil || e.Details.Connection != "missing" ||
