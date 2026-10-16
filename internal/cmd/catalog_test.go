@@ -101,6 +101,28 @@ func TestCatalogDomain(t *testing.T) {
 	}
 }
 
+// A domain no catalog declares is a usage error naming it, with the closest
+// declared domain, never "invalid configuration".
+func TestCatalogUnknownDomain(t *testing.T) {
+	metadataEnv(t)
+	code, out, stderr := run(t, "catalog", "--domain", "x")
+	if code != 2 || out != "" || stderr != "Unknown domain x.\nRun mcparcel catalog to see all of them.\n" {
+		t.Fatalf("empty install: %d %q %q", code, out, stderr)
+	}
+	metadataSeed(t)
+	for _, tc := range []struct{ domain, message, suggestion string }{
+		{"doc", "Unknown domain doc. Did you mean docs?", "docs"},
+		{"zzzzzz", "Unknown domain zzzzzz.", ""},
+		{"Bad CANARY", "Unknown domain.", ""},
+	} {
+		code, out, _ := run(t, "catalog", "--domain", tc.domain, "--json")
+		e := envelopeError(t, out)
+		if code != 2 || e.Code != "invalid_arguments" || e.Message != tc.message || e.Details == nil || e.Details.Argument != "--domain" || e.Details.Suggestion != tc.suggestion || strings.Contains(out, "CANARY") {
+			t.Fatalf("%s: %d %s", tc.domain, code, out)
+		}
+	}
+}
+
 func TestSnapshotAge(t *testing.T) {
 	p := metadataEnv(t)
 	store := config.NewStore(p)
@@ -190,7 +212,7 @@ func TestPartialMultiSourceSync(t *testing.T) {
 		}
 		return f.Fetch(ctx, s)
 	})
-	d, err := runSync(context.Background(), service, state, "", true, nil)
+	d, err := runSync(context.Background(), service, state, "", true, nil, nil)
 	var failure *commandFailure
 	if !errors.As(err, &failure) || failure.Failure.Code != "catalog_unavailable" || len(d.Results) != 3 || !d.Results[0].Applied || d.Results[1].Applied || !d.Results[2].Applied || d.Results[2].Revision != 3 {
 		t.Fatal(d, err)
@@ -215,7 +237,7 @@ func TestPartialMultiSourceConflict(t *testing.T) {
 		}
 		return f.Fetch(ctx, s)
 	})
-	d, err := runSync(context.Background(), service, state, "", true, nil)
+	d, err := runSync(context.Background(), service, state, "", true, nil, nil)
 	if safeFailure(err).Code != "config_conflict" || calls != 2 || !d.Results[0].Applied || d.Results[1].Error.Code != "config_conflict" || d.Results[2].Error.Code != "config_conflict" {
 		t.Fatal(d, err, calls)
 	}
@@ -238,7 +260,7 @@ func TestSyncAcceptScope(t *testing.T) {
 				t.Fatal("preflight fetched")
 				return catalog.Snapshot{}, nil
 			})
-			_, err := runSync(context.Background(), service, state, tc.repo, tc.apply, tc.accept)
+			_, err := runSync(context.Background(), service, state, tc.repo, tc.apply, tc.accept, nil)
 			if safeFailure(err).Code != tc.code {
 				t.Fatal(err, safeFailure(err))
 			}
@@ -273,7 +295,7 @@ func TestSyncFailureEnvelope(t *testing.T) {
 		}
 		return fetcher.Fetch(ctx, source)
 	})
-	d, err := runSync(context.Background(), service, state, "", true, nil)
+	d, err := runSync(context.Background(), service, state, "", true, nil, nil)
 	if len(d.Results) != 3 || !d.Results[0].Applied || d.Results[1].Error.Code != "catalog_offline" || !d.Results[2].Applied {
 		t.Fatal(d, err)
 	}
@@ -314,7 +336,7 @@ func TestSyncCancellationStopsFetch(t *testing.T) {
 				calls++
 				return catalog.Snapshot{}, cause
 			})
-			d, err := runSync(context.Background(), service, state, "", true, nil)
+			d, err := runSync(context.Background(), service, state, "", true, nil, nil)
 			if calls != 1 || len(d.Results) != 3 || safeFailure(err).Code != safeFailure(cause).Code {
 				t.Fatal(calls, d, err)
 			}

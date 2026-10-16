@@ -112,13 +112,15 @@ func metadataStore(ctx context.Context) (*config.Store, config.State, error) {
 	return store, state, err
 }
 
-func writeMutation(s *Streams, opts *CommandOptions, state config.State) error {
-	return writeLinkedMutation(s, opts, state, nil)
+// writeMutation prints summary, what the change did in words (one or more
+// lines); JSON has the new revision instead.
+func writeMutation(s *Streams, opts *CommandOptions, state config.State, summary string) error {
+	return writeLinkedMutation(s, opts, state, summary, nil)
 }
 
 // writeLinkedMutation also reports profiles that enable bound on its own, by
 // profile ID only, never by account.
-func writeLinkedMutation(s *Streams, opts *CommandOptions, state config.State, linked []linkedProfile) error {
+func writeLinkedMutation(s *Streams, opts *CommandOptions, state config.State, summary string, linked []linkedProfile) error {
 	if opts.JSON {
 		data := ConfigMutationData{Revision: state.Selections.Revision}
 		for _, l := range linked {
@@ -129,7 +131,7 @@ func writeLinkedMutation(s *Streams, opts *CommandOptions, state config.State, l
 		}
 		return writeSuccess(s, opts, data)
 	}
-	text := fmt.Sprintf("Configuration saved at revision %d.\n", state.Selections.Revision)
+	text := summary
 	for _, l := range linked {
 		text += fmt.Sprintf("Linked credential profile %s to %s.\n", output.DisplayMetadata(l.profile), output.DisplayMetadata(l.name))
 	}
@@ -154,7 +156,8 @@ func (c *ConfigInputSetCmd) Run(ctx context.Context, s *Streams, opts *CommandOp
 	if err != nil {
 		return err
 	}
-	return writeMutation(s, opts, next)
+	name := connectionNamer(next)(id, c.MCP)
+	return writeMutation(s, opts, next, fmt.Sprintf("Set input %s for %s.\n", output.DisplayMetadata(c.Name), name))
 }
 
 func (c *ConfigProfileSetCmd) Run(ctx context.Context, s *Streams, opts *CommandOptions) error {
@@ -184,7 +187,7 @@ func (c *ConfigProfileSetCmd) Run(ctx context.Context, s *Streams, opts *Command
 	if err != nil {
 		return err
 	}
-	return writeMutation(s, opts, next)
+	return writeMutation(s, opts, next, fmt.Sprintf("Saved credential profile %s.\n", output.DisplayMetadata(c.Name)))
 }
 
 func (c *ConfigProfileBindCmd) Run(ctx context.Context, s *Streams, opts *CommandOptions) error {
@@ -208,5 +211,6 @@ func (c *ConfigProfileBindCmd) Run(ctx context.Context, s *Streams, opts *Comman
 	if err != nil {
 		return err
 	}
-	return writeMutation(s, opts, next)
+	name := connectionNamer(next)(id, c.MCP)
+	return writeMutation(s, opts, next, fmt.Sprintf("Linked credential profile %s to %s.\n", output.DisplayMetadata(c.Profile), name))
 }

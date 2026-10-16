@@ -202,8 +202,19 @@ func (p *pool) Handle(ctx context.Context, id string, req Request, before func()
 			}
 		}
 	}
+	base := workCtx
 	deadline, deadlineCancel := withCallDeadline(workCtx, time.Until(started.Add(duration)))
 	defer deadlineCancel()
+	if req.Method == "call" {
+		// Only here is it known that the call's own deadline ended it: its
+		// timer fired while the request itself (the client's context, a
+		// forced restart) was still live. Say so, naming it.
+		defer func() {
+			if resp.Error != nil && errors.Is(deadline.Err(), context.DeadlineExceeded) && base.Err() == nil {
+				output.NameCallTimeout(resp.Error, req.Connection, req.Tool, duration)
+			}
+		}()
+	}
 	workCtx = deadline
 	gate := p.gate(canonical)
 	if workCtx.Err() != nil {
@@ -373,6 +384,7 @@ func (p *pool) Handle(ctx context.Context, id string, req Request, before func()
 
 	var schema json.RawMessage
 	found := false
+	var names []string
 	for _, raw := range items {
 		var tool struct {
 			Name        string          `json:"name"`
@@ -386,15 +398,22 @@ func (p *pool) Handle(ctx context.Context, id string, req Request, before func()
 			found = true
 			break
 		}
+		if output.SafeToolName(tool.Name) && (c.ToolPolicy == nil || config.ToolAllowed(*c.ToolPolicy, tool.Name)) {
+			names = append(names, tool.Name)
+		}
 	}
 	if !found {
-		return fail(output.NewError("tool_not_found", nil))
+		// The list is in hand: suggest the nearest name without another request.
+		return fail(output.ToolNotFoundError(req.Connection, req.Tool, output.Closest(req.Tool, names)))
 	}
 	values, checked, e := args.Prepare(req.Arguments, schema)
 	if e != nil {
 		r := fail(e)
 		if errors.Is(e, args.ErrInvalidArgs) {
-			r.Error.Message = e.Error()
+			r.Error.Message = output.ArgumentsMessage(e)
+			if output.SafeConnectionName(req.Connection) {
+				r.Error.NextAction = "Run " + output.ToolsCommand(req.Connection) + " to see the tool's arguments."
+			}
 		}
 		return r
 	}

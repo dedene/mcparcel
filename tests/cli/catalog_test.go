@@ -181,7 +181,7 @@ func testToolsSyntaxLive(t *testing.T) {
 	httpServer := httptest.NewServer(mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil))
 	defer httpServer.Close()
 	_, err := config.NewStore(r.paths).Update(context.Background(), 0, func(s *config.State) error {
-		for _, id := range []string{"fixture", "enable", "disable"} {
+		for _, id := range []string{"fixture", "enable", "disable", "list"} {
 			s.Personal.Connections[id] = config.Connection{Transport: config.Transport{HTTP: &config.HTTP{URL: config.Literal(httpServer.URL), AllowInsecureHTTP: "loopback"}}}
 			s.Selections.Connections["local:"+id] = config.Selection{Enabled: true}
 		}
@@ -191,11 +191,14 @@ func testToolsSyntaxLive(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { r.run(0, "", "runtime", "stop", "--force", "--json") })
-	for _, id := range []string{"fixture", "local:enable", "local:disable"} {
-		v := r.run(0, "", "tools", id, "--json")
+	// A connection named like a subcommand is reached by its canonical ID or
+	// through tools list.
+	for _, argv := range [][]string{{"fixture"}, {"local:enable"}, {"local:disable"}, {"list", "fixture"}, {"list", "enable"}, {"list", "disable"}, {"list", "list"}} {
+		v := r.run(0, "", append(append([]string{"tools"}, argv...), "--json")...)
 		var list output.ToolList
+		id := argv[len(argv)-1]
 		if err := json.Unmarshal(v.envelope.Data, &list); err != nil || len(list.Items) == 0 || list.Connection != "local:"+strings.TrimPrefix(id, "local:") {
-			t.Fatal(v.stdout, err)
+			t.Fatal(argv, v.stdout, err)
 		}
 	}
 }
@@ -811,7 +814,7 @@ func TestCatalogAllCommandsJSON(t *testing.T) {
 		if v.code != 0 || v.stderr != "" || strings.ContainsAny(v.stdout, "\x1b") {
 			t.Fatal(v)
 		}
-		if argv[0] == "sync" && v.stdout != "No catalogs are registered. Run 'mcparcel add <owner/repo>' to register one.\n" {
+		if argv[0] == "sync" && v.stdout != "No catalogs are registered. Run mcparcel add <owner/repo> to register one.\n" {
 			t.Fatalf("empty sync guidance: %q", v.stdout)
 		}
 	}
@@ -821,10 +824,10 @@ func TestCatalogAllCommandsJSON(t *testing.T) {
 		if v.code != 0 || v.stderr != "" || strings.ContainsAny(v.stdout, "\x1b") {
 			t.Fatal(v)
 		}
-		if argv[0] == "add" && (!strings.HasPrefix(v.stdout, "Source: fixture-owner/fixture.repo mcparcel.json @ "+strings.Repeat("b", 40)+"\nRevision: ") || !strings.HasSuffix(v.stdout, "Registered.\n")) {
+		if argv[0] == "add" && v.stdout != "Added fixture-owner/fixture.repo (bbbbbbb). Run mcparcel setup to choose its connections.\n" {
 			t.Fatal(v.stdout)
 		}
-		if argv[0] == "remove" && !strings.HasPrefix(v.stdout, "Removed fixture-owner/fixture.repo.\nRevision: ") {
+		if argv[0] == "remove" && v.stdout != "Removed fixture-owner/fixture.repo.\n" {
 			t.Fatal(v.stdout)
 		}
 	}

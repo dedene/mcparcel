@@ -6,7 +6,6 @@ MCParcel  acmeco/mcp-catalog - aaaaaaa                                          
   [ ] Paper                                              acmeco/mcp-catalog |
                                                                             | [ ] off
                                                                             |
-                                                                            | [*] Turn it on
                                                                             | [.] Tools load on first use
                                                                             |
                                                                             | Runs  remote - mcp.figma.example
@@ -29,6 +28,7 @@ MCParcel  acmeco/mcp-catalog - aaaaaaa                                          
                                                                             |
                                                                             |
                                                                             |
+                                                                            |
 
 2 servers need a step.  Next: Reviewer, review change.
-Space on/off   Tab domain   / search   u undo   ? help   q quit
+Space on/off   Tab domain   u undo   / search   q quit   ? help

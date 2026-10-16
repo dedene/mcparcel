@@ -58,6 +58,15 @@ func TestToolsJSONBlackBox(t *testing.T) {
 			if string(fields["cacheAgeSeconds"]) != "null" {
 				t.Fatal("cacheAgeSeconds must be explicit null")
 			}
+			// Human output shows each tool's arguments; tools list is the
+			// same listing.
+			for _, argv := range [][]string{{"tools", "fixture"}, {"tools", "list", "fixture"}} {
+				human := r.run(argv...)
+				if human.code != 0 || human.stderr != "" || !strings.Contains(human.stdout, "\necho(text: string)\n  Return the given text.\n") ||
+					!strings.Contains(human.stdout, "\ntyped(limit: integer, enabled: boolean, queries: object[])\n") {
+					t.Fatalf("%v: %s", argv, human.stdout)
+				}
+			}
 		})
 	}
 }

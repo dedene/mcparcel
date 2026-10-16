@@ -222,7 +222,8 @@ func TestSetUpFailureIsolated(t *testing.T) {
 	h.lineHas("Calendar", "[-]", "sign-in port in use")
 	h.contains("1 of 3 ready.", "5 on - 4 need a step")
 	h.selectRow("Maps")
-	h.paneContains("[-] could not start", "[*] Could not start", "Could not start Maps.")
+	h.paneContains("[-] could not start", "Could not start Maps.")
+	h.paneLacks("[*] Could not start") // the state line says it
 	delete(h.loads.errs, idMaps)
 	delete(h.fin.signErr, idCalendar)
 	calls := h.loads.calls

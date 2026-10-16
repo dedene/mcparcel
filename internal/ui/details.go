@@ -22,7 +22,8 @@ import (
 type actionKind int
 
 const (
-	actTurnOn actionKind = iota
+	actNone actionKind = iota // a To do item no action takes
+	actTurnOn
 	actAccept
 	actInput   // set or change an input, on the page
 	actProfile // link or change the 1Password profile

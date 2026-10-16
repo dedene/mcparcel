@@ -51,7 +51,10 @@ func (c *JoinCmd) Run(ctx context.Context, s *Streams, opts *CommandOptions, dep
 	// A catalog that is already added is used as saved; sync updates it.
 	note := "%s is already added (%s). Run mcparcel sync to update it.\n"
 	if !registered {
-		if state, source, err = registerSource(ctx, deps, store, state, source); err != nil {
+		waiting := startProgress(s, opts, fetchLabel(source))
+		state, source, err = registerSource(ctx, deps, store, state, source)
+		waiting.stop()
+		if err != nil {
 			return err
 		}
 		note = "Added %s (%s).\n"

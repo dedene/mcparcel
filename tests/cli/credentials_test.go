@@ -164,7 +164,7 @@ func TestAuthStatusProfilesBlackBox(t *testing.T) {
 		t.Fatalf("%+v", s.CredentialSessions)
 	}
 	neither := r.check(r.run("auth", "status", "fixture", "--json"), 2, "invalid_arguments")
-	if !strings.Contains(neither.stdout, "fixture uses neither sign-in nor 1Password.") {
+	if !strings.Contains(neither.stdout, "fixture uses neither sign-in nor 1Password.") || strings.Contains(neither.stdout, "nextAction") {
 		t.Fatal(neither.stdout)
 	}
 	noCredentialLeaks(t, r, append(out, v, human, neither)...)

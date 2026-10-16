@@ -4,6 +4,9 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/colorprofile"
+
 	"github.com/dedene/mcparcel/internal/config"
 	"github.com/dedene/mcparcel/internal/output"
 )
@@ -25,6 +28,26 @@ func TestGolden120x35Details(t *testing.T) {
 	h := newHarness(t, seedFixture, 120, 35, fixedAges(7200))
 	h.details("Research", "Notes")
 	golden(t, "details_120x35", h.view())
+}
+
+// The floor of each layout: the wide list at its smallest, the compact
+// list at 60 and 40 columns, and the resize request just below 40x10.
+func TestGoldenFloors(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		w, h int
+	}{{"list_100x20", 100, 20}, {"list_60x24", 60, 24}, {"list_40x10", 40, 10}, {"too_small_39x10", 39, 10}} {
+		h := newHarness(t, seedFixture, tc.w, tc.h)
+		golden(t, tc.name, h.view())
+	}
+}
+
+// Color on, in a 256-color terminal with Unicode: the golden keeps the SGR
+// sequences, so a styling regression shows in the diff.
+func TestGolden120x35Color(t *testing.T) {
+	h := newHarness(t, seedFixture, 120, 35, func(o *Options) { o.Color, o.Unicode = true, true })
+	h.send(tea.ColorProfileMsg{Profile: colorprofile.ANSI256})
+	golden(t, "list_120x35_color", h.view())
 }
 
 // checkFits asserts the view fits w x h display cells and holds no control
@@ -63,7 +86,7 @@ func seedLong(t *testing.T, store *config.Store) {
 
 func TestEveryLineFitsWidthAndHeight(t *testing.T) {
 	for _, w := range []int{100, 120, 160} {
-		for _, ht := range []int{30, 35, 50} {
+		for _, ht := range []int{20, 30, 35, 50} {
 			h := newHarness(t, seedLong, w, ht, func(o *Options) { o.Color, o.Unicode = true, true })
 			h.selectTab("Other")
 			h.selectRow(strings.Repeat("Very long label ", 12))
@@ -175,7 +198,7 @@ func TestLayoutFitsAllSizesAllScreens(t *testing.T) {
 		sizes := 0
 		tour(h, func(name string) {
 			for _, w := range []int{40, 41, 59, 80, 99, 100, 120, 160} {
-				for _, ht := range []int{10, 11, 17, 24, 29, 30, 35, 50} {
+				for _, ht := range []int{10, 11, 17, 19, 20, 24, 35, 50} {
 					h.send(resize(w, ht))
 					checkFits(t, h, w, ht, name)
 					sizes++
@@ -311,12 +334,66 @@ func TestHelpOverlayEnglish(t *testing.T) {
 	// opens it.
 	wide := newHarness(t, seedFixture, 120, 35)
 	wide.contains("2 servers need a step.  Next: Reviewer, review change.",
-		"Space on/off   Tab domain   / search   u undo   ? help   q quit")
+		"Space on/off   Tab domain   u undo   / search   q quit   ? help")
 	wide.lacks("s set up all")
 	wide.selectTab("Development")
 	wide.selectRow("Reviewer")
 	wide.contains("2 servers need a step.  Right open Reviewer")
 	calm := newHarness(t, nil, 120, 35)
-	calm.contains("Space on/off   Tab domain   Up/Down server   Right/Enter open   u undo   s set up",
-		"/ search   n new personal connection   q quit   ? help")
+	calm.contains("Space on/off   Tab domain   Enter open   s set up   u undo   / search   n new   q quit   ? help")
+	calm.lacks("Up/Down server", "new personal connection")
+	if n := len(calm.m.bottomLines(120)); n != 1 {
+		t.Fatalf("calm wide list has %d bottom lines:\n%s", n, calm.plain())
+	}
+}
+
+// A long label shows in full whenever the Status column has room to spare
+// (at 60 columns the compact list keeps Status at its minimum, and at 100 the
+// details pane leaves the list too narrow for it and Status); a status too long for
+// its column cuts the command it names, never "not installed". One source,
+// so no Source column takes the room.
+func TestListColumnsKeepLabelAndVerdict(t *testing.T) {
+	const label = "Web search with an unusually long name"
+	const command = "never-execute-xyz-with-a-long-name"
+	withLabel := func(t *testing.T, store *config.Store) {
+		mustUpdate(t, store, func(s *config.State) {
+			s.Personal.Connections["websearch"] = config.Connection{Label: label, Transport: stdio("fixture")}
+			s.Personal.Connections["notes"] = config.Connection{Label: "Notes", Transport: stdio("fixture")}
+			s.Selections.Connections["local:notes"] = config.Selection{Enabled: true}
+		})
+	}
+	withCommand := func(t *testing.T, store *config.Store) {
+		withLabel(t, store)
+		mustUpdate(t, store, func(s *config.State) {
+			s.Personal.Connections["plain"] = config.Connection{Label: "Echo fixture", Transport: stdio(command)}
+		})
+	}
+	missing := func(o *Options) {
+		o.CommandAvailable = func(c, _ string) bool { return c != command }
+	}
+	line := func(h *harness, text string) string {
+		for line := range strings.SplitSeq(h.plain(), "\n") {
+			if (strings.HasPrefix(line, "  [") || strings.HasPrefix(line, "> [")) && strings.Contains(line, text) {
+				return line
+			}
+		}
+		return ""
+	}
+	for _, size := range [][2]int{{99, 20}, {100, 20}, {120, 30}, {60, 24}} {
+		w, ht := size[0], size[1]
+		h := newHarness(t, withLabel, w, ht)
+		h.selectTab("Other")
+		if got := line(h, "Web search"); (w == 99 || w == 120) && !strings.Contains(got, label) {
+			t.Errorf("%dx%d: label cut: %q\n%s", w, ht, got, h.plain())
+		}
+		h = newHarness(t, withCommand, w, ht, missing)
+		h.selectTab("Other")
+		if got := line(h, "Echo fixture"); !strings.Contains(got, " not installed") {
+			t.Errorf("%dx%d: verdict cut: %q\n%s", w, ht, got, h.plain())
+		}
+		// Both long: MCP keeps colMaxName on the wide list.
+		if got := line(h, "Web search"); w == 120 && !strings.Contains(got, label[:colMaxName-gutter-3]) {
+			t.Errorf("%dx%d: label squeezed: %q\n%s", w, ht, got, h.plain())
+		}
+	}
 }

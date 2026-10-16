@@ -173,8 +173,9 @@ consent.
 
 `tools` and every `call` discover tools live from the connection, following
 pagination with repeated-cursor detection; the SDK's list cache is disabled. There
-is no schema cache yet: `tools --cached` cannot authenticate or connect and always
-returns `schema_cache_miss`. A tool missing from the live list is `tool_not_found`.
+is no schema cache yet: `tools --cached` is hidden from help, cannot authenticate
+or connect and always returns `schema_cache_miss`. A tool missing from the live list is `tool_not_found`;
+its error names the nearest allowed tool name from that same list when one is close.
 `call` checks enabled state and both tool filters before resolving secrets, then
 coerces and validates arguments against the live schema
 (jsonschema-go, draft-07 and 2020-12, local refs only, with a nil loader so nothing

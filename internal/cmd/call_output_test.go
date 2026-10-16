@@ -27,10 +27,10 @@ func TestOutputDirFlagValidation(t *testing.T) {
 		args    []string
 		message string
 	}{
-		{[]string{"--output-dir", dir, "--output-dir", dir}, "Invalid call arguments."},
-		{[]string{"--output-dir=" + dir, "--output-dir=" + dir}, "Invalid call arguments."},
-		{[]string{"--output-dir="}, "Invalid call arguments."},
-		{[]string{"--output-dir", ""}, "Invalid call arguments."},
+		{[]string{"--output-dir", dir, "--output-dir", dir}, "Give the --output-dir flag only once."},
+		{[]string{"--output-dir=" + dir, "--output-dir=" + dir}, "Give the --output-dir flag only once."},
+		{[]string{"--output-dir="}, "The --output-dir flag needs a value."},
+		{[]string{"--output-dir", ""}, "The --output-dir flag needs a value."},
 		{[]string{"--output-dir", filepath.Join(dir, "missing")}, "--output-dir must name an existing directory."},
 		{[]string{"--output-dir", file}, "--output-dir must name an existing directory."},
 	} {

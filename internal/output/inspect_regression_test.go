@@ -17,7 +17,7 @@ func TestHumanInspectRetainsOriginAndBlockers(t *testing.T) {
 	} {
 		t.Run(tc.id, func(t *testing.T) {
 			got := humanInspect(InspectData{Item: config.EffectiveConnection{ID: tc.id, Available: tc.available, Blockers: []string{"config_required", "review_required"}}})
-			for _, want := range []string{"Source: " + tc.origin + "\n", `"blockers": [`, `"config_required"`, `"review_required"`} {
+			for _, want := range []string{"Source: " + tc.origin + "\n", "Blockers: config_required, review_required\n"} {
 				if !strings.Contains(got, want) {
 					t.Errorf("inspect missing %q: %s", want, got)
 				}

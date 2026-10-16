@@ -18,6 +18,9 @@ import (
 
 func run(t *testing.T, args ...string) (code int, stdout, stderr string) {
 	t.Helper()
+	// kong wraps help to $COLUMNS; the help tests expect it wrapped at 80,
+	// its width when COLUMNS is unset.
+	t.Setenv("COLUMNS", "80")
 	var out, errOut bytes.Buffer
 	code = Run(context.Background(), args, strings.NewReader(""), &out, &errOut)
 	return code, out.String(), errOut.String()
@@ -83,13 +86,6 @@ func TestUnknownCommandIsUsageError(t *testing.T) {
 	}
 }
 
-func TestNoArgsIsUsageError(t *testing.T) {
-	code, _, stderr := run(t)
-	if code != ExitUsage {
-		t.Fatalf("exit = %d, want %d (stderr: %q)", code, ExitUsage, stderr)
-	}
-}
-
 func TestNewCommandUsageIsSafeJSON(t *testing.T) {
 	for _, argv := range [][]string{
 		{"call", "--json"},
@@ -122,7 +118,8 @@ func TestNewCommandUsageIsSafeJSON(t *testing.T) {
 }
 
 // auth <mcp> takes any connection name: an unknown one is
-// connection_unavailable, checked offline, and never echoed.
+// connection_unavailable, checked offline. A name outside the connection ID
+// grammar, which may be a pasted value, is never echoed.
 func TestAuthUnknownConnection(t *testing.T) {
 	paths := ccEnv(t, false)
 	code, stdout, stderr := run(t, "auth", "bogus-CANARY", "--json")

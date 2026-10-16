@@ -69,6 +69,8 @@ type harness struct {
 	hold  bool
 	quit  bool
 	ticks []pendingTick
+
+	suspends int // tea.Suspend commands the model returned (Ctrl+Z)
 }
 
 // pendingTick is a scheduled animation frame, recorded by the harness Tick.
@@ -135,6 +137,8 @@ func (h *harness) run(cmd tea.Cmd) {
 	case nil:
 	case tea.QuitMsg:
 		h.quit = true
+	case tea.SuspendMsg:
+		h.suspends++
 	case pendingTick:
 		h.ticks = append(h.ticks, msg)
 	case tea.BatchMsg:
@@ -175,6 +179,7 @@ var namedKeys = map[string]tea.Key{
 	"space": {Code: tea.KeySpace, Text: " "}, "enter": {Code: tea.KeyEnter}, "tab": {Code: tea.KeyTab},
 	"shift+tab": {Code: tea.KeyTab, Mod: tea.ModShift}, "esc": {Code: tea.KeyEscape}, "backspace": {Code: tea.KeyBackspace},
 	"ctrl+c": {Code: 'c', Mod: tea.ModCtrl}, "ctrl+u": {Code: 'u', Mod: tea.ModCtrl},
+	"ctrl+z": {Code: 'z', Mod: tea.ModCtrl},
 }
 
 func keyFor(t *testing.T, name string) tea.Key {
@@ -384,6 +389,18 @@ func (h *harness) paneContains(want ...string) {
 	for _, text := range want {
 		if !strings.Contains(pane, text) {
 			h.t.Fatalf("pane lacks %q: %q\n%s", text, pane, h.plain())
+		}
+	}
+}
+
+// paneLacks fails when the details pane shows any of the texts, wrapping
+// ignored.
+func (h *harness) paneLacks(texts ...string) {
+	h.t.Helper()
+	pane := h.paneText()
+	for _, text := range texts {
+		if strings.Contains(pane, text) {
+			h.t.Fatalf("pane shows %q: %q\n%s", text, pane, h.plain())
 		}
 	}
 }

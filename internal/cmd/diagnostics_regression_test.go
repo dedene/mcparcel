@@ -15,12 +15,12 @@ func TestCommandDiagnosticsDistinguishInputAndRegistration(t *testing.T) {
 		exit                  int
 		code, message, action string
 	}{
-		{[]string{"enable", "--all", "CANARY"}, 2, "invalid_arguments", "Invalid command arguments.", "Run 'mcparcel --help' for command usage."},
-		{[]string{"sync", "--accept", "CANARY"}, 2, "invalid_arguments", "Invalid command arguments.", "Run 'mcparcel --help' for command usage."},
+		{[]string{"enable", "--all", "CANARY"}, 2, "invalid_arguments", "Unknown flag --all.", "Run mcparcel enable --help."},
+		{[]string{"sync", "--accept", "CANARY"}, 2, "invalid_arguments", "The --accept flag needs --apply.", "Run mcparcel sync --help."},
 		{[]string{"add", "CANARY/bad/repo"}, 2, "invalid_repository", "Invalid repository argument.", "Use a repository name in owner/repo form."},
 		{[]string{"remove", "CANARY/bad/repo"}, 2, "invalid_repository", "Invalid repository argument.", "Use a repository name in owner/repo form."},
 		{[]string{"sync", "CANARY/bad/repo"}, 2, "invalid_repository", "Invalid repository argument.", "Use a repository name in owner/repo form."},
-		{[]string{"remove", "fixture/missing"}, 4, "catalog_unavailable", "This catalog is not registered.", "Run 'mcparcel add <owner/repo>' to register a catalog."},
+		{[]string{"remove", "fixture/missing"}, 4, "catalog_unavailable", "This catalog is not registered.", "Run mcparcel add <owner/repo> to register a catalog."},
 	} {
 		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
 			exit, stdout, stderr := run(t, append(tc.args, "--json")...)
@@ -37,9 +37,13 @@ func TestCommandDiagnosticsDistinguishInputAndRegistration(t *testing.T) {
 	}
 }
 
-func TestCallUsageDiagnosticUnchanged(t *testing.T) {
-	_, stdout, _ := run(t, "call", "--json")
-	if !strings.Contains(stdout, `"message":"Invalid call arguments."`) || !strings.Contains(stdout, `"nextAction":"Check the tool schema and argument syntax."`) {
-		t.Fatal(stdout)
+// call without <mcp>.<tool> says how to name the tool, with or without a
+// target, and never echoes what was typed.
+func TestCallTargetDiagnostic(t *testing.T) {
+	for _, argv := range [][]string{{"call"}, {"call", "foo"}, {"call", "CANARY"}, {"call", "github:acme/tools"}, {"call", "echo."}} {
+		_, stdout, _ := run(t, append(argv, "--json")...)
+		if !strings.Contains(stdout, `"message":"Name the tool as \u003cmcp\u003e.\u003ctool\u003e, for example context7.resolve-library-id."`) || strings.Contains(stdout, "CANARY") {
+			t.Fatal(argv, stdout)
+		}
 	}
 }

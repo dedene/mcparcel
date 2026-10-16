@@ -153,13 +153,22 @@ func TestTimeoutBeforeAndAfterDispatch(t *testing.T) {
 	short, stop := context.WithTimeout(testCtx(t), 30*time.Millisecond)
 	defer stop()
 	queued := asyncCall(r, short, "a", "counter")
-	responseCode(t, response(t, queued), "timeout", false)
+	// The client's context ended it, not the call's deadline: the generic
+	// message stays.
+	if res := response(t, queued); res.Error == nil || res.Error.Code != "timeout" || res.Dispatched || res.Error.Message != "The operation timed out before tool dispatch." {
+		t.Fatalf("%+v", res.Error)
+	}
 	cancel()
 	responseCode(t, response(t, first), "canceled", true)
 	// wait blocks until release, so the timeout always fires after dispatch;
 	// it only has to outlast the reconnect, which a loaded runner slows.
 	req := Request{Method: "call", Connection: "a", Tool: "wait", Timeout: "1s", Arguments: emptyArgs()}
-	responseCode(t, r.h.Handle(testCtx(t), testID, req, nil), "outcome_unknown", true)
+	res := r.h.Handle(testCtx(t), testID, req, nil)
+	responseCode(t, res, "outcome_unknown", true)
+	// The call's own deadline ended it: the message says so and names it.
+	if d := res.Error.Details; res.Error.Message != "a.wait did not answer within 1s; it may have run." || d == nil || d.Connection != "a" || d.Tool != "wait" || !d.Dispatched || res.Error.NextAction != "Inspect remote state before deciding whether to call again." {
+		t.Fatalf("%+v %+v", res.Error, res.Error.Details)
+	}
 }
 
 func TestForceShutdown(t *testing.T) {

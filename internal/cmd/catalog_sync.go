@@ -13,7 +13,9 @@ import (
 	"github.com/dedene/mcparcel/internal/output"
 )
 
-func runSync(ctx context.Context, service *catalog.Service, state config.State, repository string, apply bool, accept []string) (output.SyncData, error) {
+// runSync previews or applies each source's update. fetching, when not nil,
+// hears of each source before its catalog is fetched.
+func runSync(ctx context.Context, service *catalog.Service, state config.State, repository string, apply bool, accept []string, fetching func(config.Source)) (output.SyncData, error) {
 	data := output.SyncData{Apply: apply, Results: []output.SourceSyncResult{}}
 	if !apply && len(accept) > 0 {
 		return data, args.ErrInvalidArgs
@@ -67,6 +69,9 @@ func runSync(ctx context.Context, service *catalog.Service, state config.State, 
 			current, err := catalog.SnapshotFromState(state, source.ID)
 			if err != nil {
 				return err
+			}
+			if fetching != nil {
+				fetching(current.Source)
 			}
 			fetchCtx, cancel := context.WithTimeout(ctx, catalog.FetchTimeout)
 			candidate, err := service.Fetcher.Fetch(fetchCtx, current.Source)

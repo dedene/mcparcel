@@ -6,9 +6,11 @@ import (
 )
 
 // The server page's look: "<Domain> / <Label>" with the state on the right,
-// the description, the actions (the focus line), then the To do or, once
-// they are known, the tools, then Runs and From, and with i the technical
-// facts. The page opens on the first action, the next step.
+// the description, the actions (the focus line), then the To do (without
+// the steps an action above takes) or, once they are known and that To do
+// has no step left, the tools, then
+// Runs and From, and with i the technical facts. The page opens on the first
+// action, the next step.
 
 // crumb is "<Domain> / <Label>": the domain the list shows, when the row is
 // in it, else its first domain.
@@ -72,14 +74,14 @@ func (m *Model) detailsPage() []string {
 		}
 	}
 
-	todo := m.todo(row)
 	tools := m.toolRows(row.ID)
 	if m.loaded[row.ID].tools == nil {
 		tools = nil
 	}
-	if len(todo) > 0 && (tools == nil || !allDone(todo)) {
+	// The tools take the place of a To do with no step left to list.
+	if page := pageTodo(m.todo(row), actions); len(page) > 0 && (tools == nil || !allDone(page)) {
 		head = append(head, "", t.paint(roleDim, "To do"))
-		for _, item := range todo {
+		for _, item := range page {
 			head = append(head, m.todoLine(item, "  ", w, true))
 		}
 	}

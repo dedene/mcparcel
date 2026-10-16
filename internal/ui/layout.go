@@ -7,10 +7,12 @@ import (
 	"github.com/dedene/mcparcel/internal/config"
 )
 
-// Layout thresholds: the wide list needs 100x30; anything smaller down to
-// 40x10 uses the compact list; below that setup only asks for a resize.
+// Layout thresholds: the wide list needs 100x20, where the details pane
+// still gets 13 lines, enough for the label, the state, a To do and Runs
+// and From; anything smaller down to 40x10 uses the compact list; below
+// that setup only asks for a resize.
 const (
-	wideWidth, wideHeight = 100, 30
+	wideWidth, wideHeight = 100, 20
 	minWidth, minHeight   = 40, 10
 	compactChrome         = 6 // header, tabs, search, columns, summary, status; then the bottom lines
 )
@@ -210,7 +212,10 @@ func (m *Model) compactList() []string {
 	lines = append(lines, m.listBody(w, m.compactRow(w))...)
 	summary := ""
 	if row, ok := m.selected(); ok {
-		summary = fit(m.stateText(row), w)
+		summary = m.matchLine(row, w)
+		if summary == "" {
+			summary = fit(m.stateText(row), w)
+		}
 	}
 	lines = append(lines, summary, m.statusLine(w))
 	return append(lines, m.bottomLines(w)...)
@@ -231,6 +236,7 @@ func helpText(g glyphs) []string {
 		"  n               new personal connection",
 		"  /               search every domain; Esc clears it",
 		"  q               quit; while setting up, stop (Esc skips a sign-in)",
+		"  Ctrl+Z          suspend to the shell; fg brings setup back",
 		"Server page",
 		"  Up/Down         choose an action; the first is the next step",
 		"  Enter           do it; Right only opens Tools or Edit",

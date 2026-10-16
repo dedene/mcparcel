@@ -33,7 +33,7 @@ func TestDoctorLiveNeedsConnection(t *testing.T) {
 		t.Fatal(code, stdout, stderr)
 	}
 	code, _, stderr = run(t, "doctor", "--live")
-	if code != ExitUsage || !strings.Contains(stderr, "Invalid command arguments.") {
+	if code != ExitUsage || stderr != "The --live flag needs a connection: mcparcel doctor <mcp> --live.\nRun mcparcel doctor --help.\n" {
 		t.Fatal(code, stderr)
 	}
 }

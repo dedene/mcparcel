@@ -37,11 +37,11 @@ func Coerce(raw Raw, inputSchema json.RawMessage) (map[string]any, error) {
 		var err error
 		if value.JSON != nil {
 			if value.Text != "" {
-				return nil, fmt.Errorf("%w: argument %q has inconsistent wire value", ErrInvalidArgs, key)
+				return nil, fmt.Errorf("%w: an argument has an inconsistent wire value", ErrInvalidArgs)
 			}
 			v, err = jsonutil.Decode(value.JSON)
 			if err != nil {
-				return nil, fmt.Errorf("%w: argument %q requires valid JSON", ErrInvalidArgs, key)
+				return nil, fmt.Errorf("%w: an argument requires valid JSON", ErrInvalidArgs)
 			}
 		} else {
 			typ, nullable := propertyType(root, properties[key])

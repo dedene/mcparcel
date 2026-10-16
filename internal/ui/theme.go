@@ -25,6 +25,7 @@ const (
 	roleKey                   // a key chip in a help line
 	roleFlashOn               // a row just turned on, briefly
 	roleFlashOff              // a row just turned off, briefly
+	roleMatch                 // the text a search matched
 	roleCount
 )
 
@@ -47,7 +48,7 @@ type glyphs struct {
 
 var (
 	unicodeGlyphs = glyphs{
-		on: "●", off: "○", pending: "◐", unavailable: "✕", done: "✓", todo: "◆", later: "○", warn: "!",
+		on: "●", off: "○", pending: "◐", unavailable: "✕", done: "✓", todo: "◆", later: "⋯", warn: "!",
 		sep: " · ", prev: "‹", next: "›", left: "←", right: "→",
 	}
 	asciiGlyphs = glyphs{
@@ -117,6 +118,7 @@ func newTheme(opts Options, grey lipgloss.CompleteFunc) theme {
 		roleKey:       s.Foreground(chipText).Background(chip),
 		roleFlashOn:   s.Reverse(true).Foreground(lipgloss.Green),
 		roleFlashOff:  s.Reverse(true).Foreground(dim),
+		roleMatch:     s.Bold(true).Underline(true),
 	}
 	return t
 }

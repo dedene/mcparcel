@@ -57,7 +57,7 @@ func TestSyncRefusesNewerMinVersionKeepsSnapshot(t *testing.T) {
 	service, state := syncSeed(t)
 	service.Fetcher = newerFetcher(state)
 	for _, apply := range []bool{false, true} {
-		d, err := runSync(context.Background(), service, state, "fixture/repo1", apply, nil)
+		d, err := runSync(context.Background(), service, state, "fixture/repo1", apply, nil, nil)
 		var failure *commandFailure
 		if !errors.As(err, &failure) || failure.Failure.Code != "catalog_requires_upgrade" || len(d.Results) != 1 || d.Results[0].Applied || d.Results[0].Plan != nil {
 			t.Fatal(apply, d, err)
@@ -76,7 +76,7 @@ func TestDevBuildIgnoresMinVersion(t *testing.T) {
 	withVersion(t, "dev")
 	service, state := syncSeed(t)
 	service.Fetcher = newerFetcher(state)
-	d, err := runSync(context.Background(), service, state, "fixture/repo1", true, nil)
+	d, err := runSync(context.Background(), service, state, "fixture/repo1", true, nil, nil)
 	if err != nil || !d.Results[0].Applied {
 		t.Fatal(d, err)
 	}

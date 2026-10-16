@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -35,13 +36,13 @@ func splitCallTarget(target string) (connection, tool string, err error) {
 	if strings.HasPrefix(target, "github:") {
 		hash := strings.IndexByte(target, '#')
 		if hash < 0 {
-			return "", "", output.NewError("invalid_arguments", nil)
+			return "", "", output.CallTargetError()
 		}
 		offset = hash + 1
 	}
 	index := strings.IndexByte(target[offset:], '.')
 	if index < 0 {
-		return "", "", output.NewError("invalid_arguments", nil)
+		return "", "", output.CallTargetError()
 	}
 	index += offset
 	connection, tool = target[:index], target[index+1:]
@@ -50,17 +51,25 @@ func splitCallTarget(target string) (connection, tool string, err error) {
 		valid = config.ValidateCanonicalID(connection) == nil
 	}
 	if !valid || tool == "" {
-		return "", "", output.NewError("invalid_arguments", nil)
+		return "", "", output.CallTargetError()
 	}
 	return connection, tool, nil
 }
 
+// callUsage is invalid_arguments for a call command line, pointing at call
+// --help. reason names flags only, never their values.
+func callUsage(reason, flag string) *output.Error {
+	return output.UsageError("call", reason, flag, "")
+}
+
 func validateCallSources(c *CallCmd, flags map[string]int) error {
 	sources := 0
-	for _, flag := range []string{"--args", "--args-file"} {
+	for _, flag := range []string{"--args", "--args-file", "--meta", "--output-dir"} {
 		if flags[flag] > 1 {
-			return output.NewError("invalid_arguments", nil)
+			return callUsage("Give the "+flag+" flag only once.", flag)
 		}
+	}
+	for _, flag := range []string{"--args", "--args-file"} {
 		if flags[flag] > 0 {
 			sources++
 		}
@@ -68,19 +77,29 @@ func validateCallSources(c *CallCmd, flags map[string]int) error {
 	if len(c.Assignments) > 0 {
 		sources++
 	}
-	if sources > 1 || flags["--args"] > 0 && c.Args == "" || flags["--args-file"] > 0 && c.ArgsFile == "" || flags["--meta"] > 1 || flags["--meta"] > 0 && c.Meta == "" {
-		return output.NewError("invalid_arguments", nil)
+	if sources > 1 {
+		return callUsage("Give the arguments one way: key=value assignments, --args or --args-file.", "")
 	}
-	if flags["--output-dir"] > 1 || flags["--output-dir"] > 0 && c.OutputDir == "" {
-		return output.NewError("invalid_arguments", nil)
+	for _, f := range []struct{ flag, value string }{{"--args", c.Args}, {"--args-file", c.ArgsFile}, {"--meta", c.Meta}, {"--output-dir", c.OutputDir}} {
+		if flags[f.flag] > 0 && f.value == "" {
+			return callUsage("The "+f.flag+" flag needs a value.", f.flag)
+		}
 	}
 	if flags["--timeout"] > 0 {
-		d, err := time.ParseDuration(c.Timeout)
-		if err != nil || d <= 0 {
-			return output.NewError("invalid_arguments", nil)
+		if _, err := callTimeout(c.Timeout); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+// callTimeout parses --timeout: a positive Go duration.
+func callTimeout(text string) (time.Duration, error) {
+	d, err := time.ParseDuration(text)
+	if err != nil || d <= 0 {
+		return 0, callUsage("The --timeout flag needs a positive duration, such as 120s.", "--timeout")
+	}
+	return d, nil
 }
 
 func (c *CallCmd) Run(ctx context.Context, s *Streams, opts *CommandOptions) error {
@@ -98,9 +117,8 @@ func (c *CallCmd) Run(ctx context.Context, s *Streams, opts *CommandOptions) err
 	}
 	var timeout time.Duration
 	if c.Timeout != "" {
-		timeout, err = time.ParseDuration(c.Timeout)
-		if err != nil || timeout <= 0 {
-			return output.NewError("invalid_arguments", nil)
+		if timeout, err = callTimeout(c.Timeout); err != nil {
+			return err
 		}
 	}
 	var meta json.RawMessage
@@ -110,9 +128,7 @@ func (c *CallCmd) Run(ctx context.Context, s *Streams, opts *CommandOptions) err
 			meta = json.RawMessage(c.Meta)
 		}
 		if _, err = args.ParseMeta(meta); err != nil {
-			failure := output.NewError("invalid_arguments", nil)
-			failure.Message = err.Error()
-			return failure
+			return output.UsageError("call", output.ArgumentsMessage(err), "--meta", "")
 		}
 	}
 	var raw args.Raw
@@ -125,7 +141,7 @@ func (c *CallCmd) Run(ctx context.Context, s *Streams, opts *CommandOptions) err
 		var file *os.File
 		file, err = os.OpenFile(c.ArgsFile, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 		if err != nil {
-			return output.NewError("invalid_arguments", nil)
+			return callUsage("The --args-file file could not be opened.", "--args-file")
 		}
 		defer file.Close()
 		var input io.Reader = file
@@ -138,7 +154,13 @@ func (c *CallCmd) Run(ctx context.Context, s *Streams, opts *CommandOptions) err
 		return output.NewError("canceled", nil)
 	}
 	if err != nil {
-		return output.NewError("invalid_arguments", nil)
+		failure := output.NewError("invalid_arguments", nil)
+		if errors.Is(err, args.ErrInvalidArgs) {
+			// The reason names keys and the expected syntax, never a value.
+			failure = output.ArgumentsError(err)
+		}
+		failure.NextAction = output.HelpAction("call")
+		return failure
 	}
 	paths, err := runtimePaths()
 	if err != nil {
@@ -152,7 +174,10 @@ func (c *CallCmd) Run(ctx context.Context, s *Streams, opts *CommandOptions) err
 		return err
 	}
 	client.Prompt, client.OnElicit = promptFor(ctx, s, opts, client.Paths, connection)
+	waiting := startProgress(s, opts, callLabel(connection, tool))
+	client.OnElicit = stopBefore(waiting, client.OnElicit)
 	response, err := client.Call(ctx, runtimeclient.CallRequest{Connection: connection, Tool: tool, Arguments: raw, Timeout: timeout, Meta: meta})
+	waiting.stop()
 	var exportErr *output.Error
 	if exports != nil && len(response.Data.Result) > 0 {
 		// Not interruptible: the result is in hand and the work is bounded.
@@ -185,6 +210,27 @@ func (c *CallCmd) Run(ctx context.Context, s *Streams, opts *CommandOptions) err
 		return &commandFailure{Data: response.Data, Failure: exportErr}
 	}
 	return writeSuccess(s, opts, response.Data)
+}
+
+// stopBefore ends the progress line before a server prompt: the question
+// takes its place. No prompt stays no prompt.
+func stopBefore(p *progress, ask func(context.Context, elicit.Prompt) elicit.Answer) func(context.Context, elicit.Prompt) elicit.Answer {
+	if ask == nil {
+		return nil
+	}
+	return func(ctx context.Context, q elicit.Prompt) elicit.Answer {
+		p.stop()
+		return ask(ctx, q)
+	}
+}
+
+// callLabel is call's progress line: the tool when its name passes the tool
+// grammar, else only the connection, whose ID splitCallTarget checked.
+func callLabel(connection, tool string) string {
+	if output.SafeToolName(tool) {
+		return "Calling " + connection + "." + tool + ellipsis()
+	}
+	return "Calling " + connection + ellipsis()
 }
 
 // promptFor picks where the call's server may ask its user: the terminal,

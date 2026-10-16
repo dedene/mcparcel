@@ -186,7 +186,9 @@ func TestOpenExportDirRejects(t *testing.T) {
 	for _, dir := range []string{"", filepath.Join(t.TempDir(), "missing"), file} {
 		d, err := OpenExportDir(dir)
 		wantExportCode(t, err, "invalid_arguments")
-		if d != nil || err.Error() != "--output-dir must name an existing directory." || ExitCode(err) != 2 {
+		// Not the default's tools hint: the fix is the directory.
+		var e *Error
+		if d != nil || err.Error() != "--output-dir must name an existing directory." || ExitCode(err) != 2 || !errors.As(err, &e) || e.NextAction != "Run mcparcel call --help." {
 			t.Fatal(dir, err)
 		}
 	}

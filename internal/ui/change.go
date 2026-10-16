@@ -66,17 +66,26 @@ func (m *Model) written(msg writtenMsg) tea.Cmd {
 	if m.finish != nil {
 		cmds = append(cmds, m.pump())
 	}
-	for len(m.queued) > 0 && !m.busy {
+	cmds = append(cmds, m.replay()...)
+	return tea.Batch(cmds...)
+}
+
+// replay runs the keys and pastes that waited, in order, until one starts a
+// change or suspends setup; the rest wait for that write or for the resume,
+// so setup never suspends while a replayed key's write runs.
+func (m *Model) replay() []tea.Cmd {
+	var cmds []tea.Cmd
+	for len(m.queued) > 0 && !m.busy && !m.suspending {
 		next := m.queued[0]
 		m.queued = m.queued[1:]
 		switch next := next.(type) {
 		case tea.KeyPressMsg:
-			cmds = append(cmds, m.key(next))
+			cmds = append(cmds, m.key(next)) // a Ctrl+Z sets suspending
 		case tea.PasteMsg:
 			m.paste(next.Content)
 		}
 	}
-	return tea.Batch(cmds...)
+	return cmds
 }
 
 // undo reverts the last change still kept, as a new change.
