@@ -17,7 +17,7 @@ func manyTools(h *harness) {
 		h.loads.items = append(h.loads.items, fmt.Sprintf(`{"name":"tool_%02d","description":%q}`, i, strings.Repeat("a long tool description ", 10)))
 	}
 	h.details("Other", "Excalidraw")
-	h.press("l")
+	h.press("enter")
 	if h.m.screen != screenTools {
 		h.t.Fatalf("tools did not load:\n%s", h.plain())
 	}
@@ -30,7 +30,7 @@ func TestPageFocusSurvivesWrappedLines(t *testing.T) {
 		h := newHarness(t, seedFixture, size[0], size[1], fixedNow(), func(o *Options) { o.Color = true })
 		manyTools(h)
 		for i := range 25 {
-			want := fmt.Sprintf("> [x] tool_%02d", i)
+			want := fmt.Sprintf("> [+] tool_%02d", i)
 			h.focused(want)
 			if !painted(h.view(), want, "7") {
 				t.Fatalf("%dx%d: %q is not highlighted:\n%s", size[0], size[1], want, h.plain())
@@ -38,12 +38,14 @@ func TestPageFocusSurvivesWrappedLines(t *testing.T) {
 			h.press("down")
 		}
 	}
-	// Details: lines wrap above the focused field on a narrow page.
+	// The server page: the description wraps above the focused action on a
+	// narrow page.
 	for _, size := range [][2]int{{45, 10}, {45, 14}, {50, 11}, {60, 10}} {
 		h := newHarness(t, seedFixture, size[0], size[1], func(o *Options) { o.Color = true })
 		h.details("Research", "Notes")
-		line := h.focused("Input workspace")
-		if !painted(h.view(), "> Input workspace", "7") || strings.Count(h.view(), "\x1b[7m") != 1 {
+		h.press("down")
+		line := h.focused("Set workspace")
+		if !painted(h.view(), "> Set workspace", "7") || strings.Count(h.view(), "\x1b[7m") != 1 {
 			t.Fatalf("%dx%d: focus %q not the one highlighted line:\n%q", size[0], size[1], line, h.view())
 		}
 	}
@@ -63,10 +65,10 @@ func TestHelpScrollsToTheEndWhenWrapped(t *testing.T) {
 				}
 				h.press("down")
 			}
-			if !seen["Every change has a command: run mcparcel --help."] && !seen["run mcparcel --help."] && !seen["--help."] {
+			if !seen["  starts on first use: nothing left to do"] && !seen["starts on first use: nothing left to do"] {
 				t.Fatalf("%dx%d: the end of the help is unreachable:\n%s", w, ht, h.plain())
 			}
-			if w == 45 && (!seen["  1Password       a credential profile to"] || !seen[strings.Repeat(" ", helpKeyColumn)+"link"]) {
+			if w == 45 && (!seen["  sign in         s signs you in, in your"] || !seen[strings.Repeat(" ", helpKeyColumn)+"browser"]) {
 				t.Fatalf("%dx%d: wrapped key row lost its column: %v", w, ht, seen)
 			}
 		}
@@ -92,28 +94,10 @@ func TestFieldPageKeepsValueLine(t *testing.T) {
 		if h.m.screen != screenField {
 			t.Fatal(h.m.screen)
 		}
-		h.contains("Input workspace (string)", "Value: _", "...")
+		h.contains("Input workspace", "Value: _", "...")
 		h.press("ctrl+u") // a status line from the screen before must not hide it either
 		h.m.status = "A status long enough to wrap over two lines at the narrowest width setup draws."
 		h.contains("Value: _")
-	}
-}
-
-// A need that only partly fits is either cut with "..." to a readable width
-// or left out; never a one-to-three letter fragment.
-func TestNeedsColumnNeverShowsFragments(t *testing.T) {
-	h := newHarness(t, seedFixture, 120, 35)
-	needs := []need{{text: "input other"}, {text: "input workspace"}, {text: "npx"}}
-	for n := 12; n <= 40; n++ {
-		got := strings.TrimRight(h.m.needsText(needs, n, false), " ")
-		if textWidth(got) > n-gutter {
-			t.Fatalf("%d: %q overflows", n, got)
-		}
-		for _, part := range strings.Split(got, "  ") {
-			if part != "" && part != "npx" && textWidth(part) < 6 {
-				t.Fatalf("%d: fragment %q in %q", n, part, got)
-			}
-		}
 	}
 }
 
@@ -122,32 +106,15 @@ func TestNeedsColumnNeverShowsFragments(t *testing.T) {
 func TestKeyHintsKeepTheLastHint(t *testing.T) {
 	details := newHarness(t, seedFixture, 80, 24)
 	details.details("Other", "Excalidraw")
-	details.contains("Esc back")
+	details.contains("Left back")
 	tools := newHarness(t, seedFixture, 60, 24, fixedNow())
 	tools.details("Other", "Excalidraw")
-	tools.press("t")
-	tools.contains("Up/Down tool   Space on/off   Esc back")
+	tools.press("enter")
+	tools.contains("Up/Down tool   Space on/off   s set up   u undo   Esc back")
 	compact := newHarness(t, seedFixture, 60, 20)
 	compact.contains("? help")
 	if line := compact.m.keys("a: one   b: two", 3); line != "a o" {
 		t.Fatalf("%q", line)
-	}
-}
-
-// On the compact list a save conflict keeps its whole message over the
-// summary and status lines, and the help line shows only the keys it takes.
-func TestCompactConflictWrapsAndShowsItsKeys(t *testing.T) {
-	for _, w := range []int{40, 60, 80} {
-		h := newHarness(t, seedFixture, w, 24)
-		h.press("space")
-		mustUpdate(t, h.store, func(s *config.State) { s.Local.Aliases = map[string]string{"x": idPaper} })
-		h.press("ctrl+s")
-		if h.m.screen != screenConflict {
-			t.Fatalf("%d: no conflict:\n%s", w, h.plain())
-		}
-		h.containsWrapped("Your 1 change is kept.")
-		h.contains("r reload and reapply   Esc back")
-		h.lacks("Space on/off", "Enter details")
 	}
 }
 
@@ -169,12 +136,37 @@ func TestHeaderSummarizesSeveralCatalogs(t *testing.T) {
 	}
 	h := newHarness(t, seed, 160, 35, fixedAges(120))
 	h.contains("MCParcel  2 catalogs + personal")
-	// The header no longer names one catalog, so the pane says which, and when.
+	// The header no longer names one catalog: the pane says which, and the
+	// server page's technical facts say when it synced.
 	h.selectTab("Design")
 	h.selectRow("Figma")
-	h.paneContains("Source acmeco/mcp-catalog - aaaaaaa - synced 2m ago")
+	h.paneContains("From acmeco/mcp-catalog - Design")
+	h.press("enter", "i")
+	h.contains("Source       acmeco/mcp-catalog, commit aaaaaaa, synced 2m ago")
+	h.press("esc")
 	none := newHarness(t, nil, 80, 24, func(o *Options) { o.Color = true })
 	if !painted(none.view(), "0 on", "90") || painted(none.view(), "0 on", "32") {
 		t.Fatalf("%q", none.view())
 	}
+}
+
+// A page that does not fit says how many lines are cut.
+func TestCutPageSaysHowMuchIsCut(t *testing.T) {
+	h := finishHarness(t, seedFinish, 60, 20)
+	h.turnOn("Calendar")
+	h.details("Other", "Calendar")
+	h.lacks("below.")
+	h.press("i")
+	h.contains("3 more lines below.")
+	h.send(resize(60, 40))
+	h.contains("Transport")
+	h.lacks("below.")
+}
+
+// On a narrow page an action's note gives way before its label does.
+func TestNarrowPageKeepsActionLabels(t *testing.T) {
+	h := statusHarness(t)
+	h.send(resize(40, 12))
+	h.details("Other", "Calendar")
+	h.focused("> Sign in to Calendar  opens your")
 }

@@ -10,7 +10,9 @@ import (
 	"sync"
 	"sync/atomic"
 
+	dbus "github.com/godbus/dbus/v5"
 	"github.com/zalando/go-keyring"
+	ss "github.com/zalando/go-keyring/secret_service"
 	"golang.org/x/sys/unix"
 )
 
@@ -218,4 +220,70 @@ func busSocketOK(p string) bool {
 		return false
 	}
 	return unix.Lstat(filepath.Dir(p), &dir) == nil && dir.Mode&unix.S_IFMT == unix.S_IFDIR && dir.Uid == uid && dir.Mode&0o022 == 0
+}
+
+var (
+	errKeyringLocked   = errors.New("keyring item is locked")
+	errKeyringReadOnly = errors.New("keyring opened for reading only")
+)
+
+// peekItem reads an item without unlocking anything; a test seam.
+var peekItem = secretServicePeek
+
+// quietKeyring reads the Secret Service without ever prompting: an item in
+// a locked collection is not read (errKeyringLocked), where go-keyring would
+// ask to unlock it. It shares SystemKeyring's call slot and writes nothing.
+type quietKeyring struct{ SystemKeyring }
+
+func (quietKeyring) Get(service, account string) (v string, err error) {
+	defer recoverKeyring(&err)
+	if err = busReady(); err != nil {
+		return "", err
+	}
+	return peekItem(service, account)
+}
+
+func (quietKeyring) Set(string, string, string) error { return errKeyringReadOnly }
+func (quietKeyring) Delete(string, string) error      { return errKeyringReadOnly }
+
+// NoPrompt returns k for reads that must never prompt, such as setup's
+// status: the Secret Service reads only items already unlocked. Any other
+// keyring is returned as is.
+func NoPrompt(k Keyring) Keyring {
+	if _, ok := k.(SystemKeyring); ok {
+		return quietKeyring{}
+	}
+	return k
+}
+
+// secretServicePeek finds the item with the Secret Service's own search,
+// which reports locked items apart and never prompts, and reads it only
+// when it is unlocked.
+func secretServicePeek(service, account string) (string, error) {
+	svc, err := ss.NewSecretService()
+	if err != nil {
+		return "", err
+	}
+	var unlocked, locked []dbus.ObjectPath
+	attributes := map[string]string{"username": account, "service": service}
+	err = svc.Object("org.freedesktop.secrets", "/org/freedesktop/secrets").
+		Call("org.freedesktop.Secret.Service.SearchItems", 0, attributes).Store(&unlocked, &locked)
+	switch {
+	case err != nil:
+		return "", err
+	case len(unlocked) == 0 && len(locked) > 0:
+		return "", errKeyringLocked
+	case len(unlocked) == 0:
+		return "", ErrNoSession
+	}
+	session, err := svc.OpenSession()
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = svc.Close(session) }()
+	secret, err := svc.GetSecret(unlocked[0], session.Path())
+	if err != nil {
+		return "", err
+	}
+	return string(secret.Value), nil
 }

@@ -28,7 +28,8 @@ type formField struct {
 func (f *formField) editable() bool { return f != nil && f.readOnly == "" && f.key != "transport" }
 
 type personalForm struct {
-	edit   string // canonical ID when editing; empty when adding
+	edit   string             // canonical ID when editing; empty when adding
+	stored *config.Connection // when editing, the stored definition it opened on
 	http   bool
 	fields []*formField
 	cursor int // index into visible()
@@ -89,12 +90,12 @@ func (m *Model) openAddForm() {
 // openEditForm edits the stored personal definition, not the effective one,
 // which fills in a label and the Other domain.
 func (m *Model) openEditForm(row config.EffectiveConnection) {
-	stored, ok := m.draft.State().Personal.Connections[strings.TrimPrefix(row.ID, "local:")]
+	stored, ok := m.live.State().Personal.Connections[strings.TrimPrefix(row.ID, "local:")]
 	if !ok {
 		return
 	}
 	d := &stored
-	f := &personalForm{edit: row.ID, http: d.Transport.HTTP != nil, fields: []*formField{
+	f := &personalForm{edit: row.ID, stored: d, http: d.Transport.HTTP != nil, fields: []*formField{
 		newField("label", "Label", d.Label), newField("description", "Description", d.Description),
 		newField("domains", "Domains", strings.Join(d.Domains, ", ")),
 		{key: "transport", label: "Transport"},
@@ -151,9 +152,9 @@ func keptFields(d *config.Connection) []string {
 func (m *Model) formPage() []string {
 	f := m.form
 	w, _ := m.size()
-	title := "MCParcel / Setup / Add personal connection"
+	title := "New personal connection"
 	if f.edit != "" {
-		title = "MCParcel / Setup / Edit " + rowLabel(m.detailRow())
+		title = m.crumb(m.detailRow()) + " / Edit"
 	}
 	body := []string{}
 	focus := -1
@@ -187,7 +188,7 @@ func (m *Model) formPage() []string {
 	return m.page(title, body, focus, "Tab/Shift+Tab: field   Enter: apply   Esc: discard")
 }
 
-func (m *Model) formKey(msg tea.KeyPressMsg, k string) {
+func (m *Model) formKey(msg tea.KeyPressMsg, k string) tea.Cmd {
 	f := m.form
 	field := f.current()
 	switch k {
@@ -198,13 +199,13 @@ func (m *Model) formKey(msg tea.KeyPressMsg, k string) {
 	case "esc":
 		m.closeForm("")
 	case "enter":
-		m.applyForm()
+		return m.applyForm()
 	case "space":
 		if field.key == "transport" {
 			if f.edit == "" {
 				f.http = !f.http
 			}
-			return
+			return nil
 		}
 		if field.editable() {
 			field.value.insert(" ")
@@ -222,6 +223,7 @@ func (m *Model) formKey(msg tea.KeyPressMsg, k string) {
 			field.value.insert(typed(msg))
 		}
 	}
+	return nil
 }
 
 func (m *Model) closeForm(status string) {
@@ -293,55 +295,58 @@ func (f *personalForm) definition(existing *config.Connection) ([]byte, error) {
 	return json.Marshal(obj)
 }
 
-func (m *Model) applyForm() {
+// applyForm writes the form as local add or local update would, and closes
+// it; an error stays on the form.
+func (m *Model) applyForm() tea.Cmd {
 	f := m.form
+	existing := f.stored
 	if f.edit == "" {
 		id := f.get("id").value.String()
 		if _, err := config.CanonicalLocal(id); err != nil {
 			f.err = "ID: use lowercase letters, digits and single hyphens."
-			return
+			return nil
 		}
-		if _, exists := m.draft.State().Personal.Connections[id]; exists {
+		if _, exists := m.live.State().Personal.Connections[id]; exists {
 			f.err = fmt.Sprintf("A personal connection %s already exists.", quoted(id))
-			return
+			return nil
 		}
-	}
-	var existing *config.Connection
-	if f.edit != "" {
-		c := m.draft.State().Personal.Connections[strings.TrimPrefix(f.edit, "local:")]
-		existing = &c
 	}
 	raw, err := f.definition(existing)
 	if err != nil {
 		f.err = m.inline(err)
-		return
+		return nil
 	}
 	if f.edit != "" {
-		if err := m.draft.UpdateLocal(f.edit, raw); err != nil {
+		return m.apply(change{ops: []op{{kind: opLocalUpdate, id: f.edit, raw: raw, was: definitionPrint(*f.stored)}}}, func(err error) tea.Cmd {
+			if err != nil {
+				f.err = m.inline(err)
+				return nil
+			}
+			status := "Updated " + rowLabel(m.detailRow()) + "."
+			if m.detailRow().ReviewRequired {
+				status += " Review required: Space accepts it."
+			}
+			m.closeForm(status)
+			return nil
+		})
+	}
+	id := "local:" + f.get("id").value.String()
+	return m.apply(change{ops: []op{{kind: opLocalAdd, id: id, raw: raw}}}, func(err error) tea.Cmd {
+		if _, exists := m.live.State().Personal.Connections[strings.TrimPrefix(id, "local:")]; err != nil && exists && errors.As(err, new(elsewhereError)) {
+			f.err = fmt.Sprintf("A personal connection %s already exists.", quoted(f.get("id").value.String()))
+			return nil
+		}
+		if err != nil {
 			f.err = m.inline(err)
-			return
+			return nil
 		}
-		status := "Updated " + rowLabel(m.detailRow()) + "."
-		if m.detailRow().ReviewRequired {
-			status += " Review required: Space accepts it."
+		m.closeForm("Added " + rowLabel(m.live.Effective().Connections[id]) + ". It is off: press Space to turn it on.")
+		for i, row := range m.rows() {
+			if row.ID == id {
+				m.cursor = i
+			}
 		}
-		m.closeForm(status)
-		return
-	}
-	id, err := m.draft.AddLocal(raw)
-	if errors.Is(err, errLocalExists) {
-		f.err = fmt.Sprintf("A personal connection %s already exists.", quoted(f.get("id").value.String()))
-		return
-	}
-	if err != nil {
-		f.err = m.inline(err)
-		return
-	}
-	m.closeForm("Added " + rowLabel(m.draft.Effective().Connections[id]) + ". It is off: press Space to turn it on.")
-	for i, row := range m.rows() {
-		if row.ID == id {
-			m.cursor = i
-		}
-	}
-	m.clamp()
+		m.clamp()
+		return nil
+	})
 }

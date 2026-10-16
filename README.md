@@ -142,9 +142,12 @@ mcparcel join acme/mcp-catalog
 catalog suggests a 1Password account, you confirm it or type another one;
 that creates your local profile and nothing else. If the catalog has role
 presets, you pick the ones that fit. Setup then opens with those servers
-turned on but not saved. Press Ctrl+S to save, and setup offers to start the
-servers and sign in where needed. Quitting before you save keeps only the
-catalog and a profile you confirmed.
+turned on. Every change in setup applies right away, as `mcparcel enable`
+does, and `u` undoes the last one. Each server's Status says what is left
+(`sign in`, `needs <input>`, `<command> not installed`, ...). Press `s` to start
+the servers that are on and sign in where needed, right in the list. Open a
+server with → or Enter: its page starts with the next step (sign in, set an
+input, link a profile) and Enter does it.
 
 Without a terminal, or to go step by step, do the same by hand:
 

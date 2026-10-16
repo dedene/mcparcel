@@ -39,7 +39,7 @@ func (c *SetupCmd) Run(ctx context.Context, s *Streams, opts *CommandOptions) er
 		return err
 	}
 	result, err := runSetupUI(ctx, store, state, setupOptions(paths, store, opts, in, errOut))
-	return finishSetup(s, result, err, func(r ui.Result) ([]string, []string) { return setupHints(ctx, paths, store, r) })
+	return finishSetup(s, result, err)
 }
 
 // runSetupUI runs the setup program; tests drive the model instead.
@@ -57,7 +57,8 @@ func setupOptions(paths config.Paths, store *config.Store, opts *CommandOptions,
 		SourceAges: func(st config.State) ([]output.SourceMetadata, error) {
 			return sourceMetadata(paths, st, time.Now())
 		},
-		// The runtime client is built only when the user asks to connect.
+		// The runtime client is built only when tools load: on the tools
+		// page, or when the user sets up (s).
 		LoadTools: func(ctx context.Context, id string) (output.ToolList, error) {
 			client, err := newRuntimeClient(opts)
 			if err != nil {
@@ -65,11 +66,12 @@ func setupOptions(paths config.Paths, store *config.Store, opts *CommandOptions,
 			}
 			return client.Tools(ctx, id, false)
 		},
-		// The finish step a save offers: nothing here runs until the user
-		// starts it (setup_finish.go).
-		NeedsSignIn: func(ctx context.Context, id string) ui.SignInState {
+		// Each server's Status (setup_finish.go): local reads, no prompt.
+		StoredSignIn: func(ctx context.Context, id string) ui.SignInState {
 			return setupSignInState(ctx, paths, store, id)
 		},
+		CommandAvailable: setupCommandAvailable,
+		// Setting up (s): nothing here runs until the user presses it.
 		SignIn:       setupSignIn(paths, opts),
 		NoDesktopApp: paths.Headless() || !desktopOnePassword(paths),
 		Describe:     safeFailure,
@@ -92,43 +94,26 @@ func unicodeTerminal(getenv func(string) string) bool {
 	return false
 }
 
-const unconfirmedSummary = "The last save could not be confirmed. Run mcparcel list to check the configuration.\n"
+const unconfirmedSummary = "The last change could not be confirmed. Run mcparcel list to check it.\n"
 
-// finishSetup prints the summary. A finished setup then lists what hints
-// reports: the sign-ins still needed and the connections the finish step
-// could not start. An interrupted setup (Ctrl+C or a signal) still reports a
-// save that already happened, or one that could not be confirmed, then exits
-// 130.
-func finishSetup(s *Streams, result ui.Result, err error, hints func(ui.Result) (signIn, failed []string)) error {
+// finishSetup prints the summary. Every change was written as it was made,
+// so a finished setup says what is on and what is left, in one line, then
+// what to run for the steps setup could not take: mcparcel setup once for
+// the sign-ins s does, mcparcel auth for each it cannot do here, and
+// doctor for a server that could not start. An interrupted setup (Ctrl+C or
+// a signal) exits 130 without it. Either way it reports a change that could
+// not be confirmed.
+func finishSetup(s *Streams, result ui.Result, err error) error {
 	interrupted := result.Interrupted || errors.Is(err, context.Canceled)
 	if err != nil && !interrupted {
 		return err
 	}
 	summary := ""
-	if result.Saves > 0 {
-		summary = fmt.Sprintf("Configuration saved at revision %d.\n", result.Revision)
-	}
 	if result.Unconfirmed {
-		summary += unconfirmedSummary
+		summary = unconfirmedSummary
 	}
 	if !interrupted {
-		if summary == "" {
-			summary = "No changes saved.\n"
-		}
-		actions, failed := hints(result)
-		if len(actions) > 0 {
-			summary += "Sign in before first use:\n"
-			for _, action := range actions {
-				summary += "  " + output.DisplayMetadata(action) + "\n"
-			}
-		}
-		if len(failed) > 0 {
-			for i, name := range failed {
-				failed[i] = output.DisplayMetadata(name)
-			}
-			summary += "Could not start " + strings.Join(failed, ", ") + ". Run mcparcel doctor to see why.\n"
-		}
-		return writeSuccess(s, &CommandOptions{}, summary)
+		return writeSuccess(s, &CommandOptions{}, summary+setupSummary(result))
 	}
 	if summary != "" {
 		if _, err := io.WriteString(s.Out, summary); err != nil {
@@ -136,4 +121,54 @@ func finishSetup(s *Streams, result ui.Result, err error, hints func(ui.Result) 
 		}
 	}
 	return context.Canceled
+}
+
+// setupSummary is "9 on: 8 ready, Rails Blocks needs ..." or "9 on, all
+// ready.", then the commands for what setup could not do. Labels, details
+// and commands in a Step are display-safe.
+func setupSummary(r ui.Result) string {
+	if r.On == 0 {
+		return "Nothing is on.\n"
+	}
+	if len(r.Steps) == 0 {
+		return fmt.Sprintf("%d on, all ready.\n", r.On)
+	}
+	parts := []string{fmt.Sprintf("%d ready", r.Ready)}
+	var commands []string
+	setup, doctor := false, false
+	for _, step := range r.Steps {
+		switch step.Need {
+		case ui.NeedReview:
+			parts = append(parts, step.Label+" needs a review")
+		case ui.NeedUnavailable:
+			parts = append(parts, step.Label+" is unavailable")
+		case ui.NeedInput:
+			parts = append(parts, step.Label+" needs input "+step.Detail)
+		case ui.NeedProfile:
+			parts = append(parts, step.Label+" needs a 1Password profile")
+		case ui.NeedCommand:
+			parts = append(parts, step.Label+" needs "+step.Detail+" installed")
+		case ui.NeedSignIn:
+			parts = append(parts, step.Label+" needs a sign-in")
+			if step.Command != "" {
+				commands = append(commands, step.Command)
+			} else {
+				setup = true
+			}
+		case ui.NeedFailed:
+			parts = append(parts, step.Label+" could not start")
+			doctor = true
+		}
+	}
+	if setup {
+		commands = append([]string{"mcparcel setup, then s signs you in"}, commands...)
+	}
+	if doctor {
+		commands = append(commands, "mcparcel doctor")
+	}
+	out := fmt.Sprintf("%d on: %s.\n", r.On, strings.Join(parts, ", "))
+	for _, command := range commands {
+		out += "  " + command + "\n"
+	}
+	return out
 }

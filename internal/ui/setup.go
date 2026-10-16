@@ -19,18 +19,31 @@ type Options struct {
 	Out        io.Writer                                                     // terminal stderr; the UI renders here
 	Color      bool                                                          // false when NO_COLOR is non-empty or TERM is "dumb" or empty; the depth comes from Bubble Tea
 	Unicode    bool                                                          // glyphs beyond ASCII: a UTF-8 locale and TERM is not "dumb"
-	SourceAges func(config.State) ([]output.SourceMetadata, error)           // recomputed after save and reload
-	LoadTools  func(ctx context.Context, id string) (output.ToolList, error) // nil hides Connect and the finish step
+	SourceAges func(config.State) ([]output.SourceMetadata, error)           // recomputed after each change
+	LoadTools  func(ctx context.Context, id string) (output.ToolList, error) // nil: no tools load and s sets nothing up
 	Describe   func(error) *output.Error                                     // cmd.safeFailure
 	Now        func() time.Time
 
-	// The finish step (finish.go) runs only after the user asks for it on the
-	// screen a save offers; browsing, editing and saving never call these.
+	// The list's Status column reads what each server needs locally. Both
+	// are read only from this device: never a prompt, the network or the
+	// runtime.
 	//
-	// NeedsSignIn says whether setup can sign in to a saved connection and
-	// whether it needs to before it starts. It may read the Keychain. Nil
-	// means no sign-in is known to be needed or possible.
-	NeedsSignIn func(ctx context.Context, id string) SignInState
+	// StoredSignIn reads the stored sign-in of a saved connection, as
+	// mcparcel auth status does: whether setup can sign in to it here and
+	// whether it needs to. A stored sign-in that cannot be read without a
+	// prompt (a locked keyring) is Unknown. Setup reads it for the servers
+	// that are on and sign in through a browser, keeps it for the session
+	// and reads it again after a sign-in. Nil means no sign-in is known to
+	// be needed or possible.
+	StoredSignIn func(ctx context.Context, id string) SignInState
+	// CommandAvailable reports whether a local command a server runs is
+	// found on search, the PATH the connection sets ("": the PATH setup runs
+	// with), or exists at its absolute path. Nil: not checked.
+	CommandAvailable func(command, search string) bool
+
+	// Setting up (s, finish.go) starts servers and signs in only when the
+	// user asks for it; browsing and changes never call these.
+	//
 	// SignIn signs in to a saved connection as mcparcel auth <mcp> does. It
 	// passes the sign-in URL to onURL (browser: a browser is opening it) and
 	// must never write to the terminal. Nil (headless) leaves sign-ins to
@@ -54,20 +67,38 @@ type Options struct {
 	Tick func(d time.Duration, fn func(time.Time) tea.Msg) tea.Cmd
 }
 
-// Result reports what a setup session saved.
+// Result reports how a setup session ended. Every change was written as it
+// was made.
 type Result struct {
-	Revision    uint64
-	Saves       int
 	Interrupted bool
-	Unconfirmed bool // the last save failed with config_write_failed and no reload settled it
+	Unconfirmed bool // the last change failed part way (config_write_failed) and no read settled it
 
-	// What the finish step left, by canonical ID, sorted; the latest run
-	// wins. A connection setup never tried to start, or stopped before it
-	// settled in its latest run, is in none of them.
-	Started []string // started and its tools loaded, signed in where needed
-	SignIn  []string // still needs a sign-in: skipped, stopped while signing in, or not possible here
-	Failed  []string // could not start; mcparcel doctor says why
+	On    int    // servers on when setup ended
+	Ready int    // of those, the ones with no step left
+	Steps []Step // the others, by label
 }
+
+// Step is a server that is on with a step left, as its Status reads.
+type Step struct {
+	ID      string // canonical connection ID
+	Label   string // display-safe
+	Need    Need
+	Detail  string // the input or the command it misses, display-safe
+	Command string // a sign-in setup cannot do here: mcparcel auth <mcp>, display-safe; "" when s does it
+}
+
+// Need is the step a server that is on has left.
+type Need int
+
+const (
+	NeedReview      Need = iota // changed upstream: a review to accept
+	NeedUnavailable             // its source no longer defines it
+	NeedInput                   // an input to fill in (Detail)
+	NeedProfile                 // a 1Password profile to link
+	NeedCommand                 // its command (Detail) is not found on PATH
+	NeedSignIn                  // a browser sign-in: s, or Command where setup cannot
+	NeedFailed                  // it could not start: mcparcel doctor
+)
 
 // Join names the catalog mcparcel join registered or found registered. The
 // join screens read its suggestions and presets from the state.
@@ -77,10 +108,11 @@ type Join struct {
 	Commit     string // the snapshot's commit, shortened for display
 }
 
-// SignInState is what NeedsSignIn reports for a saved connection.
+// SignInState is what StoredSignIn reports for a saved connection.
 type SignInState struct {
 	Possible bool // setup can sign in to it here: an OAuth sign-in, not headless
 	Needed   bool // its stored sign-in is missing or no longer usable
+	Unknown  bool // its stored sign-in could not be read without a prompt
 }
 
 // NewModel builds the setup model on the initial state.
@@ -88,14 +120,17 @@ func NewModel(ctx context.Context, store *config.Store, initial config.State, op
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
-	draft, err := NewDraft(initial)
+	state, err := newLive(initial)
 	if err != nil {
 		return nil, err
 	}
-	m := &Model{ctx: ctx, store: store, opts: opts, theme: newTheme(opts, nil), draft: draft}
+	m := &Model{ctx: ctx, store: store, opts: opts, theme: newTheme(opts, nil), live: state, opened: initial}
 	m.refreshSources()
 	if opts.Join != nil {
 		m.openJoin(*opts.Join)
+	} else {
+		m.landStep = true
+		m.landOnStep()
 	}
 	return m, nil
 }
@@ -108,8 +143,8 @@ func (m *Model) tick(d time.Duration, fn func(time.Time) tea.Msg) tea.Cmd {
 	return tea.Tick(d, fn)
 }
 
-// RunSetup runs the setup UI until the user saves and leaves, cancels or
-// quits. A canceled context returns its error.
+// RunSetup runs the setup UI until the user quits. A canceled context
+// returns its error.
 func RunSetup(ctx context.Context, store *config.Store, initial config.State, opts Options) (Result, error) {
 	if opts.In == nil || opts.Out == nil {
 		return Result{}, errors.New("setup needs terminal input and output")

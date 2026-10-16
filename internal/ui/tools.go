@@ -11,13 +11,13 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/dedene/mcparcel/internal/config"
 	"github.com/dedene/mcparcel/internal/output"
 )
 
-// Tools are loaded only by an explicit Connect and kept for this session:
-// there is no schema cache. The daemon hides disabled and source-denied
-// tools, so a disabled name that is not loaded cannot be confirmed.
+// Tools load when the tools page opens on a server that is on and ready
+// (opening it is asking for them) and are kept for this session; nothing
+// is cached on disk. The daemon hides disabled and source-denied tools, so
+// a disabled name that is not loaded cannot be confirmed.
 
 type toolInfo struct {
 	name, display, description string
@@ -33,19 +33,26 @@ type toolRow struct {
 	loaded, enabled bool
 }
 
-func (m *Model) openTools() {
+// openTools shows the tools page and loads the tools, unless they loaded
+// this session already.
+func (m *Model) openTools() tea.Cmd {
 	m.screen, m.toolCursor, m.status = screenTools, 0, ""
+	if _, ok := m.loaded[m.detailID]; ok {
+		return nil
+	}
+	return m.loadTools()
 }
 
-// toolRows is the union of the loaded names and the names disabled in the
-// base or the draft, sorted by name.
+// toolRows is the union of the loaded names and the names disabled when
+// setup opened or now, sorted by name, so a tool turned back on stays
+// listed.
 func (m *Model) toolRows(id string) []toolRow {
 	rows := map[string]toolRow{}
 	for _, tool := range m.loaded[id].tools {
 		rows[tool.name] = toolRow{toolInfo: tool, loaded: true}
 	}
-	disabled := m.draft.State().Selections.Connections[id].DisabledTools
-	for _, names := range [][]string{m.draft.Base().Selections.Connections[id].DisabledTools, disabled} {
+	disabled := m.live.State().Selections.Connections[id].DisabledTools
+	for _, names := range [][]string{m.opened.Selections.Connections[id].DisabledTools, disabled} {
 		for _, name := range names {
 			if _, ok := rows[name]; !ok {
 				rows[name] = toolRow{toolInfo: toolInfo{name: name, display: output.DisplayMetadata(name)}}
@@ -64,14 +71,19 @@ func (m *Model) toolRows(id string) []toolRow {
 func (m *Model) toolsPage() []string {
 	row := m.detailRow()
 	w, _ := m.size()
-	body := []string{"Policy: " + m.policyText(row), m.revisionText()}
-	switch {
+	body := []string{"Tool policy: " + m.policyText(row)}
+	switch blocked := m.toolsBlocked(); {
 	case m.loading == row.ID:
-		body = append(body, m.spinner()+" Connecting to "+rowLabel(row)+"... Credentials may be requested.")
+		body = append(body, m.spinner()+" Loading the tools of "+rowLabel(row)+"... 1Password may ask you to approve.")
 	case len(m.loadErr[row.ID]) > 0:
 		body = append(body, m.loadErr[row.ID]...)
 	case m.loaded[row.ID].tools != nil:
-		body = append(body, fmt.Sprintf("Loaded this session %s ago (%s).", ages(m.opts.Now().Sub(m.loaded[row.ID].at).Seconds()), plural(len(m.loaded[row.ID].tools), "tool", "tools")))
+		body = append(body, fmt.Sprintf("Loaded %s ago (%s).", ages(m.opts.Now().Sub(m.loaded[row.ID].at).Seconds()), plural(len(m.loaded[row.ID].tools), "tool", "tools")))
+	case blocked != "":
+		body = append(body, blocked)
+	}
+	if text := m.signInText(); text != "" {
+		body = append(body, "", text)
 	}
 	body = append(body, "")
 	rows := m.toolRows(row.ID)
@@ -86,9 +98,9 @@ func (m *Model) toolsPage() []string {
 		if i == m.toolCursor {
 			prefix, focus = "> ", len(body)
 		}
-		mark := "[ ]"
+		mark := m.theme.glyph.off
 		if r.enabled {
-			mark = "[x]"
+			mark = m.theme.glyph.done
 		}
 		text := prefix + mark + " " + pad(r.display, nameWidth)
 		switch {
@@ -99,20 +111,20 @@ func (m *Model) toolsPage() []string {
 		}
 		body = append(body, text)
 	}
-	if _, ok := m.loaded[row.ID]; !ok && m.opts.LoadTools != nil && m.loading != row.ID {
-		if len(rows) > 0 {
-			body = append(body, "")
-		}
-		body = append(body, "Press l to connect and load tools.")
+	help := "Up/Down: tool   Space: on/off   s: set up   u: undo   ?: help   Esc: back"
+	switch {
+	case m.finish.current() != nil:
+		help = m.runHelp()
+	case m.finish != nil:
+		help = "Up/Down: tool   Space: on/off   q: stop setting up   Esc: back"
 	}
-	help := "Up/Down: tool   Space: on/off   Esc: back"
-	if m.opts.LoadTools != nil {
-		help = "Up/Down: tool   Space: on/off   l: connect and load tools   Esc: back"
-	}
-	return m.page("MCParcel / Setup / "+rowLabel(row)+" / Tools", body, focus, help)
+	return m.page(m.crumb(row)+" / Tools", body, focus, help)
 }
 
 func (m *Model) toolsKey(k string) tea.Cmd {
+	if cmd, ok := m.runKey(k); ok {
+		return cmd
+	}
 	rows := m.toolRows(m.detailID)
 	switch k {
 	case "up":
@@ -122,59 +134,64 @@ func (m *Model) toolsKey(k string) tea.Cmd {
 	case "space":
 		if m.toolCursor < len(rows) {
 			r := rows[m.toolCursor]
-			if err := m.draft.SetTool(m.detailID, r.name, !r.enabled); err != nil {
-				m.status = m.inline(err)
-			} else {
+			return m.apply(change{ops: []op{{kind: opTool, id: m.detailID, name: r.name, on: !r.enabled}}}, func(err error) tea.Cmd {
 				m.status = ""
-			}
+				if err != nil {
+					m.status = m.inline(err)
+				}
+				return nil
+			})
 		}
-	case "l":
-		return m.connect()
-	case "esc":
+	case "s": // sets this server up right here: its tools show once it starts
+		m.cancelLoad()
+		return m.setUpOne(m.detailRow())
+	case "u":
+		return m.undo()
+	case "?":
+		m.openHelp()
+	case "q":
+		return m.quit()
+	case "left", "esc":
 		m.cancelLoad()
 		m.screen, m.status = screenDetails, ""
 	}
 	return nil
 }
 
-// connectBlocked explains why Connect cannot run yet: the runtime uses the
-// saved configuration, so the saved row must be enabled and ready and the
-// draft must not change it.
-func (m *Model) connectBlocked(id string) string {
-	base, err := config.Resolve(m.draft.Base())
-	if err != nil {
-		return m.failure(err).Message
-	}
-	row, ok := base.Connections[id]
-	label := rowLabel(m.detailRow())
-	switch {
-	case m.draft.Pending(id):
-		return "Save first: the runtime uses the saved configuration."
-	case !ok || !row.Available:
-		return unavailableText(m.draft.State(), m.detailRow())
+// toolsBlocked says why the tools of the details row cannot load yet, and
+// the keys that get it there, or "".
+func (m *Model) toolsBlocked() string {
+	row := m.detailRow()
+	label := rowLabel(row)
+	back := m.theme.glyph.left + " back"
+	switch st := m.statusOf(row); {
+	case m.opts.LoadTools == nil:
+		return ""
+	case !row.Available:
+		return unavailableText(m.live.State(), row)
 	case !row.Enabled:
-		return label + " is off. Turn it on and save first: the runtime uses the saved configuration."
-	case slices.Contains(row.Blockers, "review_required"):
-		return label + " needs review. Press Space to accept it, then save."
-	case slices.Contains(row.Blockers, "config_required"):
-		return label + " needs configuration. Fill it in, then save."
+		return label + " is off: " + back + ", then Space turns it on."
+	case st.kind == stReview:
+		return label + " changed upstream: " + back + ", then Space accepts it."
+	case st.kind == stInput || st.kind == stProfile:
+		return label + " needs " + needsText(missingConfig(m.live.State(), row)) + " first: " + back + " to set it."
+	case st.kind == stCommand:
+		return st.detail + " is not installed. Install it, then press s."
+	case st.kind == stManual || st.kind == stSignIn && m.opts.SignIn == nil:
+		return "Needs a sign-in first: run mcparcel auth " + authName(m.live.Effective(), row.ID) + " in a terminal."
+	case st.kind == stSignIn:
+		return "Needs a sign-in first: s signs you in."
+	case st.kind == stSigning || st.kind == stWorking:
+		return "Setting up: " + st.text
 	}
 	return ""
 }
 
-// connect starts an explicit tool load for the details row and shows the
-// tools screen. It is the only action that contacts the runtime.
-func (m *Model) connect() tea.Cmd {
-	if m.opts.LoadTools == nil {
-		return nil
-	}
+// loadTools starts a tool load for the details row, once it can load. It
+// is the only part of browsing that contacts the runtime.
+func (m *Model) loadTools() tea.Cmd {
 	id := m.detailID
-	m.openTools()
-	if blocked := m.connectBlocked(id); blocked != "" {
-		m.status = blocked
-		return nil
-	}
-	if m.loading == id {
+	if m.opts.LoadTools == nil || m.loading == id || m.toolsBlocked() != "" {
 		return nil
 	}
 	m.cancelLoad()
@@ -207,15 +224,26 @@ func (m *Model) toolsLoaded(msg toolsMsg) {
 		return
 	}
 	m.cancelLoad()
-	if msg.err != nil {
-		m.loadErr[msg.id] = m.connectFailure(msg.id, msg.err)
+	if msg.err == nil {
+		m.keepTools(msg.id, msg.list)
 		return
 	}
-	m.keepTools(msg.id, msg.list)
+	switch m.failure(msg.err).Code {
+	case "auth_required", "auth_expired":
+		// As setting up does: a sign-in, not a failure. s signs in where
+		// setup can; else mcparcel auth does.
+		outcome := finManual
+		if row, ok := m.live.Effective().Connections[msg.id]; ok && row.Connection != nil && signIn(row.Connection) && m.opts.SignIn != nil {
+			outcome = finSkipped
+		}
+		m.keepOutcome(msg.id, outcome)
+	default:
+		m.keepFailure(msg.id, msg.err)
+	}
 }
 
-// keepTools keeps a loaded tool list for this session: Connect and the
-// finish screen both load one.
+// keepTools keeps a loaded tool list for this session: the tools page and
+// setting up both load one.
 func (m *Model) keepTools(id string, list output.ToolList) int {
 	tools := []toolInfo{}
 	for _, raw := range list.Items {
@@ -236,19 +264,29 @@ func (m *Model) keepTools(id string, list output.ToolList) int {
 	return len(tools)
 }
 
-// connectFailure is the error message, its next action, and for connection
-// failures (exit 6) the reassurance that configured MCPs still work.
+// connectFailure is the error message and its next action; a server that
+// could not start says so by its label and points at doctor. Other
+// connection failures (exit 6) add the reassurance that configured MCPs
+// still work.
 func (m *Model) connectFailure(id string, err error) []string {
 	failure := m.failure(err)
 	lines := []string{failure.Message}
 	next := failure.NextAction
-	if failure.Code == "auth_required" || failure.Code == "auth_expired" {
-		next = "Run mcparcel auth " + output.DisplayMetadata(output.AuthTarget(id, id)) + "."
+	reassure := output.ExitCode(failure) == 6 || errors.Is(err, context.DeadlineExceeded)
+	switch failure.Code {
+	case "auth_required", "auth_expired":
+		lines[0], next = "Needs a sign-in first: s signs you in.", ""
+	case "connection_failed":
+		label := output.DisplayMetadata(id)
+		if row, ok := m.live.Effective().Connections[id]; ok {
+			label = rowLabel(row)
+		}
+		lines[0], next, reassure = "Could not start "+label+".", "mcparcel doctor shows why.", false
 	}
 	if next != "" {
 		lines = append(lines, output.DisplayMetadata(next))
 	}
-	if output.ExitCode(failure) == 6 || errors.Is(err, context.DeadlineExceeded) {
+	if reassure {
 		lines = append(lines, "Could not connect. Configured MCPs on this device still work.")
 	}
 	return lines

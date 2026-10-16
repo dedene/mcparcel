@@ -11,18 +11,21 @@ import (
 // only adds styling here: with it stripped, the text is the colorless text.
 
 // header shows MCParcel and the catalog (or the source summary) on the left,
-// and on the right how many rows are on and how many of those need
-// attention: on but not ready.
+// and on the right how many servers are on and how many of those need a
+// step, or that all are ready.
 func (m *Model) header(w int) string {
 	t := m.theme
-	on, attention := m.counts()
-	ready := roleDim // green only when some row is on and ready
-	if on > attention {
+	on, steps := m.steps()
+	ready := roleDim // green only when some server is on and ready
+	if on > len(steps) {
 		ready = roleOK
 	}
 	right := t.paint(ready, fmt.Sprintf("%d on", on))
-	if attention > 0 {
-		right += t.glyph.sep + t.paint(roleWarn, plural(attention, "needs attention", "need attention"))
+	switch {
+	case len(steps) > 0:
+		right += t.glyph.sep + t.paint(roleWarn, plural(len(steps), "needs a step", "need a step"))
+	case on > 0:
+		right += t.glyph.sep + t.paint(roleOK, "all ready")
 	}
 	room := w - textWidth(right) - 1
 	if room < len("MCParcel") {
@@ -35,25 +38,10 @@ func (m *Model) header(w int) string {
 	return spread(left, right, w)
 }
 
-// counts returns the rows that are on, and those of them not ready.
-func (m *Model) counts() (on, attention int) {
-	state := m.draft.State()
-	for _, row := range m.draft.Effective().Connections {
-		if !row.Enabled {
-			continue
-		}
-		on++
-		if !lookOf(state, row).ready() {
-			attention++
-		}
-	}
-	return on, attention
-}
-
 // catalogInfo names the only catalog with its commit and snapshot age, or
 // summarizes the sources when there are none or several.
 func (m *Model) catalogInfo() string {
-	state := m.draft.State()
+	state := m.live.State()
 	if len(state.Local.Sources) != 1 {
 		return m.sourceSummary()
 	}
@@ -76,7 +64,7 @@ func (m *Model) catalogInfo() string {
 
 // sourceSummary is the header's left side without exactly one catalog.
 func (m *Model) sourceSummary() string {
-	if n := len(m.draft.State().Local.Sources); n > 0 {
+	if n := len(m.live.State().Local.Sources); n > 0 {
 		return fmt.Sprintf("%d catalogs + personal", n)
 	}
 	return "personal"
@@ -87,7 +75,7 @@ func (m *Model) sourceSummary() string {
 // either side, one space from the label. The current tab is a pill:
 // "[Label 1/2]", in reverse with color; the others show their count dim.
 func (m *Model) scrollTabs(w int) string {
-	effective := m.draft.Effective()
+	effective := m.live.Effective()
 	current := m.currentTab()
 	all := tabs(effective)
 	query := m.search.String()

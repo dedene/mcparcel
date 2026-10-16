@@ -12,9 +12,9 @@ import (
 )
 
 // JoinCmd adds a team catalog as add does, then opens setup on it: the
-// 1Password accounts the catalog suggests, its presets, the list and, after
-// a save, the finish step. Until the user confirms a suggestion or saves,
-// only the source registration is written.
+// 1Password accounts the catalog suggests, its presets, then the list. Until
+// the user confirms a suggestion or picks presets, only the source
+// registration is written.
 type JoinCmd struct {
 	Repository string `arg:"" required:"" json:"-"`
 	Path       string `name:"path" json:"-"`
@@ -63,5 +63,5 @@ func (c *JoinCmd) Run(ctx context.Context, s *Streams, opts *CommandOptions, dep
 	options := setupOptions(paths, store, opts, in, errOut)
 	options.Join = &ui.Join{SourceID: source.ID, Repository: repository, Commit: commit}
 	result, err := runSetupUI(ctx, store, state, options)
-	return finishSetup(s, result, err, func(r ui.Result) ([]string, []string) { return setupHints(ctx, paths, store, r) })
+	return finishSetup(s, result, err)
 }

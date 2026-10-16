@@ -2,25 +2,26 @@ package cmd
 
 import (
 	"context"
-	"maps"
-	"slices"
+	"os"
 
 	"github.com/dedene/mcparcel/internal/auth"
 	"github.com/dedene/mcparcel/internal/config"
-	"github.com/dedene/mcparcel/internal/output"
+	"github.com/dedene/mcparcel/internal/mcpclient"
 	runtimeclient "github.com/dedene/mcparcel/internal/runtime"
 	"github.com/dedene/mcparcel/internal/ui"
 )
 
-// Setup's finish step reaches the runtime and the Keychain only through
-// these functions, which the UI calls after the user asks it to start the
-// saved connections. They run the same code as tools <mcp>, auth <mcp> and
-// auth status.
+// Setup reads stored sign-ins and looks up commands to show each server's
+// Status; it reaches the runtime only when the user sets servers up (s).
+// These functions run the same code as auth status, tools <mcp> and
+// auth <mcp>.
 
-// setupSignInState is ui.Options.NeedsSignIn: whether auth <mcp> would sign
-// in to the saved connection id in a browser, outside headless mode, and
-// whether its stored sign-in reads "sign-in required" as auth status shows
-// it. An unmarked server can still ask for a sign-in when it connects.
+// setupSignInState is ui.Options.StoredSignIn: whether auth <mcp> would
+// sign in to the saved connection id in a browser, outside headless mode,
+// and whether its stored sign-in reads "sign-in required" as auth status
+// shows it. It reads the keyring without a prompt: an item it cannot read
+// that way (a locked Linux keyring) is Unknown. An unmarked server can
+// still ask for a sign-in when it connects.
 func setupSignInState(ctx context.Context, paths config.Paths, store *config.Store, id string) ui.SignInState {
 	if paths.Headless() {
 		return ui.SignInState{}
@@ -41,9 +42,27 @@ func setupSignInState(ctx context.Context, paths config.Paths, store *config.Sto
 	if c.Transport.HTTP == nil || c.Auth == nil {
 		return st
 	}
-	_, report, _, err := newSessionReader(paths).explain(ctx, canonical, canonical, c)
+	sessions := newSessionReader(paths)
+	sessions.keyring = auth.NoPrompt(sessions.keyring)
+	_, report, _, err := sessions.explain(ctx, canonical, canonical, c)
 	st.Needed = err == nil && report.State == auth.StateSignInRequired
+	st.Unknown = err != nil
 	return st
+}
+
+// setupCommandAvailable is ui.Options.CommandAvailable: whether the
+// runtime would find command on search, the PATH the connection sets. Else
+// the runtime looks on the PATH of the login shell, which only it
+// captures, so this looks on this process's PATH.
+func setupCommandAvailable(command, search string) bool {
+	if search == "" {
+		search = os.Getenv("PATH")
+	}
+	if search == "" {
+		search = "/usr/bin:/bin:/usr/sbin:/sbin"
+	}
+	_, err := mcpclient.Executable(command, search, "")
+	return err == nil
 }
 
 // setupSignIn is ui.Options.SignIn: auth <mcp>'s offline refusals, then its
@@ -85,98 +104,4 @@ func setupSignIn(paths config.Paths, opts *CommandOptions) func(context.Context,
 		_, err = client.Auth(ctx, id)
 		return err
 	}
-}
-
-// setupHints is what the setup summary still asks for. signIn has
-// "mcparcel auth <mcp>" for each enabled OAuth connection whose stored
-// sign-in needs one (as auth status explains it) and each one the finish
-// step left needing one; failed names each connection it could not start.
-// One it started is in neither, and one in both, such as a failed browser
-// sign-in, is listed once, under the sign-in it still needs. Only a connection auth <mcp> would run is
-// listed from the Keychain: one under review, missing configuration or on an
-// unsupported transport is left out, as is one whose item cannot be read.
-// Headless mode stores no sign-ins: a connection left needing one counts as
-// failed.
-func setupHints(ctx context.Context, paths config.Paths, store *config.Store, result ui.Result) (signIn, failed []string) {
-	snap, err := setupSnapshot(ctx, store)
-	name := func(id string) string { return id }
-	need := map[string]bool{}
-	if err == nil {
-		name = func(id string) string { return authName(snap.Effective, id) }
-		if !paths.Headless() {
-			for _, id := range storedSignIns(ctx, paths, snap) {
-				need[id] = true
-			}
-		}
-	}
-	failedIDs := slices.Clone(result.Failed)
-	for _, id := range result.SignIn {
-		if paths.Headless() {
-			failedIDs = append(failedIDs, id)
-		} else {
-			need[id] = true
-		}
-	}
-	for _, id := range result.Started {
-		delete(need, id)
-	}
-	failedIDs = slices.DeleteFunc(failedIDs, func(id string) bool { return need[id] })
-	for _, id := range slices.Sorted(maps.Keys(need)) {
-		signIn = append(signIn, output.AuthAction(name(id), id))
-	}
-	slices.Sort(failedIDs)
-	for _, id := range failedIDs {
-		failed = append(failed, output.AuthTarget(name(id), id))
-	}
-	return signIn, failed
-}
-
-func setupSnapshot(ctx context.Context, store *config.Store) (config.Snapshot, error) {
-	state, err := store.Read(ctx)
-	if err != nil {
-		return config.Snapshot{}, err
-	}
-	return config.NewSnapshot(state)
-}
-
-// storedSignIns lists, sorted, the enabled OAuth connections (not
-// client_credentials) auth <mcp> would run whose stored sign-in reads
-// "sign-in required".
-func storedSignIns(ctx context.Context, paths config.Paths, snap config.Snapshot) []string {
-	effective := snap.Effective
-	var sessions *sessionReader
-	var ids []string
-	for _, id := range slices.Sorted(maps.Keys(effective.Connections)) {
-		row := effective.Connections[id]
-		c := row.Connection
-		if !row.Enabled || c == nil || c.Transport.HTTP == nil || c.Auth == nil || clientCredentialsConn(c) {
-			continue
-		}
-		if _, _, err := snap.RuntimeConnection(id); err != nil {
-			continue
-		}
-		if sessions == nil {
-			r := newSessionReader(paths)
-			sessions = &r
-		}
-		_, report, _, err := sessions.explain(ctx, id, authName(effective, id), *c)
-		if err == nil && report.State == auth.StateSignInRequired {
-			ids = append(ids, id)
-		}
-	}
-	return ids
-}
-
-// authName is the short name a command accepts for id: a personal
-// connection's base name when it resolves back to id, else id.
-func authName(effective *config.EffectiveConfig, id string) string {
-	base := config.ConnectionBase(id)
-	if base == "" {
-		return id
-	}
-	ids := slices.Collect(maps.Keys(effective.Connections))
-	if resolved, err := config.ResolveID(base, effective.Aliases, ids); err == nil && resolved == id {
-		return base
-	}
-	return id
 }

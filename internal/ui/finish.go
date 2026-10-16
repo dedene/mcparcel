@@ -2,25 +2,27 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"maps"
 	"slices"
-	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/dedene/mcparcel/internal/config"
 	"github.com/dedene/mcparcel/internal/output"
 )
 
-// The finish step. A save that turned connections on, or changed ones that
-// are on, offers to start them; until the user presses Enter on that offer
-// nothing contacts the runtime or reads a credential. Then each connection
-// checks its stored sign-in, starts and loads its tools, finishLimit at a
-// time, through Options.NeedsSignIn and Options.LoadTools. Those that need a
-// browser sign-in line up and sign in one at a time, each on Enter, through
-// Options.SignIn; a slow or failing connection never holds up the others.
+// Setting up: s on the list starts every server that is on, waits on
+// nothing from the user and has not loaded its tools this session; s on a
+// server page starts that one. Nothing else starts a server or signs in. It
+// runs in place: each row's Status shows its phase while the list stays
+// usable. Each server checks its stored sign-in, starts and loads its
+// tools, finishLimit at a time, through Options.StoredSignIn and
+// Options.LoadTools. Those that need a browser sign-in line up and sign in
+// one at a time through Options.SignIn; a slow or failing server never
+// holds up the others. Esc skips the sign-in that runs, q stops it all.
 
-// finishLimit is how many connections start at once.
+// finishLimit is how many servers start at once.
 const finishLimit = 3
 
 type finishState int
@@ -29,39 +31,33 @@ const (
 	finWaiting  finishState = iota // waiting for a free slot
 	finStarting                    // checking its sign-in, starting, loading tools
 	finQueued                      // needs a sign-in, behind another one
-	finAsk                         // needs a sign-in, next in line: Enter signs in
 	finSigning                     // waiting for the browser sign-in
 	finStarted                     // started, tools loaded
 	finFailed
-	finSkipped
+	finSkipped // still needs a sign-in: skipped, or stopped in line for one
 	finManual  // needs a sign-in setup cannot do here: mcparcel auth <mcp>
 	finStopped // stopped before it settled
 )
 
-// finishRow is one connection on the finish screen. Its seq changes with
-// every attempt, so a result from an older one is ignored.
+// finishRow is one server setting up. Its seq changes with every attempt,
+// so a result from an older one is ignored.
 type finishRow struct {
 	id, label string
 	state     finishState
 	signIn    SignInState
-	signedIn  bool // signed in during this run; its next load follows it
-	tools     int
-	reason    string // why it failed, display-safe
+	signedIn  bool   // signed in during this run; its next load follows it
 	url       string // the sign-in URL, display-safe
 	browser   bool   // a browser is opening the URL
 	seq       int
 	cancel    context.CancelFunc
 }
 
-// finishRun is the finish screen: an offer until started.
+// finishRun is a set-up run, while it runs.
 type finishRun struct {
-	rows    []*finishRow
-	started bool
-	ctx     context.Context
-	cancel  context.CancelFunc
-	queue   []*finishRow // sign-ins in line, in the order they were found
-	offset  int          // scroll position of the rows
-	back    screen       // where Esc on the offer and Enter when done return to
+	rows   []*finishRow
+	ctx    context.Context
+	cancel context.CancelFunc
+	queue  []*finishRow // sign-ins in line, in the order they were found
 }
 
 type (
@@ -86,14 +82,27 @@ type (
 	}
 )
 
-// working reports whether a connection is starting, waiting to or signing in.
+// row is the run's row for a connection, or nil.
+func (f *finishRun) row(id string) *finishRow {
+	if f == nil {
+		return nil
+	}
+	for _, r := range f.rows {
+		if r.id == id {
+			return r
+		}
+	}
+	return nil
+}
+
+// working reports whether a server is starting, waiting to or signing in.
 func (f *finishRun) working() bool {
-	return f != nil && f.started && slices.ContainsFunc(f.rows, func(r *finishRow) bool {
+	return f != nil && slices.ContainsFunc(f.rows, func(r *finishRow) bool {
 		return r.state == finWaiting || r.state == finStarting || r.state == finSigning
 	})
 }
 
-// settled reports whether every connection has an outcome.
+// settled reports whether every server has an outcome.
 func (f *finishRun) settled() bool {
 	return !slices.ContainsFunc(f.rows, func(r *finishRow) bool { return r.state < finStarted })
 }
@@ -108,64 +117,111 @@ func (f *finishRun) count(state finishState) int {
 	return n
 }
 
-// current is the connection whose sign-in is asked for or running, or nil.
+// current is the server whose sign-in runs, or nil.
 func (f *finishRun) current() *finishRow {
+	if f == nil {
+		return nil
+	}
 	for _, r := range f.rows {
-		if r.state == finAsk || r.state == finSigning {
+		if r.state == finSigning {
 			return r
 		}
 	}
 	return nil
 }
 
-// noteSaved adds the connections a save changed to those the finish step
-// offers: each one that is now saved on and ready. ids are the connections
-// the save changed (Draft.pendingIDs before the save).
-func (m *Model) noteSaved(ids []string) {
-	state, effective := m.draft.State(), m.draft.Effective()
+// setUpAll is s on the list: it sets up every server that is on and only
+// waits on setup.
+func (m *Model) setUpAll() tea.Cmd {
+	if !m.canSetUp() {
+		return nil
+	}
+	m.commands = nil // look for commands again: one may be installed now
+	var ids []string
+	on, blocked := 0, 0
+	for _, row := range m.live.Effective().Connections {
+		if !row.Enabled {
+			continue
+		}
+		on++
+		switch s := m.statusOf(row); {
+		case s.blocked():
+			blocked++
+		case s.kind != stTools:
+			ids = append(ids, row.ID)
+		}
+	}
+	switch {
+	case len(ids) > 0:
+		return m.startRun(ids)
+	case on == 0:
+		m.status = "Nothing to set up: turn a server on with Space first."
+	case blocked > 0:
+		m.status = "Nothing setup can do on its own: open a server to see what it needs."
+	default:
+		m.status = "Everything that is on is set up."
+	}
+	return nil
+}
+
+// setUpOne is s on a server page: it sets up that server, even one that
+// loaded its tools already.
+func (m *Model) setUpOne(row config.EffectiveConnection) tea.Cmd {
+	if !m.canSetUp() {
+		return nil
+	}
+	m.lookAgain(row)
+	switch s := m.statusOf(row); {
+	case !row.Enabled:
+		m.status = rowLabel(row) + " is off. Space turns it on."
+	case s.blocked():
+		m.status = rowLabel(row) + ": " + s.text + " first."
+	default:
+		return m.startRun([]string{row.ID})
+	}
+	return nil
+}
+
+func (m *Model) canSetUp() bool {
+	switch {
+	case m.opts.LoadTools == nil:
+		m.status = "Setting up is not available here."
+	case m.finish != nil:
+		m.status = "Setting up already. q stops it."
+	default:
+		return true
+	}
+	return false
+}
+
+// startRun sets up ids in label order. What earlier runs found for them no
+// longer holds.
+func (m *Model) startRun(ids []string) tea.Cmd {
+	run := &finishRun{}
+	effective := m.live.Effective()
 	for _, id := range ids {
-		row, ok := effective.Connections[id]
-		if ok && lookOf(state, row).ready() && !slices.Contains(m.unoffered, id) {
-			m.unoffered = append(m.unoffered, id)
-		}
+		run.rows = append(run.rows, &finishRow{id: id, label: rowLabel(effective.Connections[id])})
+		delete(m.loadErr, id)
+		delete(m.failed, id)
+		delete(m.outcomes, id)
+		delete(m.loaded, id)
 	}
-}
-
-// offerFinish shows the offer for the connections saved since the last one,
-// in label order. It contacts nothing.
-func (m *Model) offerFinish() {
-	if m.opts.LoadTools == nil || len(m.unoffered) == 0 {
-		return
-	}
-	effective := m.draft.Effective()
-	run := &finishRun{back: m.screen}
-	for _, id := range m.unoffered {
-		if row, ok := effective.Connections[id]; ok && lookOf(m.draft.State(), row).ready() {
-			run.rows = append(run.rows, &finishRow{id: id, label: rowLabel(row)})
-		}
-	}
-	if len(run.rows) == 0 {
-		return
-	}
-	slices.SortStableFunc(run.rows, func(a, b *finishRow) int { return strings.Compare(a.label, b.label) })
-	m.finish, m.screen = run, screenFinish
-}
-
-// startFinish is Enter on the offer: the first contact with the runtime.
-func (m *Model) startFinish() tea.Cmd {
-	f := m.finish
-	f.started = true
-	f.ctx, f.cancel = context.WithCancel(m.ctx)
-	m.unoffered = nil
-	m.spinFrame = 0
+	slices.SortStableFunc(run.rows, func(a, b *finishRow) int {
+		return compareRows(effective.Connections[a.id], effective.Connections[b.id])
+	})
+	run.ctx, run.cancel = context.WithCancel(m.ctx)
+	m.finish, m.status, m.spinFrame = run, "", 0
 	return m.pump()
 }
 
-// pump starts waiting connections while fewer than finishLimit run (those
-// just signed in first), asks for the next sign-in when none is asked for or
-// running, and keeps the spinner going.
+// pump starts waiting servers while fewer than finishLimit run (those just
+// signed in first), starts the next sign-in when none runs, keeps the
+// spinner going, and ends the run once every server settled. A server
+// turned off, undone or removed meanwhile is dropped first, so nothing
+// starts or signs in for it. Every written change pumps a run.
 func (m *Model) pump() tea.Cmd {
 	f := m.finish
+	m.dropTurnedOff()
 	active := f.count(finStarting)
 	var cmds []tea.Cmd
 	for _, signedIn := range []bool{true, false} {
@@ -177,19 +233,39 @@ func (m *Model) pump() tea.Cmd {
 		}
 	}
 	if f.current() == nil && len(f.queue) > 0 {
-		f.queue[0].state = finAsk
+		next := f.queue[0]
 		f.queue = f.queue[1:]
+		cmds = append(cmds, m.signIn(next))
+	}
+	if f.settled() {
+		m.endRun()
 	}
 	return tea.Batch(append(cmds, m.spin())...)
 }
 
-// startRow checks the connection's stored sign-in, unless it just signed in,
+// dropTurnedOff stops the rows of the run whose server is no longer on.
+func (m *Model) dropTurnedOff() {
+	f := m.finish
+	for _, r := range f.rows {
+		if row, ok := m.live.Effective().Connections[r.id]; r.state >= finStarted || ok && row.Enabled {
+			continue
+		}
+		if r.cancel != nil {
+			r.cancel()
+		}
+		r.seq++
+		r.state, r.cancel, r.url = finStopped, nil, ""
+	}
+	f.queue = slices.DeleteFunc(f.queue, func(r *finishRow) bool { return r.state == finStopped })
+}
+
+// startRow checks the server's stored sign-in, unless it just signed in,
 // then starts it and loads its tools.
 func (m *Model) startRow(r *finishRow) tea.Cmd {
 	ctx, cancel := context.WithCancel(m.finish.ctx)
 	r.seq++
-	r.state, r.cancel, r.reason = finStarting, cancel, ""
-	id, seq, check, load := r.id, r.seq, m.opts.NeedsSignIn, m.opts.LoadTools
+	r.state, r.cancel = finStarting, cancel
+	id, seq, check, load := r.id, r.seq, m.opts.StoredSignIn, m.opts.LoadTools
 	// A sign-in just now settles what the check said; it is not asked again.
 	msg := finishMsg{row: r, seq: seq, signIn: SignInState{Possible: r.signIn.Possible}}
 	signedIn := r.signedIn
@@ -207,10 +283,13 @@ func (m *Model) startRow(r *finishRow) tea.Cmd {
 
 func (m *Model) rowFinished(msg finishMsg) tea.Cmd {
 	r := msg.row
-	if m.finish == nil || r.seq != msg.seq || r.state != finStarting {
+	if m.finish == nil || m.finish.row(r.id) != r || r.seq != msg.seq || r.state != finStarting {
 		return nil
 	}
 	r.cancel, r.signIn = nil, msg.signIn
+	if !r.signedIn {
+		m.keepSignIn(r.id, msg.signIn)
+	}
 	var failure *output.Error
 	if msg.err != nil {
 		failure = m.failure(msg.err)
@@ -219,40 +298,73 @@ func (m *Model) rowFinished(msg finishMsg) tea.Cmd {
 	case msg.signIn.Needed:
 		m.needSignIn(r)
 	case failure == nil:
-		r.state, r.tools = finStarted, m.keepTools(r.id, msg.list)
+		r.state = finStarted
+		m.keepTools(r.id, msg.list)
+		m.keepSignIn(r.id, SignInState{Possible: r.signIn.Possible})
 	case !r.signedIn && (failure.Code == "auth_required" || failure.Code == "auth_expired"):
 		// The server asked for a sign-in its stored state did not predict:
 		// an unmarked OAuth server, or an expired session.
 		m.needSignIn(r)
 	default:
-		r.state, r.reason = finFailed, failure.Message
+		r.state = finFailed
 		m.keepFailure(r.id, msg.err)
 	}
 	return m.pump()
 }
 
-// keepFailure keeps why a connection could not start for this session, as
-// a failed Connect does: the list and details show it after the finish step.
+// keepFailure keeps why a server could not start for this session, as a
+// failed tool load does: its Status, the pane and the tools page show it.
 func (m *Model) keepFailure(id string, err error) {
 	if m.loadErr == nil {
 		m.loadErr = map[string][]string{}
 	}
+	if m.failed == nil {
+		m.failed = map[string]string{}
+	}
 	m.loadErr[id] = m.connectFailure(id, err)
+	m.failed[id] = shortReason(m.failure(err).Code, err)
 }
 
-// needSignIn lines a connection up for a sign-in, or, where setup cannot
-// sign in (headless, or not an OAuth sign-in), points at mcparcel auth.
+// shortReason is the Status of a server that could not start.
+func shortReason(code string, err error) string {
+	switch {
+	case code == "timeout" || errors.Is(err, context.DeadlineExceeded):
+		return "timed out"
+	case code == "canceled":
+		return "stopped"
+	case code == "auth_failed" || code == "auth_rate_limited" || code == "auth_account_conflict":
+		return "1Password failed"
+	case code == "keychain_unavailable":
+		return "sign-in store locked"
+	case code == "auth_callback_unavailable":
+		return "sign-in port in use"
+	case code == "auth_required" || code == "auth_expired":
+		return "needs a sign-in"
+	}
+	return "could not start"
+}
+
+// needSignIn lines a server up for a sign-in, or, where setup cannot sign
+// in (headless, or not an OAuth sign-in), points at mcparcel auth.
 func (m *Model) needSignIn(r *finishRow) {
 	if !r.signIn.Possible || m.opts.SignIn == nil {
 		r.state = finManual
+		m.keepOutcome(r.id, finManual)
 		return
 	}
 	r.state = finQueued
 	m.finish.queue = append(m.finish.queue, r)
 }
 
-// signIn is Enter on the connection asked for: Options.SignIn runs in its
-// own goroutine, so its URL can reach the screen while it waits.
+func (m *Model) keepOutcome(id string, state finishState) {
+	if m.outcomes == nil {
+		m.outcomes = map[string]finishState{}
+	}
+	m.outcomes[id] = state
+}
+
+// signIn starts the next sign-in: Options.SignIn runs in its own goroutine,
+// so its URL can reach the screen while it waits.
 func (m *Model) signIn(r *finishRow) tea.Cmd {
 	ctx, cancel := context.WithCancel(m.finish.ctx)
 	r.seq++
@@ -260,7 +372,7 @@ func (m *Model) signIn(r *finishRow) tea.Cmd {
 	row, id, seq, sign := r, r.id, r.seq, m.opts.SignIn
 	urls := make(chan signInURLMsg, 1)
 	done := make(chan error, 1)
-	return tea.Batch(func() tea.Msg {
+	return func() tea.Msg {
 		go func() {
 			done <- sign(ctx, id, func(u string, browser bool) {
 				select { // only the first URL is shown; never block the sign-in
@@ -271,7 +383,7 @@ func (m *Model) signIn(r *finishRow) tea.Cmd {
 			cancel()
 		}()
 		return waitSignIn(row, seq, urls, done)()
-	}, m.spin())
+	}
 }
 
 // waitSignIn delivers the sign-in URL, then waits again, or the result.
@@ -296,55 +408,48 @@ func (m *Model) signInURL(msg signInURLMsg) tea.Cmd {
 
 func (m *Model) signedIn(msg signInMsg) tea.Cmd {
 	r := msg.row
-	if m.finish == nil || r.seq != msg.seq || r.state != finSigning {
+	if m.finish == nil || m.finish.row(r.id) != r || r.seq != msg.seq || r.state != finSigning {
 		return nil
 	}
 	r.cancel, r.url = nil, ""
 	if msg.err != nil {
-		r.state, r.reason = finFailed, m.failure(msg.err).Message
+		r.state = finFailed
 		m.keepFailure(r.id, msg.err)
 	} else {
 		r.state, r.signedIn = finWaiting, true
+		m.keepSignIn(r.id, SignInState{Possible: true})
 	}
 	return m.pump()
 }
 
-// skip leaves the current sign-in for later, canceling it if it runs.
+// skip leaves the running sign-in for later, canceling it.
 func (m *Model) skip() tea.Cmd {
 	r := m.finish.current()
 	if r == nil {
 		return nil
 	}
-	if r.cancel != nil {
-		r.cancel()
-	}
+	r.cancel()
 	r.seq++
 	r.state, r.cancel, r.url = finSkipped, nil, ""
+	m.keepOutcome(r.id, finSkipped)
+	m.status = r.label + " still needs a sign-in."
 	return m.pump()
 }
 
-// retry starts the failed connections again.
-func (m *Model) retry() tea.Cmd {
-	for _, r := range m.finish.rows {
-		if r.state == finFailed {
-			r.state, r.signedIn = finWaiting, false
-		}
-	}
-	return m.pump()
-}
-
-// stopFinish cancels everything still running and settles each connection:
-// one in line for or in a sign-in is skipped, the rest stopped.
-func (m *Model) stopFinish() {
+// stopRun is q while setting up: it cancels everything still running and
+// settles each server. One in line for or in a sign-in still needs it;
+// the rest are as they were before the run.
+func (m *Model) stopRun() {
 	f := m.finish
-	if f == nil || !f.started {
+	if f == nil {
 		return
 	}
 	f.cancel()
 	for _, r := range f.rows {
 		switch r.state {
-		case finQueued, finAsk, finSigning:
+		case finQueued, finSigning:
 			r.state = finSkipped
+			m.keepOutcome(r.id, finSkipped)
 		case finWaiting, finStarting:
 			r.state = finStopped
 		}
@@ -352,86 +457,36 @@ func (m *Model) stopFinish() {
 		r.cancel, r.url = nil, ""
 	}
 	f.queue = nil
+	m.endRun()
+	m.status = "Stopped. " + m.status
 }
 
-// leaveFinish ends the finish screen: it keeps each outcome for the exit
-// summary and returns where the offer came from. A connection stopped before
-// it settled has none, whatever an earlier run left.
-func (m *Model) leaveFinish() {
+// endRun ends a settled run; the rows keep what it found.
+func (m *Model) endRun() {
 	f := m.finish
-	m.stopFinish()
-	if f.started {
-		if m.outcomes == nil {
-			m.outcomes = finishOutcomes{}
-		}
-		for _, r := range f.rows {
-			switch r.state {
-			case finStarted:
-				m.outcomes[r.id] = finStarted
-			case finFailed:
-				m.outcomes[r.id] = finFailed
-			case finSkipped, finManual:
-				m.outcomes[r.id] = finSkipped
-			case finStopped:
-				delete(m.outcomes, r.id)
-			}
-		}
-		m.status = fmt.Sprintf("%d of %d ready.", f.count(finStarted), len(f.rows))
-		if f.count(finStarted) < len(f.rows) {
-			m.status += " What is left is listed when setup ends."
-		}
+	ready := f.count(finStarted)
+	switch {
+	case len(f.rows) == 1 && ready == 1:
+		m.status = f.rows[0].label + " is ready."
+	case ready == len(f.rows):
+		m.status = fmt.Sprintf("All %d are ready.", ready)
+	default:
+		m.status = fmt.Sprintf("%d of %d ready.", ready, len(f.rows))
 	}
-	m.finish, m.screen = nil, f.back
-	m.clamp()
+	m.finish = nil
 }
 
-// finishOutcomes is the latest outcome of each connection the finish step
-// tried: finStarted, finFailed or finSkipped (still needs a sign-in).
-type finishOutcomes map[string]finishState
-
-func (o finishOutcomes) lists() (started, signIn, failed []string) {
-	for _, id := range slices.Sorted(maps.Keys(o)) {
-		switch o[id] {
-		case finStarted:
-			started = append(started, id)
-		case finFailed:
-			failed = append(failed, id)
-		default:
-			signIn = append(signIn, id)
-		}
+// runKey handles the keys setting up takes over: Esc skips the sign-in
+// that runs, q stops the run. It reports whether it used the key.
+func (m *Model) runKey(k string) (tea.Cmd, bool) {
+	switch {
+	case m.finish == nil:
+		return nil, false
+	case k == "esc" && m.finish.current() != nil:
+		return m.skip(), true
+	case k == "q":
+		m.stopRun()
+		return nil, true
 	}
-	return started, signIn, failed
-}
-
-func (m *Model) finishKey(k string) tea.Cmd {
-	f := m.finish
-	if !f.started {
-		switch k {
-		case "enter":
-			return m.startFinish()
-		case "esc", "q":
-			m.leaveFinish()
-		}
-		return nil
-	}
-	switch k {
-	case "enter":
-		if r := f.current(); r != nil && r.state == finAsk {
-			return m.signIn(r)
-		}
-		if f.settled() {
-			m.leaveFinish()
-		}
-	case "s":
-		return m.skip()
-	case "r":
-		return m.retry()
-	case "up":
-		f.offset--
-	case "down":
-		f.offset++
-	case "esc", "q":
-		m.leaveFinish()
-	}
-	return nil
+	return nil, false
 }

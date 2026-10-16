@@ -17,10 +17,12 @@ import (
 // credential profile the teammate has no local profile for yet. Only Enter
 // on that question writes anything: the local profile, mode and account
 // only, in its own store update, as config profile set would. The presets
-// screen then turns on the connections of the picked presets in the draft,
-// through the same path as Space; nothing is saved until Ctrl+S. A local
-// profile that already has the requirement's ID is never replaced; where it
-// differs from the suggestion the intro says which one the catalog uses.
+// screen then turns on the connections of the picked presets at once, in
+// one change, as Space does for each. A local profile that already has the
+// requirement's ID is never replaced: one with the suggested account counts
+// as set up, whatever its mode; one with another account is named with
+// both accounts. Requirements are named by their ID, with their
+// description below.
 
 // joinRun is the join screens' state.
 type joinRun struct {
@@ -29,18 +31,11 @@ type joinRun struct {
 	servers int                           // connections the catalog defines
 	asks    []config.EffectiveRequirement // suggestions still to answer, most used first
 	total   int                           // suggestions asked about in all
-	notes   []string                      // how earlier suggestions ended, display-safe
+	notes   []joinNote                    // how each requirement ended, display-safe
 	editing bool                          // typing another account
 	account field
 	picked  []bool // by preset
 	cursor  int    // preset row; len(picked) is Start empty
-}
-
-type profileMsg struct {
-	id, account string
-	state       config.State // the saved state, or a fresh read after an error
-	err         error
-	fresh       bool // state holds a fresh read after err
 }
 
 // ask is the suggestion asked about, or nil.
@@ -51,19 +46,17 @@ func (j *joinRun) ask() *config.EffectiveRequirement {
 	return &j.asks[0]
 }
 
-// requirementLabel names a credential profile requirement: its description,
-// else its ID.
-func requirementLabel(r config.EffectiveRequirement) string {
-	if r.Description != "" {
-		return output.DisplayMetadata(firstLine(r.Description))
-	}
-	return output.DisplayMetadata(r.ID)
+// joinNote is the intro's line for one requirement, and its description.
+type joinNote struct{ text, about string }
+
+func noteFor(r config.EffectiveRequirement, text string) joinNote {
+	return joinNote{text: text, about: output.DisplayMetadata(firstLine(r.Description))}
 }
 
 // openJoin shows the join screens for j's catalog. A catalog the state does
 // not hold opens the list.
 func (m *Model) openJoin(j Join) {
-	effective, state := m.draft.Effective(), m.draft.State()
+	effective, state := m.live.Effective(), m.live.State()
 	cat, ok := effective.Catalogs[j.SourceID]
 	if !ok {
 		return
@@ -82,11 +75,11 @@ func (m *Model) openJoin(j Join) {
 		case exists:
 			run.notes = append(run.notes, m.existingNote(r, profile))
 		case r.Suggest == nil:
-			run.notes = append(run.notes, g.todo+" 1Password for "+requirementLabel(r)+": not set up. Add it with mcparcel config profile set "+output.DisplayMetadata(r.ID)+".")
+			run.notes = append(run.notes, noteFor(r, g.todo+" 1Password "+output.DisplayMetadata(r.ID)+": not set up. Add it with mcparcel config profile set "+output.DisplayMetadata(r.ID)+"."))
 		case m.opts.NoDesktopApp:
 			// Only desktop can be suggested, and the desktop app cannot
 			// read 1Password here.
-			run.notes = append(run.notes, g.todo+" 1Password for "+requirementLabel(r)+": the desktop app works on macOS only. Add a service-account profile with mcparcel config profile set "+output.DisplayMetadata(r.ID)+".")
+			run.notes = append(run.notes, noteFor(r, g.todo+" 1Password "+output.DisplayMetadata(r.ID)+": the desktop app works on macOS only. Add a service-account profile with mcparcel config profile set "+output.DisplayMetadata(r.ID)+"."))
 		default:
 			run.asks = append(run.asks, r)
 		}
@@ -99,18 +92,30 @@ func (m *Model) openJoin(j Join) {
 }
 
 // existingNote is the intro's line for a requirement with a local profile:
-// set up when it is the one suggested, else the mode and account of the
-// profile the catalog's connections link to instead.
-func (m *Model) existingNote(r config.EffectiveRequirement, p config.Profile) string {
-	g, label := m.theme.glyph, requirementLabel(r)
-	if r.Suggest == nil || p.Mode == r.Suggest.Mode && p.Account == r.Suggest.Account {
-		return g.done + " 1Password for " + label + ": already set up"
+// set up when its account is the suggested one, whatever its mode, else
+// both accounts, since the catalog's connections link to it by ID.
+func (m *Model) existingNote(r config.EffectiveRequirement, p config.Profile) joinNote {
+	g, id := m.theme.glyph, output.DisplayMetadata(r.ID)
+	if r.Suggest == nil || p.Account == r.Suggest.Account {
+		return noteFor(r, g.done+" 1Password: using your profile "+id+" ("+profileWords(p)+")")
 	}
-	uses := p.Mode
+	uses := "a service-account token"
 	if p.Account != "" {
-		uses += ", " + p.Account
+		uses = output.DisplayMetadata(p.Account)
 	}
-	return g.review + " 1Password for " + label + ": uses your profile " + output.DisplayMetadata(r.ID) + " (" + output.DisplayMetadata(uses) + "), not the suggested " + output.DisplayMetadata(r.Suggest.Account)
+	return noteFor(r, g.warn+" 1Password: your profile "+id+" uses "+uses+", the catalog suggests "+output.DisplayMetadata(r.Suggest.Account))
+}
+
+// profileWords is a profile's mode in words, and its account.
+func profileWords(p config.Profile) string {
+	words := "desktop app"
+	if p.Mode != config.ProfileModeDesktop {
+		words = "service account"
+	}
+	if p.Account != "" {
+		words += ", " + output.DisplayMetadata(p.Account)
+	}
+	return words
 }
 
 // normalAccount is a typed sign-in address as stored: trimmed, lowercase,
@@ -146,7 +151,7 @@ func (m *Model) joinKey(msg tea.KeyPressMsg, k string) tea.Cmd {
 	ask := j.ask()
 	switch {
 	case k == "q" || k == "esc" && ask == nil:
-		return m.cancel()
+		return m.quit()
 	case ask == nil && k == "enter":
 		m.joinNext()
 	case ask == nil:
@@ -156,88 +161,85 @@ func (m *Model) joinKey(msg tea.KeyPressMsg, k string) tea.Cmd {
 		j.editing, m.status = true, ""
 		j.account.clear()
 	case k == "esc":
-		m.answered(m.theme.glyph.off + " 1Password for " + requirementLabel(*ask) + ": skipped for now")
+		m.answered(noteFor(*ask, m.theme.glyph.off+" 1Password "+output.DisplayMetadata(ask.ID)+": skipped for now"))
 	}
 	return nil
 }
 
 // answered notes how the current suggestion ended and moves to the next
 // one, or on to the presets after the last.
-func (m *Model) answered(note string) {
+func (m *Model) answered(note joinNote) {
 	j := m.join
 	j.notes, j.asks, j.editing = append(j.notes, note), j.asks[1:], false
 	j.account.clear()
 	m.status = "" // the note shows it, above the next question
 	if len(j.asks) == 0 {
 		m.joinNext()
-		m.status = note
+		m.status = note.text
 	}
 }
 
-// createProfile saves the local profile for the current suggestion: its
+// createProfile writes the local profile for the current suggestion: its
 // mode, and the suggested account or the one typed. A profile with that ID
 // that appeared since setup read the state is kept, not replaced.
 func (m *Model) createProfile(account string) tea.Cmd {
 	ask := m.join.ask()
+	id := ask.ID
 	profile := config.ProfileSuggestion{Mode: ask.Suggest.Mode, Account: account}.Profile()
-	m.busy, m.status = true, "Saving..."
-	ctx, store, id, revision := m.ctx, m.store, ask.ID, m.draft.Base().Selections.Revision
-	return func() tea.Msg {
-		next, err := store.Update(ctx, revision, func(s *config.State) error {
-			if _, ok := s.Local.CredentialProfiles[id]; ok {
-				return config.ErrConfigConflict
-			}
-			if s.Local.CredentialProfiles == nil {
-				s.Local.CredentialProfiles = map[string]config.Profile{}
-			}
-			s.Local.CredentialProfiles[id] = profile
-			return nil
-		})
-		if err == nil {
-			return profileMsg{id: id, account: account, state: next}
+	return m.apply(change{ops: []op{{kind: opNewProfile, id: id, profile: profile}}}, func(err error) tea.Cmd {
+		ask := m.join.ask()
+		existing, exists := m.live.State().Local.CredentialProfiles[id]
+		switch {
+		case ask == nil || ask.ID != id:
+		case err == nil:
+			m.answered(m.existingNote(*ask, profile))
+		case exists: // created elsewhere meanwhile; that one stays
+			m.answered(m.existingNote(*ask, existing))
+		default:
+			m.status = m.inline(err)
 		}
-		fresh, readErr := store.Read(ctx)
-		return profileMsg{id: id, account: account, state: fresh, err: err, fresh: readErr == nil}
-	}
+		return nil
+	})
 }
 
-func (m *Model) profileSaved(msg profileMsg) tea.Cmd {
-	m.busy = false
-	saved := msg.err == nil
-	if saved {
-		m.saves++
-	}
-	if saved || msg.fresh {
-		if _, err := m.draft.Rebase(msg.state); err != nil && saved {
-			msg.err = err
-		}
-		m.refreshSources()
-	}
-	ask := m.join.ask()
-	profile, exists := m.draft.State().Local.CredentialProfiles[msg.id]
-	switch {
-	case ask == nil || ask.ID != msg.id:
-	case msg.err == nil:
-		m.answered(m.theme.glyph.done + " 1Password for " + requirementLabel(*ask) + ": " + output.DisplayMetadata(msg.account))
-	case exists: // created elsewhere meanwhile; that one stays
-		m.answered(m.existingNote(*ask, profile))
-	default:
-		m.status = m.failure(msg.err).Message
-	}
-	if m.interrupted {
-		return m.quit()
-	}
-	return nil
-}
-
-// showRow moves the list to the first tab that holds id, with the cursor on
-// it. An empty or unknown id leaves the list as it is.
-func (m *Model) showRow(id string) {
-	effective := m.draft.Effective()
+// land moves the list to the first domain, in tab order, that holds one of
+// ids, with the cursor on the first of them there that needs a step, else
+// on the first of them.
+func (m *Model) land(ids []string) {
+	effective := m.live.Effective()
 	for i, t := range tabs(effective) {
-		if at := slices.IndexFunc(rowsFor(effective, t.id, ""), func(r config.EffectiveConnection) bool { return r.ID == id }); at >= 0 {
+		at := -1
+		for j, row := range rowsFor(effective, t.id, "") {
+			if !slices.Contains(ids, row.ID) {
+				continue
+			}
+			if st := m.statusOf(row); st.kind != stNone && st.kind <= stSigning {
+				at = j
+				break
+			}
+			if at < 0 {
+				at = j
+			}
+		}
+		if at >= 0 {
 			m.tabIndex, m.tabID, m.cursor = i, t.id, at
+			m.clamp()
 			return
+		}
+	}
+}
+
+// landOnStep moves the list to the first server, in tab order, that needs
+// a step. With none, the list stays where it is.
+func (m *Model) landOnStep() {
+	effective := m.live.Effective()
+	for i, t := range tabs(effective) {
+		for j, row := range rowsFor(effective, t.id, "") {
+			if m.statusOf(row).step() {
+				m.tabIndex, m.tabID, m.cursor = i, t.id, j
+				m.clamp()
+				return
+			}
 		}
 	}
 }
@@ -270,9 +272,9 @@ func (m *Model) presetKey(k string) tea.Cmd {
 		if j.cursor == len(j.picked) {
 			clear(j.picked)
 		}
-		m.stagePresets()
+		return m.applyPresets()
 	case "q", "esc":
-		return m.cancel()
+		return m.quit()
 	}
 	return nil
 }
@@ -294,43 +296,68 @@ func (j *joinRun) presetIDs() []string {
 	return ids
 }
 
-// stagePresets turns on the picked presets' connections in the draft, as
-// Space does, and opens the list. One that is already on, under review
-// included, is left as it is; one that misses configuration stays off.
-func (m *Model) stagePresets() {
+// applyPresets turns on the picked presets' connections, as Space does for
+// each, in one change, and opens the list where they are (see land). One
+// that is already on, under review included, is left as it is; one that
+// misses something stays off. Once the stored sign-ins of those turned on
+// are read, the list lands again, unless a key was pressed.
+func (m *Model) applyPresets() tea.Cmd {
 	ids := m.join.presetIDs()
-	m.join, m.screen, m.focus = nil, screenList, focusList
+	m.join, m.screen = nil, screenList
 	m.cursor, m.offset = 0, 0
-	turned, missing, failed, first := 0, 0, "", ""
+	m.status = ""
+	trial, err := config.CloneState(m.live.State())
+	if err != nil {
+		m.status = m.inline(err)
+		return nil
+	}
+	m.landing = ids
+	var c change
+	missing, failed := 0, ""
 	for _, id := range ids {
-		row, ok := m.draft.Effective().Connections[id]
+		row, ok := m.live.Effective().Connections[id]
 		if !ok || !row.Available || row.Enabled {
 			continue
 		}
-		err := m.draft.SetEnabled(id, true)
+		next, err := config.CloneState(trial)
+		if err == nil {
+			err = op{kind: opEnabled, id: id, on: true}.apply(&next)
+		}
 		switch {
 		case errors.Is(err, config.ErrConfigRequired):
 			missing++
 		case err != nil:
-			failed = m.failure(err).Message
+			failed = m.inline(err)
 		default:
-			turned++
-			if first == "" {
-				first = id
-			}
+			trial = next
+			c.ops = append(c.ops, op{kind: opEnabled, id: id, on: true})
+			c.accept = append(c.accept, id)
 		}
 	}
-	m.showRow(first)
-	m.status = ""
-	switch {
-	case failed != "":
-		m.status = failed
-	case turned > 0 && missing > 0:
-		m.status = "Turned on " + plural(turned, "server", "servers") + ". " + plural(missing, "needs", "need") + " setup first: Space on " + m.theme.glyph.needsConfig + " asks for it."
-	case turned > 0:
-		m.status = "Turned on " + plural(turned, "server", "servers") + ". Ctrl+S saves."
-	case missing > 0:
-		m.status = plural(missing, "server needs", "servers need") + " setup first: Space on " + m.theme.glyph.needsConfig + " asks for it."
+	report := func(turned int) {
+		switch {
+		case failed != "":
+			m.status = failed
+		case turned > 0 && missing > 0:
+			m.status = "Turned on " + plural(turned, "server", "servers") + ". " + plural(missing, "needs", "need") + " something first; Space asks for it."
+		case turned > 0:
+			m.status = "Turned on " + plural(turned, "server", "servers") + "."
+		case missing > 0:
+			m.status = plural(missing, "server needs", "servers need") + " something first; Space asks for it."
+		}
+		m.land(ids)
 	}
-	m.clamp()
+	if len(c.ops) == 0 {
+		report(0)
+		return nil
+	}
+	return m.apply(c, func(err error) tea.Cmd {
+		if err != nil {
+			failed = m.inline(err)
+			report(0)
+			return nil
+		}
+		report(len(c.ops))
+		return nil
+	})
 }

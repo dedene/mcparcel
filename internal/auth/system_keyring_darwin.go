@@ -18,6 +18,10 @@ func (SystemKeyring) Delete(service, account string) error {
 	return notFound(keyring.Delete(service, account))
 }
 
+// NoPrompt returns k for reads that must never prompt, such as setup's
+// status. Reading the login Keychain through go-keyring shows no prompt.
+func NoPrompt(k Keyring) Keyring { return k }
+
 // KeyringReachable reports whether the system keyring can be reached from
 // this process. The macOS Keychain always can.
 func KeyringReachable() bool { return true }

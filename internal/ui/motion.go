@@ -36,9 +36,9 @@ type motion struct {
 
 // animate schedules the ticks an update calls for: a new status message
 // clears after toastLife, and a new flash settles after flashLife. status and
-// flash are their values before the update. A busy status (Saving...) stays
-// until its result replaces it, and so does the prompt of a pending enable
-// (what the field or profile screen still needs).
+// flash are their values before the update. A status set while a change is
+// written stays until its result replaces it, and so does the prompt of a
+// pending enable (what the field or profile screen still needs).
 func (m *Model) animate(status string, flash int) tea.Cmd {
 	var cmds []tea.Cmd
 	if m.status != status {
@@ -85,8 +85,8 @@ func (m *Model) flashEnded(msg flashMsg) {
 	}
 }
 
-// spin keeps one spinner tick pending while work runs: a tool load or the
-// finish screen. The chain ends at the first tick after the work does.
+// spin keeps one spinner tick pending while work runs: a tool load or
+// setting up. The chain ends at the first tick after the work does.
 func (m *Model) spin() tea.Cmd {
 	if !m.theme.motion || !m.working() || m.spinning {
 		return nil

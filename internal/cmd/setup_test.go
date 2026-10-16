@@ -105,53 +105,47 @@ func TestSetupHelp(t *testing.T) {
 	}
 }
 
+// Every change is written as it is made, so setup has no save to report:
+// it says in one line what is on and what is left, then what to run for
+// what it could not do: setup once more for the sign-ins s does, auth for
+// one it cannot do here, doctor for a start that failed. Then a change it
+// could not confirm. An interrupted or failed setup prints no summary.
 func TestSetupSummary(t *testing.T) {
+	steps := ui.Result{On: 10, Ready: 4, Steps: []ui.Step{
+		{ID: "local:front", Label: "Front", Need: ui.NeedSignIn},
+		{ID: "local:glitchtip", Label: "GlitchTip", Need: ui.NeedSignIn, Command: "mcparcel auth glitchtip"},
+		{ID: "local:maps", Label: "Maps", Need: ui.NeedFailed},
+		{ID: "github:zenjoy/club#notes", Label: "Notes", Need: ui.NeedInput, Detail: "workspace"},
+		{ID: "local:rails", Label: "Rails Blocks", Need: ui.NeedCommand, Detail: "rails-blocks-mcp"},
+		{ID: "local:wiki", Label: "Wiki", Need: ui.NeedFailed},
+	}}
+	stepsOut := "10 on: 4 ready, Front needs a sign-in, GlitchTip needs a sign-in, Maps could not start, Notes needs input workspace, " +
+		"Rails Blocks needs rails-blocks-mcp installed, Wiki could not start.\n" +
+		"  mcparcel setup, then s signs you in\n  mcparcel auth glitchtip\n  mcparcel doctor\n"
 	for _, tc := range []struct {
 		result  ui.Result
 		err     error
 		out     string
 		wantErr error
 	}{
-		{ui.Result{}, nil, "No changes saved.\n", nil},
-		{ui.Result{Revision: 7, Saves: 2}, nil, "Configuration saved at revision 7.\n", nil},
-		{ui.Result{Revision: 7, Interrupted: true}, nil, "", context.Canceled},
-		{ui.Result{Revision: 8, Saves: 1, Interrupted: true}, nil, "Configuration saved at revision 8.\n", context.Canceled},
-		{ui.Result{Revision: 8, Saves: 1, Interrupted: true}, context.Canceled, "Configuration saved at revision 8.\n", context.Canceled},
+		{ui.Result{}, nil, "Nothing is on.\n", nil},
+		{ui.Result{On: 9, Ready: 9}, nil, "9 on, all ready.\n", nil},
+		{steps, nil, stepsOut, nil},
+		{
+			ui.Result{On: 2, Steps: []ui.Step{{ID: "x", Label: "X", Need: ui.NeedReview}, {ID: "y", Label: "Y", Need: ui.NeedUnavailable}, {ID: "z", Label: "Z", Need: ui.NeedProfile}}},
+			nil,
+			"2 on: 0 ready, X needs a review, Y is unavailable, Z needs a 1Password profile.\n", nil,
+		},
+		{ui.Result{Interrupted: true, On: 1, Ready: 1}, nil, "", context.Canceled},
+		{ui.Result{}, context.Canceled, "", context.Canceled},
 		{ui.Result{}, config.ErrConfigWrite, "", config.ErrConfigWrite},
-		{ui.Result{Revision: 7, Unconfirmed: true}, nil, unconfirmedSummary, nil},
-		{ui.Result{Revision: 7, Unconfirmed: true, Interrupted: true}, nil, unconfirmedSummary, context.Canceled},
-		{ui.Result{Revision: 8, Saves: 1, Unconfirmed: true}, nil, "Configuration saved at revision 8.\n" + unconfirmedSummary, nil},
+		{ui.Result{Unconfirmed: true, On: 1, Ready: 1}, nil, unconfirmedSummary + "1 on, all ready.\n", nil},
+		{ui.Result{Unconfirmed: true, Interrupted: true}, nil, unconfirmedSummary, context.Canceled},
 	} {
 		var out bytes.Buffer
-		err := finishSetup(&Streams{Out: &out}, tc.result, tc.err, func(ui.Result) ([]string, []string) { return nil, nil })
+		err := finishSetup(&Streams{Out: &out}, tc.result, tc.err)
 		if out.String() != tc.out || !errors.Is(err, tc.wantErr) || (tc.wantErr == nil) != (err == nil) {
-			t.Fatal(tc.result, out.String(), err)
-		}
-	}
-	// A finished setup lists the sign-ins still needed after the summary,
-	// then what the finish step could not start; an interrupted or failed one
-	// does not look them up.
-	actions := func() ([]string, []string) {
-		return []string{"mcparcel auth code", "mcparcel auth local:status"}, []string{"maps", "local:wiki"}
-	}
-	hints := "Sign in before first use:\n  mcparcel auth code\n  mcparcel auth local:status\nCould not start maps, local:wiki. Run mcparcel doctor to see why.\n"
-	for _, tc := range []struct {
-		result  ui.Result
-		err     error
-		out     string
-		wantErr error
-	}{
-		{ui.Result{}, nil, "No changes saved.\n" + hints, nil},
-		{ui.Result{Revision: 7, Saves: 2}, nil, "Configuration saved at revision 7.\n" + hints, nil},
-		{ui.Result{Revision: 8, Saves: 1, Unconfirmed: true}, nil, "Configuration saved at revision 8.\n" + unconfirmedSummary + hints, nil},
-		{ui.Result{Revision: 8, Saves: 1, Interrupted: true}, nil, "Configuration saved at revision 8.\n", context.Canceled},
-		{ui.Result{}, config.ErrConfigWrite, "", config.ErrConfigWrite},
-	} {
-		var out bytes.Buffer
-		called := false
-		err := finishSetup(&Streams{Out: &out}, tc.result, tc.err, func(ui.Result) ([]string, []string) { called = true; return actions() })
-		if out.String() != tc.out || !errors.Is(err, tc.wantErr) || (tc.wantErr == nil) != (err == nil) || called != (tc.wantErr == nil) {
-			t.Fatal(tc.result, out.String(), err, called)
+			t.Fatalf("%+v: %q %v", tc.result, out.String(), err)
 		}
 	}
 }
@@ -169,29 +163,24 @@ func (k failingKeyring) Get(service, account string) (string, error) {
 	return k.MemKeyring.Get(service, account)
 }
 
-// TestSetupHints lists enabled OAuth connections whose stored
-// session needs sign-in, by the name auth <mcp> accepts. It skips signed-in,
-// disabled, unmarked and client_credentials connections, connections auth
-// <mcp> refuses (under review, SSE) and any connection whose Keychain item
-// cannot be read; headless mode lists nothing.
-func TestSetupHints(t *testing.T) {
+// What setup's Status reads for each stored sign-in, as auth status
+// explains it: one that is missing, one that is there, an unmarked server
+// (its server decides), client credentials and a connection auth <mcp>
+// refuses (no sign-in), one the keyring cannot read without a prompt
+// (unknown), and nothing in headless mode.
+func TestSetupSignInState(t *testing.T) {
 	p := metadataEnv(t)
 	store := config.NewStore(p)
 	oauth := func(u string) config.Connection {
 		return config.Connection{Auth: &config.OAuth{Type: "oauth"}, Transport: config.Transport{HTTP: &config.HTTP{URL: config.Literal(u)}}}
 	}
 	_, err := store.Update(context.Background(), 0, func(s *config.State) error {
-		for _, id := range []string{"code", "status", "signed", "broken", "off"} {
+		for _, id := range []string{"code", "signed", "broken"} {
 			s.Personal.Connections[id] = oauth("https://" + id + ".example/mcp")
-			s.Selections.Connections["local:"+id] = config.Selection{Enabled: id != "off"}
+			s.Selections.Connections["local:"+id] = config.Selection{Enabled: true}
 		}
-		// auth <mcp> refuses a connection under review or on SSE.
 		s.Personal.Connections["rev"] = oauth("https://rev.example/mcp")
 		s.Selections.Connections["local:rev"] = config.Selection{Enabled: true, ReviewRequired: true}
-		sse := oauth("https://sse.example/mcp")
-		sse.Transport.HTTP.Mode = "sse"
-		s.Personal.Connections["sse"] = sse
-		s.Selections.Connections["local:sse"] = config.Selection{Enabled: true}
 		s.Personal.Connections["plain"] = config.Connection{Transport: config.Transport{HTTP: &config.HTTP{URL: config.Literal("https://plain.example/mcp")}}}
 		s.Selections.Connections["local:plain"] = config.Selection{Enabled: true}
 		cc := oauth("https://front.example/mcp")
@@ -213,33 +202,10 @@ func TestSetupHints(t *testing.T) {
 	saved := keyringFactory
 	t.Cleanup(func() { keyringFactory = saved })
 	keyringFactory = func(config.Paths) auth.Keyring { return failingKeyring{mem, "local:broken"} }
-	got, failed := setupHints(context.Background(), p, store, ui.Result{})
-	if want := []string{"mcparcel auth code", "mcparcel auth local:status"}; !reflect.DeepEqual(got, want) || failed != nil {
-		t.Fatal(got, failed)
-	}
-	// The finish step's outcomes: one it started is not listed again, one
-	// it left needing a sign-in is (an unmarked server too), and one it could
-	// not start is named for doctor.
-	got, failed = setupHints(context.Background(), p, store, ui.Result{Started: []string{"local:code"}, SignIn: []string{"local:plain"}, Failed: []string{"local:off", "local:front"}})
-	if want := []string{"mcparcel auth plain", "mcparcel auth local:status"}; !reflect.DeepEqual(got, want) || !reflect.DeepEqual(failed, []string{"front", "off"}) {
-		t.Fatal(got, failed)
-	}
-	// A failed browser sign-in is listed once, as the sign-in it still needs.
-	got, failed = setupHints(context.Background(), p, store, ui.Result{Failed: []string{"local:code"}})
-	if want := []string{"mcparcel auth code", "mcparcel auth local:status"}; !reflect.DeepEqual(got, want) || failed != nil {
-		t.Fatal(got, failed)
-	}
-	headless := p
-	headless.StateRoot = filepath.Join(filepath.Dir(p.Home), "state-root")
-	if got, failed := setupHints(context.Background(), headless, store, ui.Result{SignIn: []string{"local:plain"}}); got != nil || !reflect.DeepEqual(failed, []string{"plain"}) {
-		t.Fatal("headless mode listed sign-ins", got, failed)
-	}
-	// What NeedsSignIn reports: a stored sign-in that is missing, one that
-	// is there, an unmarked server (its server decides), a local command or
-	// client credentials (no sign-in), and nothing in headless mode.
 	for id, want := range map[string]ui.SignInState{
 		"local:code":   {Possible: true, Needed: true},
 		"local:signed": {Possible: true},
+		"local:broken": {Possible: true, Unknown: true},
 		"local:plain":  {Possible: true},
 		"local:front":  {},
 		"local:rev":    {},
@@ -248,11 +214,34 @@ func TestSetupHints(t *testing.T) {
 			t.Error(id, got, want)
 		}
 	}
+	headless := p
+	headless.StateRoot = filepath.Join(filepath.Dir(p.Home), "state-root")
 	if got := setupSignInState(context.Background(), headless, store, "local:code"); got != (ui.SignInState{}) {
 		t.Fatal("headless mode can sign in", got)
 	}
 	if setupSignIn(headless, &CommandOptions{}) != nil {
 		t.Fatal("headless mode has a sign-in")
+	}
+}
+
+// Setup looks for a command as the runtime does: on the PATH the
+// connection sets, else on PATH, or at its absolute path.
+func TestSetupCommandAvailable(t *testing.T) {
+	dir, own := t.TempDir(), t.TempDir()
+	tool := filepath.Join(dir, "fixture-tool")
+	for _, path := range []string{tool, filepath.Join(own, "own-tool")} {
+		if err := os.WriteFile(path, []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", dir)
+	for command, want := range map[string]bool{"fixture-tool": true, tool: true, "missing-tool": false, filepath.Join(dir, "missing"): false, "./fixture-tool": false, "own-tool": false} {
+		if got := setupCommandAvailable(command, ""); got != want {
+			t.Error(command, got)
+		}
+	}
+	if !setupCommandAvailable("own-tool", own) || setupCommandAvailable("fixture-tool", own) {
+		t.Fatal("the connection's PATH is not the one looked on")
 	}
 }
 

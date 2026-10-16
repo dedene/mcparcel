@@ -8,138 +8,124 @@ import (
 	"github.com/dedene/mcparcel/internal/config"
 )
 
-// Needs come from the definition's metadata and the selection only: the
-// transport, its auth, the credential profile requirement and the inputs.
-func TestNeedsFollowTransportAuthProfileInputs(t *testing.T) {
+// The To do comes from the definition's metadata and the selection, and
+// from what the Status knows: the transport, its auth, the credential
+// profile requirement and the inputs.
+func TestToDoFollowsTransportAuthProfileInputs(t *testing.T) {
 	state := config.State{}
 	state.Local.CredentialProfiles = map[string]config.Profile{"team": {Mode: "desktop"}, "work": {Mode: "desktop"}}
 	state.Selections.Connections = map[string]config.Selection{"bound": {CredentialProfile: "work", Inputs: map[string]string{"root": "/srv"}}, "linked": {CredentialProfile: "team"}}
+	m := &Model{live: &live{state: state}, theme: newTheme(Options{}, nil)}
 	row := func(id string, c config.Connection, blockers ...string) config.EffectiveConnection {
 		return config.EffectiveConnection{ID: id, SourceID: "personal", Definition: &c, Connection: &c, Available: true, Blockers: blockers}
 	}
 	command := func(v config.Value) config.Transport { return config.Transport{Stdio: &config.Stdio{Command: v}} }
 	http := config.Transport{HTTP: &config.HTTP{URL: config.Literal("https://mcp.example/")}}
-	type check struct {
-		name, note string
-		role       role
-		done       bool
-	}
+	on, tools := "[*] Turn it on", "[.] Tools load on first use"
+	browser := "[.] Sign in when it first starts"
 	for _, tc := range []struct {
-		name      string
-		row       config.EffectiveConnection
-		list      []string
-		state     rowState
-		checklist []check
+		name  string
+		row   config.EffectiveConnection
+		state statusKind
+		todo  []string
 	}{
-		{
-			name: "stdio shows its command", row: row("npx", config.Connection{Transport: command(config.Literal("/opt/homebrew/bin/npx"))}),
-			list: []string{"npx"}, state: rowOff, checklist: []check{{"npx", "runs on this device", roleDim, false}},
-		},
+		{name: "stdio", row: row("npx", config.Connection{Transport: command(config.Literal("/opt/homebrew/bin/npx"))}), state: stNone, todo: []string{on, tools}},
 		{
 			name: "a command from an input", row: row("bin", config.Connection{Inputs: map[string]config.Input{"bin": {Kind: "path"}}, Transport: command(config.Value{Input: &config.InputRef{Input: "bin"}})}, "config_required"),
-			list: []string{"input bin", "local command"}, state: rowNeedsConfig,
-			checklist: []check{{"input bin", "not set", roleWarn, false}, {"local command", "runs on this device", roleDim, false}},
+			state: stInput, todo: []string{on, "[*] Set bin", tools},
 		},
-		{
-			name: "OAuth signs in", row: row("oauth", config.Connection{Transport: http, Auth: &config.OAuth{Type: "oauth"}}),
-			list: []string{"sign-in"}, state: rowOff, checklist: []check{{"sign-in", "in a browser on first connect", roleAccent, false}},
-		},
+		{name: "OAuth signs in", row: row("oauth", config.Connection{Transport: http, Auth: &config.OAuth{Type: "oauth"}}), state: stNone, todo: []string{on, browser, tools}},
 		{
 			name: "authorization code signs in", row: row("code", config.Connection{Transport: http, Auth: &config.OAuth{Type: "oauth", Grant: config.GrantAuthorizationCode}}),
-			list: []string{"sign-in"}, state: rowOff, checklist: []check{{"sign-in", "in a browser on first connect", roleAccent, false}},
+			state: stNone, todo: []string{on, browser, tools},
 		},
 		{
 			name: "client credentials need no sign-in", row: row("machine", config.Connection{Transport: http, Auth: &config.OAuth{Type: "oauth", Grant: config.GrantClientCredentials}}),
-			state: rowOff,
+			state: stNone, todo: []string{on, tools},
 		},
-		{name: "plain HTTP needs nothing", row: row("plain", config.Connection{Transport: http}), state: rowOff},
 		{
 			name: "a missing profile", row: row("vault", config.Connection{CredentialProfile: "vault", Transport: http}, "config_required"),
-			list: []string{"1Password"}, state: rowNeedsConfig, checklist: []check{{"1Password vault", "not linked", roleWarn, false}},
+			state: stProfile, todo: []string{on, "[*] Link a 1Password profile", tools},
 		},
 		{
 			name: "a profile Space links by itself is ready", row: row("auto", config.Connection{CredentialProfile: "team", Transport: http}, "config_required"),
-			list: []string{"1Password"}, state: rowOff, checklist: []check{{"1Password team", "links automatically", roleInfo, true}},
+			state: stNone, todo: []string{on, "[+] 1Password: links team when on", tools},
 		},
 		{
 			name: "a bound profile and a set input", row: row("bound", config.Connection{CredentialProfile: "team", Inputs: map[string]config.Input{"root": {Kind: "path"}}, Transport: http}),
-			list: []string{"1Password"}, state: rowOff,
-			checklist: []check{{"input root", "set", roleDim, true}, {"1Password team", "linked to work", roleInfo, true}},
+			state: stNone, todo: []string{on, "[+] root is set", "[+] 1Password: work", tools},
 		},
 		{
-			// The profile with the requirement's name reads "linked", and the list
-			// shows what is left (the sign-in) before what is done.
 			name: "a linked profile and a sign-in", row: row("linked", config.Connection{CredentialProfile: "team", Transport: http, Auth: &config.OAuth{Type: "oauth"}}),
-			list: []string{"sign-in", "1Password"}, state: rowOff,
-			checklist: []check{{"1Password team", "linked", roleInfo, true}, {"sign-in", "in a browser on first connect", roleAccent, false}},
+			state: stNone, todo: []string{on, "[+] 1Password: team", browser, tools},
 		},
 	} {
-		look := lookOf(state, tc.row)
-		var list []string
-		for _, n := range look.listNeeds() {
-			list = append(list, n.text)
+		if got := m.statusOf(tc.row).kind; got != tc.state {
+			t.Errorf("%s: state %d, want %d", tc.name, got, tc.state)
 		}
-		if !slices.Equal(list, tc.list) || look.state != tc.state {
-			t.Errorf("%s: list %q state %d, want %q %d", tc.name, list, look.state, tc.list, tc.state)
+		var got []string
+		for _, item := range m.todo(tc.row) {
+			got = append(got, m.todoLine(item, "", 80, false))
 		}
-		var got []check
-		for _, n := range look.checklist() {
-			name := n.text
-			if n.name != "" {
-				name = n.name
-			}
-			got = append(got, check{name, n.note, n.role, n.done})
-		}
-		if !slices.Equal(got, tc.checklist) {
-			t.Errorf("%s: checklist %+v, want %+v", tc.name, got, tc.checklist)
+		if !slices.Equal(got, tc.todo) {
+			t.Errorf("%s: To do %q, want %q", tc.name, got, tc.todo)
 		}
 	}
 
 	review := row("review", config.Connection{Transport: http})
 	review.Enabled, review.ReviewRequired = true, true
+	if got := m.statusOf(review).kind; got != stReview || !slices.Contains(lines(m, review), "[*] Accept the change") {
+		t.Errorf("review: %d %q", got, lines(m, review))
+	}
 	gone := config.EffectiveConnection{ID: "local:gone", SourceID: "personal", Enabled: true}
+	if got := m.statusOf(gone).kind; got != stUnavailable || len(m.todo(gone)) != 0 {
+		t.Errorf("unavailable: %d %q", got, lines(m, gone))
+	}
+}
+
+func lines(m *Model, row config.EffectiveConnection) []string {
+	var out []string
+	for _, item := range m.todo(row) {
+		out = append(out, m.todoLine(item, "", 80, false))
+	}
+	return out
+}
+
+// Every Status has its mark in both glyph sets, and the ASCII set draws
+// only ASCII: on with nothing to do, on with a step left, on but it cannot
+// run, and off.
+func TestMarksPerStatus(t *testing.T) {
 	for _, tc := range []struct {
-		row   config.EffectiveConnection
-		state rowState
-		first need
+		status     status
+		ascii, uni string
+		role       role
+		step       bool
 	}{
-		{review, rowReview, need{kind: needStatus, text: "review", role: roleWarn}},
-		{gone, rowUnavailable, need{kind: needStatus, text: "unavailable", role: roleBad}},
+		{status{on: true, kind: stFirstUse}, "[x]", "●", roleOK, false},
+		{status{on: true, kind: stTools}, "[x]", "●", roleOK, false},
+		{status{on: true, kind: stSignInUnknown}, "[x]", "●", roleOK, false},
+		{status{}, "[ ]", "○", roleDim, false},
+		{status{kind: stInput}, "[ ]", "○", roleDim, false},
+		{status{on: true, kind: stInput}, "[~]", "◐", roleWarn, true},
+		{status{on: true, kind: stReview}, "[~]", "◐", roleWarn, true},
+		{status{on: true, kind: stSignIn}, "[~]", "◐", roleWarn, true},
+		{status{on: true, kind: stUnavailable}, "[-]", "✕", roleBad, true},
+		{status{on: true, kind: stCommand}, "[-]", "✕", roleBad, true},
+		{status{on: true, kind: stFailed}, "[-]", "✕", roleBad, true},
 	} {
-		look := lookOf(state, tc.row)
-		if look.state != tc.state || look.ready() || len(look.listNeeds()) == 0 || look.listNeeds()[0] != tc.first || len(look.checklist()) != 0 {
-			t.Errorf("%s: %+v", tc.row.ID, look)
+		h := newHarness(t, nil, 80, 24)
+		ascii, r := h.m.mark(tc.status)
+		h.m.theme.glyph = unicodeGlyphs
+		uni, _ := h.m.mark(tc.status)
+		if ascii != tc.ascii || uni != tc.uni || r != tc.role || tc.status.step() != tc.step {
+			t.Errorf("%+v: %q %q %d %v", tc.status, ascii, uni, r, tc.status.step())
 		}
 	}
 }
 
-// Every state has its glyph in both sets, and the ASCII set draws only ASCII.
-func TestMarksPerState(t *testing.T) {
-	for _, tc := range []struct {
-		look         rowLook
-		ascii, uni   string
-		role         role
-		label        string
-		attentionToo bool
-	}{
-		{rowLook{state: rowOn, on: true}, "[x]", "●", roleOK, "On", false},
-		{rowLook{state: rowOff}, "[ ]", "○", roleDim, "Off", false},
-		{rowLook{state: rowNeedsConfig}, "[?]", "◌", roleDim, "Off, configuration required", false},
-		{rowLook{state: rowNeedsConfig, on: true}, "[~]", "◐", roleWarn, "On, configuration required", true},
-		{rowLook{state: rowReview, on: true}, "[!]", "!", roleWarn, "On, review required", true},
-		{rowLook{state: rowUnavailable, on: true}, "[-]", "✕", roleBad, "On, unavailable", true},
-		{rowLook{state: rowUnavailable}, "[ ]", "○", roleDim, "Off, unavailable", false},
-	} {
-		ascii, r := tc.look.mark(asciiGlyphs)
-		uni, _ := tc.look.mark(unicodeGlyphs)
-		if ascii != tc.ascii || uni != tc.uni || r != tc.role || tc.look.label() != tc.label || tc.look.on && tc.look.ready() == tc.attentionToo {
-			t.Errorf("%+v: %q %q %d %q", tc.look, ascii, uni, r, tc.look.label())
-		}
-	}
-}
-
-// seedMarks turns Notes on without its configuration, so the fixture shows
-// every mark: on, off, on with configuration missing, review and unavailable.
+// seedMarks turns Notes on without its input and profile, so the fixture
+// shows every mark: on, off, on with something missing, review and
+// unavailable.
 func seedMarks(t *testing.T, store *config.Store) {
 	seedFixture(t, store)
 	mustUpdate(t, store, func(s *config.State) { s.Selections.Connections[idNotes] = config.Selection{Enabled: true} })
@@ -147,11 +133,11 @@ func seedMarks(t *testing.T, store *config.Store) {
 
 func TestUnicodeFalseRendersASCIIMarks(t *testing.T) {
 	for _, tc := range []struct {
-		unicode                                           bool
-		on, off, pending, needsConfig, review, gone, help string
+		unicode                                        bool
+		on, off, pending, offNotes, review, gone, help string
 	}{
-		{false, "[x] Excalidraw", "[ ] Paper", "[~] Notes", "[?] Notes", "[!] Reviewer", "[-] local:gone", "[?] off, needs configuration"},
-		{true, "● Excalidraw", "○ Paper", "◐ Notes", "◌ Notes", "! Reviewer", "✕ local:gone", "◌ off, needs configuration"},
+		{false, "[x] Excalidraw", "[ ] Paper", "[~] Notes", "[ ] Notes", "[~] Reviewer", "[-] local:gone", "[-] on, can't run"},
+		{true, "● Excalidraw", "○ Paper", "◐ Notes", "○ Notes", "◐ Reviewer", "✕ local:gone", "✕ on, can't run"},
 	} {
 		h := newHarness(t, seedMarks, 120, 35, func(o *Options) { o.Color, o.Unicode = true, tc.unicode })
 		h.selectTab("Other")
@@ -161,7 +147,7 @@ func TestUnicodeFalseRendersASCIIMarks(t *testing.T) {
 		h.selectTab("Research")
 		h.focused(tc.pending)
 		h.press("space")
-		h.focused(tc.needsConfig)
+		h.focused(tc.offNotes, "needs workspace")
 		h.press("?")
 		for range 40 {
 			h.press("down")
@@ -175,7 +161,7 @@ func TestUnicodeFalseRendersASCIIMarks(t *testing.T) {
 			}
 		}
 		h.press("esc")
-		if !tc.unicode && strings.ContainsAny(h.plain(), "●○◐◌✕◆✓·‹›│") {
+		if !tc.unicode && strings.ContainsAny(h.plain(), "●○◐✕◆✓·‹›│←→") {
 			t.Fatal(h.plain())
 		}
 	}

@@ -286,3 +286,40 @@ func TestSystemKeyringPromptPending(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// A quiet read never unlocks: a locked item is not read, go-keyring's
+// prompting Get is never called, and the quiet keyring writes nothing.
+func TestNoPromptKeyringNeverUnlocks(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "run")
+	isolateKeyring(t, fakeBackend{get: func(string, string) (string, error) {
+		t.Error("the prompting read ran")
+		return "", nil
+	}})
+	runUserDir = dir
+	listenBus(t, filepath.Join(dir, strconv.Itoa(os.Getuid())), 0o700)
+	old := peekItem
+	t.Cleanup(func() { peekItem = old })
+	items := map[string]error{"locked": errKeyringLocked, "missing": ErrNoSession}
+	peekItem = func(_, account string) (string, error) {
+		if err := items[account]; err != nil {
+			return "", err
+		}
+		return `{"v":1,"u":"https://mcp.example/"}`, nil
+	}
+	k := NoPrompt(SystemKeyring{})
+	if _, err := LoadOAuth(context.Background(), k, "locked"); !errors.As(err, new(*output.Error)) {
+		t.Fatal("a locked item read as", err)
+	}
+	if _, err := LoadOAuth(context.Background(), k, "missing"); !errors.Is(err, ErrNoSession) {
+		t.Fatal(err)
+	}
+	if s, err := LoadOAuth(context.Background(), k, "open"); err != nil || s.URL != "https://mcp.example/" {
+		t.Fatal(s, err)
+	}
+	if k.Set("s", "a", "x") == nil || k.Delete("s", "a") == nil {
+		t.Fatal("the quiet keyring wrote")
+	}
+	if other := (&fakeBackend{}); NoPrompt(other) != Keyring(other) {
+		t.Fatal("NoPrompt changed another keyring")
+	}
+}

@@ -81,18 +81,35 @@ func recordTick(d time.Duration, fn func(time.Time) tea.Msg) tea.Cmd {
 	return func() tea.Msg { return pendingTick{d: d, fn: fn} }
 }
 
+// newHarness opens setup on its first tab, as most tests expect; see
+// landingHarness for where plain setup really opens.
 func newHarness(t *testing.T, seed func(*testing.T, *config.Store), w, h int, opts ...func(*Options)) *harness {
+	t.Helper()
+	return openHarness(t, seed, w, h, false, opts...)
+}
+
+// landingHarness opens setup where it lands: on the first step.
+func landingHarness(t *testing.T, seed func(*testing.T, *config.Store), w, h int, opts ...func(*Options)) *harness {
+	t.Helper()
+	return openHarness(t, seed, w, h, true, opts...)
+}
+
+func openHarness(t *testing.T, seed func(*testing.T, *config.Store), w, h int, land bool, opts ...func(*Options)) *harness {
 	t.Helper()
 	store, paths, state := fixtureStore(t, seed)
 	loads := &fakeLoader{}
 	fin := &fakeFinish{loads: loads, ended: make(chan error, 16)}
-	o := Options{Describe: describeFixture, LoadTools: loads.load, NeedsSignIn: fin.needsSignIn, SignIn: fin.signIn, Tick: recordTick}
+	o := Options{Describe: describeFixture, LoadTools: loads.load, StoredSignIn: fin.needsSignIn, SignIn: fin.signIn, Tick: recordTick}
 	for _, apply := range opts {
 		apply(&o)
 	}
 	m, err := NewModel(context.Background(), store, state, o)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !land && o.Join == nil {
+		m.landStep = false
+		m.tabIndex, m.tabID, m.cursor = 0, tabs(m.live.Effective())[0].id, 0
 	}
 	hr := &harness{t: t, m: m, store: store, paths: paths, loads: loads, fin: fin}
 	hr.send(tea.WindowSizeMsg{Width: w, Height: h})
@@ -157,7 +174,7 @@ var namedKeys = map[string]tea.Key{
 	"pgup": {Code: tea.KeyPgUp}, "pgdown": {Code: tea.KeyPgDown}, "home": {Code: tea.KeyHome}, "end": {Code: tea.KeyEnd},
 	"space": {Code: tea.KeySpace, Text: " "}, "enter": {Code: tea.KeyEnter}, "tab": {Code: tea.KeyTab},
 	"shift+tab": {Code: tea.KeyTab, Mod: tea.ModShift}, "esc": {Code: tea.KeyEscape}, "backspace": {Code: tea.KeyBackspace},
-	"ctrl+c": {Code: 'c', Mod: tea.ModCtrl}, "ctrl+s": {Code: 's', Mod: tea.ModCtrl}, "ctrl+u": {Code: 'u', Mod: tea.ModCtrl},
+	"ctrl+c": {Code: 'c', Mod: tea.ModCtrl}, "ctrl+u": {Code: 'u', Mod: tea.ModCtrl},
 }
 
 func keyFor(t *testing.T, name string) tea.Key {
@@ -211,6 +228,23 @@ func (h *harness) disk() config.State {
 	return state
 }
 
+// reread shows the stored state, as setup does after its next change, for
+// a test that changed the store underneath.
+func (h *harness) reread() {
+	h.t.Helper()
+	if err := h.m.live.set(h.disk()); err != nil {
+		h.t.Fatal(err)
+	}
+	h.m.refreshSources()
+	h.m.clamp()
+}
+
+// writes counts the changes written since setup opened.
+func (h *harness) writes() int {
+	h.t.Helper()
+	return int(h.disk().Selections.Revision - h.m.opened.Selections.Revision)
+}
+
 // fileBytes captures the config documents and every file under the config
 // and data directories, so a test can prove nothing was written.
 func (h *harness) fileBytes() map[string][]byte {
@@ -257,14 +291,14 @@ func (h *harness) selectRow(label string) {
 	h.t.Fatalf("no row %q in %v", label, names)
 }
 
-// selectTab moves right until the named tab is current.
+// selectTab presses Tab until the named tab is current.
 func (h *harness) selectTab(label string) {
 	h.t.Helper()
-	for range len(tabs(h.m.draft.Effective())) {
+	for range len(tabs(h.m.live.Effective())) {
 		if h.m.currentTab().label == label {
 			return
 		}
-		h.press("right")
+		h.press("tab")
 	}
 	h.t.Fatalf("no tab %q", label)
 }

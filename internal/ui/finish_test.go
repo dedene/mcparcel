@@ -5,7 +5,6 @@ import (
 	"errors"
 	"slices"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -15,210 +14,61 @@ import (
 	"github.com/dedene/mcparcel/internal/output"
 )
 
-// fakeFinish stands in for the stored sign-in check and the browser
-// sign-in. A sign-in runs on its own goroutine, so its fields are guarded.
-type fakeFinish struct {
-	mu      sync.Mutex
-	checks  int
-	signIns int
-	signed  []string               // connections signed in to, in order
-	needs   map[string]SignInState // what needsSignIn answers
-	signErr map[string]error       // a failing sign-in
-	url     string                 // passed to onURL; empty: none
-	block   chan struct{}          // when set, a sign-in waits for it to close, or for its context
-	loads   *fakeLoader            // a sign-in clears the connection's load error
-	ended   chan error             // what each sign-in returned
-}
-
-func (f *fakeFinish) needsSignIn(_ context.Context, id string) SignInState {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.checks++
-	return f.needs[id]
-}
-
-func (f *fakeFinish) signIn(ctx context.Context, id string, onURL func(string, bool)) (err error) {
-	defer func() { f.ended <- err }()
-	f.mu.Lock()
-	f.signIns++
-	url, block, fail := f.url, f.block, f.signErr[id]
-	f.mu.Unlock()
-	if url != "" {
-		onURL(url, true)
-	}
-	if block != nil {
-		select {
-		case <-block:
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-	if fail != nil {
-		return fail
-	}
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.signed = append(f.signed, id)
-	delete(f.loads.errs, id)
-	return nil
-}
-
-func (f *fakeFinish) counts() (checks, signIns int, signed []string) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.checks, f.signIns, slices.Clone(f.signed)
-}
-
-const (
-	idCalendar = "local:calendar"
-	idMail     = "local:mail"
-	idSearch   = "local:search"
-	idMaps     = "local:maps"
-	idWiki     = "local:wiki"
-)
-
-// seedFinish adds personal connections the finish step treats differently,
-// all off: two OAuth servers (Calendar, Mail), an HTTP server without OAuth
-// metadata (Search) and two local commands (Maps, Wiki).
-func seedFinish(t *testing.T, store *config.Store) {
-	t.Helper()
-	seedFixture(t, store)
-	oauth := func(label, host string) config.Connection {
-		return config.Connection{Label: label, Auth: &config.OAuth{Type: "oauth"}, Transport: config.Transport{HTTP: &config.HTTP{URL: config.Literal("https://" + host + "/mcp")}}}
-	}
-	mustUpdate(t, store, func(s *config.State) {
-		s.Personal.Connections["calendar"] = oauth("Calendar", "calendar.example")
-		s.Personal.Connections["mail"] = oauth("Mail", "mail.example")
-		s.Personal.Connections["search"] = config.Connection{Label: "Search", Transport: config.Transport{HTTP: &config.HTTP{URL: config.Literal("https://search.example/mcp")}}}
-		s.Personal.Connections["maps"] = config.Connection{Label: "Maps", Transport: stdio("maps-fixture")}
-		s.Personal.Connections["wiki"] = config.Connection{Label: "Wiki", Transport: stdio("wiki-fixture")}
-	})
-}
-
-func finishHarness(t *testing.T, seed func(*testing.T, *config.Store), w, ht int, opts ...func(*Options)) *harness {
-	t.Helper()
-	h := newHarness(t, seed, w, ht, append([]func(*Options){fixedNow()}, opts...)...)
-	h.loads.items = fixtureTools
-	h.loads.errs = map[string]error{}
-	h.fin.needs = map[string]SignInState{}
-	return h
-}
-
-// turnOn turns the labeled rows of the Other tab on and saves, which offers
-// the finish step.
-func (h *harness) turnOn(labels ...string) {
-	h.t.Helper()
-	h.selectTab("Other")
-	for _, label := range labels {
-		h.selectRow(label)
-		h.press("space")
-	}
-	h.press("ctrl+s")
-	if h.m.screen != screenFinish || h.m.finish.started {
-		h.t.Fatalf("no finish offer:\n%s", h.plain())
-	}
-}
-
-// rowLine is the screen line of the row labeled label (its column ends in
-// the gutter), or "".
-func (h *harness) rowLine(label string) string {
-	for line := range strings.SplitSeq(h.plain(), "\n") {
-		if strings.Contains(line, " "+label+"  ") {
-			return line
-		}
-	}
-	return ""
-}
-
-// lineHas fails unless the row labeled label shows each text.
-func (h *harness) lineHas(label string, want ...string) {
-	h.t.Helper()
-	line := h.rowLine(label)
-	for _, text := range want {
-		if line == "" || !strings.Contains(line, text) {
-			h.t.Fatalf("line %q lacks %q:\n%s", line, text, h.plain())
-		}
-	}
-}
-
-// firstMsg runs cmd up to its first message: the first command of a batch.
-func firstMsg(cmd tea.Cmd) tea.Msg {
-	msg := cmd()
-	if batch, ok := msg.(tea.BatchMsg); ok {
-		return firstMsg(batch[0])
-	}
-	return msg
-}
-
-func (h *harness) rowState(id string) finishState {
-	h.t.Helper()
-	for _, r := range h.m.finish.rows {
-		if r.id == id {
-			return r.state
-		}
-	}
-	h.t.Fatalf("no finish row %s", id)
-	return 0
-}
-
-// The offer lists what each connection involves and contacts nothing; Esc
-// leaves it for later, and setup then leaves no outcome.
-func TestFinishOfferContactsNothing(t *testing.T) {
+// s sets up the servers that are on, in place: no other screen opens, and
+// the list shows each one's tools once it started. With none on, or no
+// runtime to start them, it says so and contacts nothing.
+func TestSetUpStartsWhatIsOn(t *testing.T) {
+	empty := finishHarness(t, nil, 120, 35)
+	empty.press("s")
+	empty.contains("Nothing to set up: turn a server on with Space first.")
 	h := finishHarness(t, seedFinish, 120, 35)
-	h.turnOn("Wiki", "Calendar")
-	h.contains("MCParcel / Setup / Finish", "Start 2 servers now?", "Enter start   Esc later")
-	h.lineHas("Calendar", "sign-in")
-	h.lineHas("Wiki", "wiki-fixture")
-	if checks, signIns, _ := h.fin.counts(); h.loads.calls != 0 || checks != 0 || signIns != 0 {
-		t.Fatal(h.loads.calls, checks, signIns)
+	h.press("s") // what is on (a review, an unavailable server) waits on the user
+	h.contains("Nothing setup can do on its own: open a server to see what it needs.")
+	h.turnOn("Wiki")
+	h.lineHas("Wiki", "[x]", "starts on first use")
+	h.press("s")
+	if h.m.screen != screenList || h.m.finish != nil || !slices.Equal(h.loads.ids, []string{idWiki}) {
+		t.Fatal(h.m.screen, h.loads.ids)
 	}
-	h.press("esc")
-	if h.m.screen != screenList || h.loads.calls != 0 {
-		t.Fatal(h.m.screen, h.loads.calls)
+	h.lineHas("Wiki", "[x]", "2 tools")
+	h.contains("Wiki is ready.", "3 on - 2 need a step")
+	h.press("s")
+	h.contains("Nothing setup can do on its own")
+	if h.loads.calls != 1 {
+		t.Fatal("s started a server that is set up", h.loads.calls)
 	}
-	// Declined connections are offered again with the next save.
-	h.selectRow("Maps")
-	h.press("space", "ctrl+s")
-	h.contains("Start 3 servers now?")
-	h.press("esc", "q")
-	if r := h.m.Result(); !h.quit || r.Started != nil || r.SignIn != nil || r.Failed != nil {
-		t.Fatal(h.quit, r)
-	}
-	// A save that turns nothing on, or no runtime to start, offers nothing.
-	off := finishHarness(t, seedFinish, 120, 35)
-	off.selectTab("Other")
-	off.selectRow("Excalidraw")
-	off.press("space", "ctrl+s")
 	none := finishHarness(t, seedFinish, 120, 35, func(o *Options) { o.LoadTools = nil })
-	none.selectTab("Other")
-	none.selectRow("Wiki")
-	none.press("space", "ctrl+s")
-	if off.m.screen != screenList || none.m.screen != screenList {
-		t.Fatal(off.m.screen, none.m.screen)
+	none.turnOn("Wiki")
+	none.press("s")
+	none.contains("Setting up is not available here.")
+	if none.m.finish != nil {
+		t.Fatal("a run started")
 	}
 }
 
-// Enter starts finishLimit connections at once; each slot that frees up
-// starts the next one, in label order, and the header counts what is ready.
-func TestFinishStartsAtMostLimitAtOnce(t *testing.T) {
+// s starts finishLimit servers at once; each slot that frees up starts the
+// next one, in label order. Rows show their phase while they start, and
+// the list stays usable.
+func TestSetUpStartsAtMostLimitAtOnce(t *testing.T) {
 	h := finishHarness(t, seedFinish, 120, 35)
 	most := 0
 	h.loads.onLoad = func(string) { most = max(most, h.m.finish.count(finStarting)) }
 	h.turnOn("Maps", "Wiki", "Search", "Calendar", "Mail")
 	h.hold = true
-	h.press("enter")
+	h.press("s")
 	if n := h.m.finish.count(finStarting); n != finishLimit || h.loads.calls != 0 {
 		t.Fatal(n, h.loads.calls)
 	}
 	for _, id := range []string{idCalendar, idMail, idMaps} {
-		if h.rowState(id) != finStarting {
+		if h.m.finish.row(id).state != finStarting {
 			t.Fatal(id, "did not start first")
 		}
 	}
 	h.lineHas("Calendar", "starting...")
 	h.lineHas("Wiki", "waiting")
-	h.contains("Finishing setup", "0 of 5 ready", "Esc stop")
-	h.lacks("Up/Down") // every row fits: nothing scrolls
+	h.contains("Setting up: 0 of 5 ready.", "q stop")
+	h.lacks("servers need a step")
+	h.press("down") // the list stays usable
 	h.flush()
 	if most > finishLimit {
 		t.Fatal("more than the limit ran at once:", most)
@@ -226,25 +76,27 @@ func TestFinishStartsAtMostLimitAtOnce(t *testing.T) {
 	if want := []string{idCalendar, idMail, idMaps, idSearch, idWiki}; !slices.Equal(slices.Sorted(slices.Values(h.loads.ids)), want) {
 		t.Fatal(h.loads.ids)
 	}
-	h.contains("5 of 5 ready", "Enter done")
-	h.lineHas("Wiki", "[+]", "started - 2 tools")
-	h.press("enter")
-	if h.m.screen != screenList || h.m.finish != nil {
-		t.Fatal(h.m.screen)
-	}
-	h.contains("5 of 5 ready.")
-	// The loaded tools stay for the session, as after Connect.
+	h.contains("All 5 are ready.", "7 on - 2 need a step")
+	h.lineHas("Wiki", "2 tools")
+	// The loaded tools stay for the session: the tools page does not load
+	// them again.
+	calls := h.loads.calls
 	h.details("Other", "Wiki")
-	h.contains("Schema: loaded this session less than 1m ago")
-	if r := h.m.Result(); len(r.Started) != 5 || r.SignIn != nil || r.Failed != nil {
+	h.press("enter")
+	h.contains("Loaded less than 1m ago (2 tools).")
+	if h.loads.calls != calls {
+		t.Fatal("the tools page loaded again")
+	}
+	if r := h.m.Result(); r.On != 7 || r.Ready != 5 || len(r.Steps) != 2 {
 		t.Fatal(r)
 	}
 }
 
-// Sign-ins line up in the order they are found and run one at a time, each
-// on Enter: a connection whose stored sign-in is missing queues before it
-// starts, one whose server asks for a sign-in queues after. s skips one.
-func TestFinishSignInQueue(t *testing.T) {
+// Sign-ins line up in the order they are found and run one at a time, on
+// their own: a server whose stored sign-in is missing queues before it
+// starts, one whose server asks for a sign-in queues after. The bottom of
+// the list says where to sign in, with the URL, and Esc skips one.
+func TestSetUpSignsInOneAtATime(t *testing.T) {
 	h := finishHarness(t, seedFinish, 120, 35)
 	h.fin.needs[idCalendar] = SignInState{Possible: true, Needed: true}
 	h.fin.needs[idMail] = SignInState{Possible: true, Needed: true}
@@ -252,116 +104,69 @@ func TestFinishSignInQueue(t *testing.T) {
 	h.loads.errs[idSearch] = output.NewError("auth_required", nil)
 	h.fin.url = "https://auth.example/authorize?client_id=fixture&redirect_uri=http%3A%2F%2F127.0.0.1%3A49152%2Fcallback"
 	h.turnOn("Calendar", "Mail", "Search", "Wiki")
-	h.press("enter")
-	if slices.Contains(h.loads.ids, idCalendar) || slices.Contains(h.loads.ids, idMail) {
-		t.Fatal("a connection that needs a sign-in started first:", h.loads.ids)
-	}
-	h.lineHas("Calendar", "> ", "needs sign-in")
-	h.lineHas("Mail", "queued for sign-in")
-	h.lineHas("Search", "queued for sign-in")
-	h.lineHas("Wiki", "started - 2 tools")
-	h.contains("1 of 4 ready", "Enter sign in to Calendar   s skip   Esc stop")
-	if _, signIns, _ := h.fin.counts(); signIns != 0 {
-		t.Fatal("signed in before Enter")
-	}
-
-	// Enter opens the browser; the URL shows while the sign-in waits.
+	h.lineHas("Calendar", "[~]", "sign in")
+	h.contains("6 on - 4 need a step", "4 servers need a step.  s set up all")
 	h.fin.block = make(chan struct{})
 	h.hold = true
-	h.press("enter")
-	msg := firstMsg(h.held[0])
-	h.held = nil
-	h.send(msg)
-	h.contains("Opening your browser to sign in to Calendar. If it does not open, visit:", "https://auth.example/authorize?client_id=fixture")
-	h.lineHas("Calendar", "waiting for browser sign-in...")
-	h.contains("s skip sign-in   Esc stop")
+	h.press("s")
+	h.stepUntil(h.signingIn(idCalendar))
+	if slices.Contains(h.loads.ids, idCalendar) || slices.Contains(h.loads.ids, idMail) {
+		t.Fatal("a server that needs a sign-in started first:", h.loads.ids)
+	}
+	h.lineHas("Calendar", "waiting for your browser...")
+	h.lineHas("Mail", "next sign-in")
+	h.containsWrapped("Sign in to Calendar in your browser. Didn't open? https://auth.example/authorize?client_id=fixture", "Esc skip this one q stop")
 	close(h.fin.block)
 	h.flush()
-	h.lineHas("Calendar", "signed in - 2 tools")
+	h.lineHas("Calendar", "[x]", "2 tools")
+	h.lineHas("Search", "[x]", "2 tools")
+	h.lineHas("Wiki", "2 tools")
 	h.lacks("https://auth.example")
-	// Mail is next; s skips it, then Search signs in.
-	h.lineHas("Mail", "> ", "needs sign-in")
-	h.press("s")
-	h.lineHas("Mail", "skipped")
-	h.lineHas("Search", "> ", "needs sign-in")
-	h.press("enter")
-	h.lineHas("Search", "signed in - 2 tools")
-	h.contains("3 of 4 ready", "Enter done")
-	if _, _, signed := h.fin.counts(); !slices.Equal(signed, []string{idCalendar, idSearch}) {
+	if _, _, signed := h.fin.counts(); !slices.Equal(signed, []string{idCalendar, idMail, idSearch}) {
 		t.Fatal(signed)
 	}
-	h.press("enter")
-	if r := h.m.Result(); !slices.Equal(r.Started, []string{idCalendar, idSearch, idWiki}) || !slices.Equal(r.SignIn, []string{idMail}) || r.Failed != nil {
+
+	// Esc skips the sign-in that waits; the next one starts.
+	skip := finishHarness(t, seedFinish, 120, 35)
+	skip.fin.needs[idCalendar] = SignInState{Possible: true, Needed: true}
+	skip.fin.needs[idMail] = SignInState{Possible: true, Needed: true}
+	skip.turnOn("Calendar", "Mail")
+	skip.fin.block = make(chan struct{})
+	skip.hold = true
+	skip.press("s")
+	skip.stepUntil(skip.signingIn(idCalendar))
+	skip.press("esc")
+	skip.stepUntil(skip.signingIn(idMail))
+	skip.contains("Calendar still needs a sign-in.", "Sign in to Mail in your browser.")
+	skip.lineHas("Calendar", "[~]", "sign in")
+	close(skip.fin.block)
+	skip.flush()
+	skip.lineHas("Mail", "2 tools")
+	if r := skip.m.Result(); r.On != 4 || r.Ready != 1 || len(r.Steps) != 3 || r.Steps[0] != (Step{ID: idCalendar, Label: "Calendar", Need: NeedSignIn}) {
 		t.Fatal(r)
 	}
 }
 
-// A failing connection never holds up the others; it shows why, r retries
-// it, and a failed sign-in is a failure too.
-func TestFinishFailureIsolated(t *testing.T) {
-	h := finishHarness(t, seedFinish, 120, 35)
-	h.loads.errs[idMaps] = output.NewError("connection_failed", nil)
-	h.fin.needs[idCalendar] = SignInState{Possible: true, Needed: true}
-	h.fin.signErr = map[string]error{idCalendar: output.NewError("auth_callback_unavailable", nil)}
-	h.turnOn("Maps", "Wiki", "Calendar")
-	h.press("enter")
-	h.lineHas("Wiki", "started - 2 tools")
-	h.lineHas("Maps", "[-]", output.NewError("connection_failed", nil).Message[:20])
-	h.press("enter")
-	h.lineHas("Calendar", "[-]", output.NewError("auth_callback_unavailable", nil).Message[:20])
-	h.contains("1 of 3 ready", "r retry failed   Enter done")
-	delete(h.loads.errs, idMaps)
-	h.press("r")
-	h.lineHas("Maps", "started - 2 tools")
-	h.lineHas("Calendar", "needs sign-in") // checked again: it still needs one
-	h.press("s", "enter")
-	if r := h.m.Result(); !slices.Equal(r.Started, []string{idMaps, idWiki}) || !slices.Equal(r.SignIn, []string{idCalendar}) || r.Failed != nil {
-		t.Fatal(r)
-	}
-}
-
-// Without a sign-in here (headless) or for a server that cannot sign in,
-// the line points at mcparcel auth instead of queueing.
-func TestFinishWithoutSignInPointsAtAuth(t *testing.T) {
-	h := finishHarness(t, seedFinish, 120, 35, func(o *Options) { o.SignIn = nil })
-	h.fin.needs[idCalendar] = SignInState{Possible: true, Needed: true}
-	h.loads.errs[idSearch] = output.NewError("auth_required", nil)
-	h.turnOn("Calendar", "Search")
-	h.press("enter")
-	h.lineHas("Calendar", "run mcparcel auth local:calendar")
-	h.lineHas("Search", "run mcparcel auth local:search")
-	h.contains("0 of 2 ready", "Enter done")
-	h.press("enter")
-	if r := h.m.Result(); !slices.Equal(r.SignIn, []string{idCalendar, idSearch}) {
-		t.Fatal(r)
-	}
-	// A 1Password failure is auth_required too, but no sign-in fixes it.
-	op := finishHarness(t, seedFinish, 120, 35)
-	op.loads.errs[idWiki] = output.NewError("auth_required", nil)
-	op.turnOn("Wiki")
-	op.press("enter")
-	op.lineHas("Wiki", "run mcparcel auth local:wiki")
-	if _, signIns, _ := op.fin.counts(); signIns != 0 {
-		t.Fatal(signIns)
-	}
-}
-
-// Esc stops the finish step: every running context is canceled, a running
-// sign-in returns, and late results change nothing.
-func TestFinishEscCancelsEverything(t *testing.T) {
+// q while setting up stops it: every running context is canceled, a
+// running sign-in returns, late results change nothing and setup stays
+// open. q again quits.
+func TestSetUpQStopsThenQuits(t *testing.T) {
 	h := finishHarness(t, seedFinish, 120, 35)
 	h.turnOn("Maps", "Wiki", "Search", "Mail")
 	h.hold = true
-	h.press("enter", "esc")
-	if h.m.screen != screenList || h.m.finish != nil {
-		t.Fatal(h.m.screen)
+	h.press("s", "q")
+	if h.m.finish != nil || h.quit {
+		t.Fatal("q did not stop, or quit")
 	}
 	h.flush()
 	if len(h.loads.canceled) != finishLimit || slices.Contains(h.loads.canceled, false) {
 		t.Fatal("a load ran without being canceled", h.loads.canceled)
 	}
-	if r := h.m.Result(); r.Started != nil || r.Failed != nil || r.SignIn != nil {
-		t.Fatal("stopped connections have an outcome", r)
+	h.contains("Stopped. 0 of 4 ready.")
+	h.lineHas("Wiki", "starts on first use")
+	h.press("q")
+	if !h.quit {
+		t.Fatal("q again did not quit")
 	}
 
 	// A sign-in waiting for the browser.
@@ -369,14 +174,14 @@ func TestFinishEscCancelsEverything(t *testing.T) {
 	s.fin.needs[idCalendar] = SignInState{Possible: true, Needed: true}
 	s.fin.block = make(chan struct{})
 	s.turnOn("Calendar")
-	s.press("enter")
 	s.hold = true
-	s.press("enter")
-	wait := s.held[0] // starts the sign-in goroutine
+	s.press("s")
+	s.stepUntil(s.signingIn(idCalendar))
+	wait := s.held[0] // waits for the sign-in to end
 	s.held = nil
 	done := make(chan tea.Msg, 1)
-	go func() { done <- firstMsg(wait) }()
-	s.press("esc")
+	go func() { done <- wait() }()
+	s.press("q")
 	select {
 	case err := <-s.fin.ended:
 		if !errors.Is(err, context.Canceled) {
@@ -387,33 +192,119 @@ func TestFinishEscCancelsEverything(t *testing.T) {
 	}
 	s.hold = false
 	s.send(<-done) // stale: changes nothing
-	if r := s.m.Result(); !slices.Equal(r.SignIn, []string{idCalendar}) || s.m.screen != screenList {
-		t.Fatal(r, s.m.screen)
+	s.lineHas("Calendar", "sign in")
+	if step, ok := stepFor(s.m.Result(), idCalendar); !ok || step.Need != NeedSignIn || s.quit {
+		t.Fatal(step, s.quit)
 	}
-	// Ctrl+C quits the same way.
+
+	// Ctrl+C quits at once, canceling the run.
 	c := finishHarness(t, seedFinish, 120, 35)
 	c.turnOn("Wiki")
 	c.hold = true
-	c.press("enter", "ctrl+c")
-	if !c.quit && len(c.held) == 0 {
-		t.Fatal("ctrl+c did not quit")
-	}
+	c.press("s", "ctrl+c")
 	c.flush()
 	if !c.quit || !slices.Equal(c.loads.canceled, []bool{true}) || !c.m.Result().Interrupted {
 		t.Fatal(c.quit, c.loads.canceled)
 	}
 }
 
-// The spinner ticks only while a connection starts or signs in; once all
-// have settled the next tick schedules nothing. Without motion nothing ticks
-// and the mark is the spinner's first frame, static.
-func TestFinishTicksOnlyWhileWorking(t *testing.T) {
-	h := finishHarness(t, seedFinish, 120, 35, func(o *Options) { o.Color, o.Unicode = true, true })
+// A failing server never holds up the others; it shows why, and s tries it
+// again (not the ones that started). A failed sign-in is a failure too.
+func TestSetUpFailureIsolated(t *testing.T) {
+	h := finishHarness(t, seedFinish, 120, 35)
+	h.loads.errs[idMaps] = output.NewError("connection_failed", nil)
 	h.fin.needs[idCalendar] = SignInState{Possible: true, Needed: true}
-	h.turnOn("Wiki", "Calendar")
+	h.fin.signErr = map[string]error{idCalendar: output.NewError("auth_callback_unavailable", nil)}
+	h.turnOn("Maps", "Wiki", "Calendar")
+	h.press("s")
+	h.lineHas("Wiki", "2 tools")
+	h.lineHas("Maps", "[-]", "could not start")
+	h.lineHas("Calendar", "[-]", "sign-in port in use")
+	h.contains("1 of 3 ready.", "5 on - 4 need a step")
+	h.selectRow("Maps")
+	h.paneContains("[-] could not start", "[*] Could not start", "Could not start Maps.")
+	delete(h.loads.errs, idMaps)
+	delete(h.fin.signErr, idCalendar)
+	calls := h.loads.calls
+	h.press("s")
+	h.lineHas("Maps", "2 tools")
+	h.lineHas("Calendar", "2 tools")
+	if got := h.loads.ids[calls:]; slices.Contains(got, idWiki) {
+		t.Fatal("s started a server that started already:", got)
+	}
+	if r := h.m.Result(); r.Ready != 3 || len(r.Steps) != 2 {
+		t.Fatal(r)
+	}
+}
+
+// Without a sign-in here (headless) or for a server that cannot sign in,
+// the row points at mcparcel auth instead of queueing.
+func TestSetUpWithoutSignInPointsAtAuth(t *testing.T) {
+	h := finishHarness(t, seedFinish, 120, 35, func(o *Options) { o.SignIn = nil })
+	h.fin.needs[idCalendar] = SignInState{Possible: true, Needed: true}
+	h.loads.errs[idSearch] = output.NewError("auth_required", nil)
+	h.turnOn("Calendar", "Search")
+	h.press("s")
+	h.lineHas("Calendar", "run mcparcel auth calendar")
+	h.lineHas("Search", "run mcparcel auth search")
+	h.contains("0 of 2 ready.")
+	for _, id := range []string{idCalendar, idSearch} {
+		if step, ok := stepFor(h.m.Result(), id); !ok || step.Need != NeedSignIn {
+			t.Fatal(id, step)
+		}
+	}
+	// A 1Password failure is auth_required too, but no sign-in fixes it.
+	op := finishHarness(t, seedFinish, 120, 35)
+	op.loads.errs[idWiki] = output.NewError("auth_required", nil)
+	op.turnOn("Wiki")
+	op.press("s")
+	op.lineHas("Wiki", "run mcparcel auth wiki")
+	if _, signIns, _ := op.fin.counts(); signIns != 0 {
+		t.Fatal(signIns)
+	}
+}
+
+// s skips servers that wait on the user (an input, a missing command) and
+// they keep their Status; s on a server page sets up just that server.
+func TestSetUpSkipsBlockedAndServerPageSetsUpOne(t *testing.T) {
+	h := finishHarness(t, seedFinish, 120, 35, func(o *Options) {
+		o.CommandAvailable = func(command, _ string) bool { return command != "maps-fixture" }
+	})
+	mustUpdate(t, h.store, func(s *config.State) { s.Selections.Connections[idNotes] = config.Selection{Enabled: true} })
+	h.turnOn("Maps", "Wiki", "Search")
+	h.lineHas("Maps", "[-]", "maps-fixture not installed")
+	h.press("s")
+	if slices.Contains(h.loads.ids, idMaps) || slices.Contains(h.loads.ids, idNotes) {
+		t.Fatal("s started a blocked server:", h.loads.ids)
+	}
+	h.lineHas("Maps", "not installed")
+	h.selectTab("Research")
+	h.lineHas("Notes", "[~]", "needs workspace")
+
+	one := finishHarness(t, seedFinish, 120, 35)
+	one.turnOn("Wiki", "Search")
+	one.details("Other", "Wiki")
+	one.press("s")
+	if one.m.screen != screenDetails || !slices.Equal(one.loads.ids, []string{idWiki}) {
+		t.Fatal(one.m.screen, one.loads.ids)
+	}
+	one.contains("Wiki is ready.", "[x] ready - 2 tools")
+	one.press("esc")
+	one.details("Other", "Maps")
+	one.press("s")
+	one.contains("Maps is off. Space turns it on.")
+}
+
+// The spinner ticks only while a server starts or signs in; once all have
+// settled the next tick schedules nothing. Without motion nothing ticks and
+// the mark is the spinner's first frame, static. A server waiting for a
+// free slot never spins.
+func TestSetUpTicksOnlyWhileWorking(t *testing.T) {
+	h := finishHarness(t, seedFinish, 120, 35, func(o *Options) { o.Color, o.Unicode = true, true })
+	h.turnOn("Wiki", "Maps", "Search", "Mail")
 	h.ticks = nil
 	h.hold = true
-	h.press("enter")
+	h.press("s")
 	h.hold = false
 	batch := h.held[0]().(tea.BatchMsg)
 	h.held = nil
@@ -422,30 +313,30 @@ func TestFinishTicksOnlyWhileWorking(t *testing.T) {
 		t.Fatal(h.ticks)
 	}
 	frames := h.m.theme.spinner.Frames
-	h.lineHas("Wiki", frames[0], "starting...")
+	h.lineHas("Mail", frames[0], "starting...")
+	h.lineHas("Wiki", frames[0], "waiting")
 	h.fireTick()
-	h.lineHas("Wiki", frames[1], "starting...")
+	h.lineHas("Mail", frames[1], "starting...")
+	h.lineHas("Wiki", frames[0], "waiting")
 	for _, cmd := range batch[:len(batch)-1] {
 		h.run(cmd)
 	}
-	h.lineHas("Calendar", "◐", "needs sign-in") // waits for the user: no spinner
+	h.lineHas("Wiki", "●", "2 tools")
 	h.fireTick()
-	if len(h.ticks) != 0 {
-		t.Fatal("ticks while nothing runs", h.ticks)
-	}
-	h.press("enter") // the sign-in runs: ticking again
-	if len(h.ticks) != 1 {
-		t.Fatal(h.ticks)
+	for _, tick := range h.ticks {
+		if tick.d == frameRate {
+			t.Fatal("ticks while nothing runs", h.ticks)
+		}
 	}
 
 	still := finishHarness(t, seedFinish, 120, 35, func(o *Options) { o.Color, o.Unicode, o.ReduceMotion = true, true, true })
 	still.turnOn("Wiki")
 	still.ticks = nil
 	still.hold = true
-	still.press("enter")
+	still.press("s")
 	still.lineHas("Wiki", still.m.theme.spinner.Frames[0], "starting...")
 	still.flush()
-	still.lineHas("Wiki", "✓", "started · 2 tools")
+	still.lineHas("Wiki", "●", "2 tools")
 	for _, tick := range still.ticks {
 		if tick.d == frameRate {
 			t.Fatal("a spinner tick without motion")
@@ -453,41 +344,97 @@ func TestFinishTicksOnlyWhileWorking(t *testing.T) {
 	}
 }
 
-// Every finish screen fits every swept size, Unicode on and off.
-func TestFinishFitsAllSizes(t *testing.T) {
+// Every list fits every swept size while setting up runs, with a sign-in
+// waiting and a URL longer than the screen, Unicode on and off; the URL
+// shows whole where there is room.
+func TestSetUpFitsAllSizes(t *testing.T) {
+	url := "https://auth.example/authorize?response_type=code&client_id=" + strings.Repeat("c", 40) + "&state=" + strings.Repeat("s", 43) + "&end=TAIL"
 	for _, unicode := range []bool{false, true} {
 		h := finishHarness(t, seedFinish, 120, 35, func(o *Options) { o.Color, o.Unicode = true, unicode })
 		h.fin.needs[idCalendar] = SignInState{Possible: true, Needed: true}
 		h.fin.needs[idMail] = SignInState{Possible: true, Needed: true}
-		h.fin.url = "https://auth.example/authorize?" + strings.Repeat("state=abcdef&", 20)
+		h.fin.url = url
 		h.loads.errs[idMaps] = output.NewError("connection_failed", nil)
-		check := func(name string) {
-			for _, w := range []int{40, 41, 59, 80, 99, 100, 120, 160} {
-				for _, ht := range []int{10, 11, 17, 24, 29, 30, 35, 50} {
-					h.send(resize(w, ht))
-					checkFits(t, h, w, ht, name)
-				}
-			}
-			h.send(resize(120, 35))
-		}
 		h.turnOn("Calendar", "Mail", "Maps", "Search", "Wiki")
-		check("offer")
-		h.press("enter")
-		check("asks")
 		h.fin.block = make(chan struct{})
 		h.hold = true
-		h.press("enter")
-		msg := firstMsg(h.held[0])
-		h.held = nil
-		h.send(msg)
-		check("sign-in URL")
+		h.press("s")
+		h.stepUntil(h.signingIn(idCalendar))
+		for _, w := range []int{40, 41, 59, 80, 99, 100, 120, 160} {
+			for _, ht := range []int{10, 11, 17, 24, 29, 30, 35, 50} {
+				h.send(resize(w, ht))
+				checkFits(t, h, w, ht, "sign-in URL")
+				if ht >= 24 && !strings.Contains(strings.Join(strings.Fields(h.plain()), ""), "TAIL") {
+					t.Fatalf("%dx%d: the URL's end does not show:\n%s", w, ht, h.plain())
+				}
+			}
+		}
+		h.send(resize(120, 35))
 		close(h.fin.block)
 		h.flush()
-		h.press("s")
-		check("settled")
-		h.send(resize(40, 10))
-		h.press("down", "down", "down", "down", "down", "down")
-		checkFits(t, h, 40, 10, "scrolled")
-		h.contains("Wiki")
 	}
+}
+
+// A server turned off while setting up runs is dropped from the run: one
+// in line for a sign-in never gets it, and a running sign-in is canceled.
+func TestSetUpDropsAServerTurnedOff(t *testing.T) {
+	h := finishHarness(t, seedFinish, 120, 35)
+	h.fin.needs[idCalendar] = SignInState{Possible: true, Needed: true}
+	h.fin.needs[idMail] = SignInState{Possible: true, Needed: true}
+	h.turnOn("Calendar", "Mail")
+	h.fin.block = make(chan struct{})
+	h.hold = true
+	h.press("s")
+	h.stepUntil(func() bool { return h.signingIn(idCalendar)() && h.m.finish.row(idMail).state == finQueued })
+	mustUpdate(t, h.store, func(s *config.State) { s.Selections.Connections[idMail] = config.Selection{} })
+	h.reread()
+	h.press("esc") // skips Calendar: Mail is next in line, but off
+	if h.m.finish != nil {
+		t.Fatalf("Mail, which is off, signs in:\n%s", h.plain())
+	}
+	h.flush()
+	if _, signIns, _ := h.fin.counts(); signIns != 1 {
+		t.Fatal(signIns)
+	}
+	<-h.fin.ended
+
+	// Space on the server whose sign-in runs turns it off and cancels it.
+	h.hold = true
+	h.press("s")
+	h.stepUntil(h.signingIn(idCalendar))
+	h.selectRow("Calendar")
+	h.press("space")
+	h.written()
+	if h.m.finish != nil {
+		t.Fatalf("the sign-in of a server turned off still runs:\n%s", h.plain())
+	}
+	h.lacks("Sign in to Calendar")
+	h.flush()
+	if err := <-h.fin.ended; !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+}
+
+// written runs, from what the harness holds, the write the last key
+// started, and delivers its result.
+func (h *harness) written() {
+	h.t.Helper()
+	cmd := h.held[len(h.held)-1]
+	h.held = h.held[:len(h.held)-1]
+	msgs := []tea.Msg{cmd()}
+	if batch, ok := msgs[0].(tea.BatchMsg); ok {
+		msgs = nil
+		for _, c := range batch {
+			if c != nil {
+				msgs = append(msgs, c())
+			}
+		}
+	}
+	for _, msg := range msgs {
+		if msg, ok := msg.(writtenMsg); ok {
+			h.send(msg)
+			return
+		}
+	}
+	h.t.Fatal("the last key wrote nothing")
 }

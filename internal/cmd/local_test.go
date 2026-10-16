@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -182,7 +183,13 @@ func TestLocalRemoveAlias(t *testing.T) {
 	before := selectionRead(t, store)
 	selectionRun(t, 0, "", "local", "remove", "paper")
 	state = selectionRead(t, store)
-	if state.Local.Aliases["paper"] != "local:paper" || !reflect.DeepEqual(before.Selections.Connections, state.Selections.Connections) || !reflect.DeepEqual(before.Local, state.Local) || !reflect.DeepEqual(before.Catalogs, state.Catalogs) {
+	// Remove turns the personal connection off and leaves every other
+	// selection as it was.
+	want := maps.Clone(before.Selections.Connections)
+	off := want["local:paper"]
+	off.Enabled = false
+	want["local:paper"] = off
+	if state.Local.Aliases["paper"] != "local:paper" || !reflect.DeepEqual(want, state.Selections.Connections) || !reflect.DeepEqual(before.Local, state.Local) || !reflect.DeepEqual(before.Catalogs, state.Catalogs) {
 		t.Fatal(state)
 	}
 	loaded, e := config.Load(p)

@@ -145,6 +145,21 @@ func StageLocalUpdate(draft *config.State, id string, raw []byte) error {
 	return ValidateLocalBindings(*draft)
 }
 
+// StageLocalRemove removes a personal definition and turns its selection
+// off, so no unavailable connection is left on. The rest of the selection
+// (inputs, profile, tools) stays for when the definition comes back.
+func StageLocalRemove(draft *config.State, id string) error {
+	if _, exists := draft.Personal.Connections[id]; !exists {
+		return config.ErrNotFound
+	}
+	delete(draft.Personal.Connections, id)
+	if sel, ok := draft.Selections.Connections["local:"+id]; ok && sel.Enabled {
+		sel.Enabled = false
+		draft.Selections.Connections["local:"+id] = sel
+	}
+	return nil
+}
+
 // ValidateLocalBindings reports ErrConfigRequired when the state no longer
 // validates or resolves.
 func ValidateLocalBindings(state config.State) error {

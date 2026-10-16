@@ -71,14 +71,10 @@ func TestEveryLineFitsWidthAndHeight(t *testing.T) {
 			h.press("/")
 			h.typeText(strings.Repeat("x", 200))
 			checkFits(t, h, w, ht, "search")
-			h.press("esc", "space", "tab")
-			checkFits(t, h, w, ht, "focus")
-			h.press("q")
-			checkFits(t, h, w, ht, "confirm")
-			h.press("n")
-			mustUpdate(t, h.store, func(s *config.State) { s.Local.Aliases = map[string]string{"x": idPaper} })
-			h.press("ctrl+s")
-			checkFits(t, h, w, ht, "conflict")
+			h.press("esc", "space", "u")
+			checkFits(t, h, w, ht, "undone")
+			h.press("tab")
+			checkFits(t, h, w, ht, "next domain")
 		}
 	}
 }
@@ -100,14 +96,20 @@ func tour(h *harness, visit func(name string)) {
 	h.selectRow("Notes")
 	h.press("enter")
 	visit("details")
-	h.press("enter")
-	visit("field")
-	h.press("esc", "down", "enter")
-	visit("profile")
-	h.press("esc", "t")
-	visit("tools before load")
-	h.press("esc", "space")
-	visit("details needs config")
+	h.press("i")
+	visit("details technical")
+	h.press("i")
+	h.do("Set workspace")
+	h.typeText(strings.Repeat("w", 200))
+	visit("inline field")
+	h.press("esc")
+	h.do("Choose tools")
+	visit("tools of a server that is off")
+	h.press("esc")
+	h.do("Turn on")
+	visit("enable asks")
+	h.press("esc", "esc", "space")
+	visit("enable asks from the list")
 	h.press("esc")
 	h.selectTab("Other")
 	h.selectRow(strings.Repeat("Very long label ", 12))
@@ -115,65 +117,56 @@ func tour(h *harness, visit func(name string)) {
 	visit("long details")
 	h.press("esc")
 	h.selectRow("Excalidraw")
-	h.press("enter", "l")
+	h.press("enter", "enter")
 	visit("tools loaded")
-	h.press("esc", "e")
+	h.press("esc")
+	h.do("Edit")
 	visit("edit form")
-	h.press("esc", "esc", "a")
+	h.press("esc", "esc", "n")
 	visit("add form")
 	h.press("enter")
 	visit("add form error")
-	h.press("esc", "space", "q")
-	visit("confirm")
-	h.press("n", "tab")
-	visit("save focus")
-	h.press("shift+tab")
-	mustUpdate(h.t, h.store, func(s *config.State) { s.Local.Aliases = map[string]string{"x": idPaper} })
-	h.press("ctrl+s")
-	visit("conflict")
 	h.press("esc")
+	h.selectRow("Spare")
+	h.press("space", "u")
+	visit("undone")
+	h.press("esc")
+	visit("esc hint")
 	finishTour(h, visit)
 	joinTour(h, visit)
 }
 
-// finishTour saves past the conflict and walks the finish step: the offer,
-// connections starting, a sign-in asked for, its URL, and the settled
-// screen with a failure.
+// finishTour turns servers on and walks setting up (s) in place: servers
+// starting, a sign-in waiting with its URL, and the list after it, with a
+// failure. A server page sets up its server too.
 func finishTour(h *harness, visit func(name string)) {
 	h.t.Helper()
 	long := strings.Repeat("Very long label ", 12)
 	h.fin.needs = map[string]SignInState{"local:long": {Possible: true, Needed: true}}
 	h.fin.url = "https://auth.example/authorize?" + strings.Repeat("state=abcdef&", 20)
 	h.loads.errs = map[string]error{"local:spare": output.NewError("connection_failed", nil)}
-	h.press("ctrl+s", "r") // the conflict again; reload reapplies the draft
 	h.selectTab("Other")
 	h.selectRow("Spare")
 	h.press("space")
 	h.selectRow(long)
-	h.press("space", "ctrl+s")
-	if h.m.screen != screenFinish {
-		h.t.Fatalf("no finish offer:\n%s", h.plain())
-	}
-	visit("finish offer")
-	h.hold = true
-	h.press("enter")
-	visit("finish starting")
-	h.flush()
-	visit("finish asks")
+	h.press("space")
+	visit("steps left")
 	h.fin.block = make(chan struct{})
 	h.hold = true
-	h.press("enter")
-	msg := firstMsg(h.held[0])
-	h.held = nil
-	h.send(msg)
-	visit("finish sign-in URL")
+	h.press("s")
+	visit("setting up")
+	h.stepUntil(h.signingIn("local:long"))
+	visit("sign-in URL")
 	close(h.fin.block)
 	h.flush()
-	if !h.m.finish.settled() || h.m.finish.count(finFailed) != 1 || h.m.finish.count(finStarted) != 1 {
-		h.t.Fatalf("finish did not settle as expected:\n%s", h.plain())
+	if h.m.finish != nil || len(h.m.loadErr["local:spare"]) == 0 {
+		h.t.Fatalf("setting up did not settle as expected:\n%s", h.plain())
 	}
-	visit("finish settled")
-	h.press("enter")
+	visit("set up")
+	h.selectRow("Spare")
+	h.press("enter", "s")
+	visit("server page set up")
+	h.press("esc")
 }
 
 func TestLayoutFitsAllSizesAllScreens(t *testing.T) {
@@ -287,23 +280,14 @@ func TestTooSmallTerminal(t *testing.T) {
 			h.containsWrapped("Terminal too small (need 40x10). Resize, or press q.")
 		}
 		checkFits(t, h, size[0], size[1], "too small")
-		h.press("space", "down", "enter", "a", "?")
-		if h.m.draft.Changes() != 0 || h.m.screen != screenList || h.quit {
-			t.Fatal(h.m.draft.Changes(), h.m.screen)
+		h.press("space", "down", "enter", "n", "u", "s", "?")
+		if h.writes() != 0 || h.m.screen != screenList || h.quit {
+			t.Fatal(h.writes(), h.m.screen)
 		}
 		h.press("q")
 		if !h.quit {
 			t.Fatal("q did not quit")
 		}
-	}
-	h := newHarness(t, seedFixture, 120, 35)
-	h.press("space")
-	h.send(resize(60, 8))
-	h.press("q")
-	h.contains("Discard 1 unsaved change? y/N")
-	h.press("y")
-	if !h.quit {
-		t.Fatal("y did not discard")
 	}
 }
 
@@ -311,16 +295,28 @@ func TestHelpOverlayEnglish(t *testing.T) {
 	h := newHarness(t, seedFixture, 80, 24)
 	h.contains("? help")
 	h.press("?")
-	h.contains("MCParcel / Setup / Help", "Space           turn on or off; on [!] it accepts the review",
-		"Ctrl+C          quit now and discard unsaved changes", "Up/Down scroll   Esc or ? close")
+	h.contains("Help", "Every change applies at once; u undoes it.",
+		"Space           turn on or off; asks for what is missing first", "Up/Down scroll   Esc or ? close")
+	h.lacks("Save", "Ctrl+S", "discard", "draft")
 	for range 60 { // past the end: the offset stops there
 		h.press("down")
 	}
-	h.contains("run mcparcel --help.")
+	h.contains("starts on first use: nothing left to do")
 	h.press("?")
 	if h.m.screen != screenList {
 		t.Fatal(h.m.screen)
 	}
+	// With a step left the first line says so. s cannot take a review or
+	// a profile, so it names the next step; on a server with a step, Right
+	// opens it.
 	wide := newHarness(t, seedFixture, 120, 35)
-	wide.contains("A add personal connection   q cancel   ? help")
+	wide.contains("2 servers need a step.  Next: Reviewer, review change.",
+		"Space on/off   Tab domain   / search   u undo   ? help   q quit")
+	wide.lacks("s set up all")
+	wide.selectTab("Development")
+	wide.selectRow("Reviewer")
+	wide.contains("2 servers need a step.  Right open Reviewer")
+	calm := newHarness(t, nil, 120, 35)
+	calm.contains("Space on/off   Tab domain   Up/Down server   Right/Enter open   u undo   s set up",
+		"/ search   n new personal connection   q quit   ? help")
 }

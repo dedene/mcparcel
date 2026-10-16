@@ -27,17 +27,17 @@ func TestThemeWithoutColorIsPlain(t *testing.T) {
 
 func TestThemeGlyphs(t *testing.T) {
 	ascii := newTheme(Options{Color: true}, nil)
-	if g := ascii.glyph; g.on != "[x]" || g.off != "[ ]" || g.review != "[!]" || ascii.glyphSet() != "" {
+	if g := ascii.glyph; g.on != "[x]" || g.off != "[ ]" || g.pending != "[~]" || g.right != "Right" || ascii.glyphSet() != "" {
 		t.Fatalf("%+v %q", g, ascii.glyphSet())
 	}
 	uni := newTheme(Options{Color: true, Unicode: true}, nil)
 	g := uni.glyph
-	if g.on != "●" || g.off != "○" || g.review != "!" || g.unavailable != "✕" || g.needsConfig != "◌" || g.done != "✓" {
+	if g.on != "●" || g.off != "○" || g.pending != "◐" || g.unavailable != "✕" || g.done != "✓" || g.right != "→" {
 		t.Fatalf("%+v", g)
 	}
 	// Every mark has an ASCII twin, and each set keeps one width so columns line up.
 	for _, set := range []glyphs{asciiGlyphs, unicodeGlyphs} {
-		marks := []string{set.on, set.off, set.review, set.unavailable, set.needsConfig, set.pending, set.done}
+		marks := []string{set.on, set.off, set.pending, set.unavailable, set.done}
 		for _, mark := range marks {
 			if textWidth(mark) != textWidth(marks[0]) {
 				t.Fatalf("%q is %d wide, %q is %d", mark, textWidth(mark), marks[0], textWidth(marks[0]))

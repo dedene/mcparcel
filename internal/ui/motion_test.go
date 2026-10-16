@@ -11,51 +11,38 @@ import (
 // motion is on. Ticks wait for the test, so this is deterministic.
 func TestToastClearsAfterTicks(t *testing.T) {
 	h := newHarness(t, seedFixture, 120, 35, fixedNow())
-	h.press("ctrl+s")
-	h.contains("Nothing to save.")
+	h.press("u")
+	h.contains("Nothing to undo.")
 	if len(h.ticks) != 1 || h.ticks[0].d != toastLife {
 		t.Fatal(h.ticks)
 	}
 	h.fireTick() // no color, no motion: it clears at once
-	h.lacks("Nothing to save.")
+	h.lacks("Nothing to undo.")
 	if len(h.ticks) != 0 {
 		t.Fatal(h.ticks)
 	}
 
 	color := newHarness(t, seedFixture, 120, 35, fixedNow(), func(o *Options) { o.Color = true })
-	color.press("ctrl+s")
+	color.press("u")
 	color.fireTick()
-	if !painted(color.view(), "Nothing to save.", "90") || len(color.ticks) != 1 || color.ticks[0].d != toastFade {
+	if !painted(color.view(), "Nothing to undo.", "90") || len(color.ticks) != 1 || color.ticks[0].d != toastFade {
 		t.Fatalf("not fading: %q %v", color.view(), color.ticks)
 	}
 	color.fireTick()
-	color.lacks("Nothing to save.")
+	color.lacks("Nothing to undo.")
 
 	// A newer status restarts the clock: the older tick does nothing.
-	h.press("ctrl+s")
+	h.press("u")
 	h.selectRow("Figma")
-	h.press("space", "ctrl+s", "esc") // Esc: the finish step later
-	h.contains("Saved at revision")
+	h.press("space", "u")
+	h.contains("Figma is off again.")
 	if len(h.ticks) != 2 {
 		t.Fatal(h.ticks)
 	}
 	h.fireTick()
-	h.contains("Saved at revision")
+	h.contains("Figma is off again.")
 	h.fireTick()
-	h.lacks("Saved at revision")
-
-	// A busy status stays until its result replaces it.
-	h.press("space")
-	h.hold = true
-	h.press("ctrl+s")
-	h.contains("Saving...")
-	if len(h.ticks) != 0 {
-		t.Fatal(h.ticks)
-	}
-	h.flush()
-	if len(h.ticks) != 1 {
-		t.Fatal(h.ticks)
-	}
+	h.lacks("Figma is off again.")
 }
 
 // The prompt of a pending enable is guidance, not a toast: it stays until
@@ -65,7 +52,7 @@ func TestPendingEnablePromptStays(t *testing.T) {
 	h.selectTab("Research")
 	h.selectRow("Notes")
 	h.press("space")
-	h.contains("Notes needs: input workspace, credential profile. Esc keeps it off.")
+	h.contains("Notes needs workspace and a 1Password profile. Esc keeps it off.")
 	if len(h.ticks) != 0 {
 		t.Fatal(h.ticks)
 	}
@@ -111,20 +98,20 @@ func TestSpinnerWhileLoading(t *testing.T) {
 	h := toolHarness(t, seedFixture, func(o *Options) { o.Color, o.Unicode = true, true })
 	h.details("Other", "Excalidraw")
 	h.hold = true
-	h.press("l")
+	h.press("enter")
 	h.hold = false
 	batch := h.held[0]().(tea.BatchMsg) // the load, then the spinner
 	h.held = nil
 	h.run(batch[1])
 	frames := h.m.theme.spinner.Frames
-	h.contains(frames[0] + " Connecting to Excalidraw... Credentials may be requested.")
+	h.contains(frames[0] + " Loading the tools of Excalidraw... 1Password may ask you to approve.")
 	if len(h.ticks) != 1 || h.ticks[0].d != frameRate {
 		t.Fatal(h.ticks)
 	}
 	h.fireTick()
-	h.contains(frames[1] + " Connecting to Excalidraw...")
+	h.contains(frames[1] + " Loading the tools of Excalidraw...")
 	h.run(batch[0])
-	h.contains("Loaded this session")
+	h.contains("Loaded less than 1m ago")
 	h.fireTick() // the load ended: no next frame
 	if len(h.ticks) != 0 {
 		t.Fatal(h.ticks)
@@ -140,29 +127,28 @@ func TestReduceMotionSchedulesNoAnimation(t *testing.T) {
 	if len(h.ticks) != 0 || h.m.flashID != "" {
 		t.Fatal(h.ticks, h.m.flashID)
 	}
-	h.press("ctrl+s", "esc")
 	h.details("Other", "Excalidraw")
 	h.ticks = nil
 	h.hold = true
-	h.press("l")
-	h.contains("Loading... Connecting to Excalidraw...")
+	h.press("enter")
+	h.contains("Loading... Loading the tools of Excalidraw...")
 	for _, frame := range h.m.theme.spinner.Frames {
-		if strings.Contains(h.plain(), frame+" Connecting") {
+		if strings.Contains(h.plain(), frame+" Loading") {
 			t.Fatal(h.plain())
 		}
 	}
 	h.flush()
-	h.contains("Loaded this session")
+	h.contains("Loaded less than 1m ago")
 	if len(h.ticks) != 0 {
 		t.Fatal(h.ticks)
 	}
-	h.press("esc", "esc", "ctrl+s")
-	h.contains("Nothing to save.")
+	h.press("esc", "esc", "esc")
+	h.contains("Changes apply at once; u undoes them. q quits.")
 	if len(h.ticks) != 1 || h.ticks[0].d != toastLife {
 		t.Fatal(h.ticks)
 	}
 	h.fireTick()
-	h.lacks("Nothing to save.")
+	h.lacks("q quits.")
 	if len(h.ticks) != 0 {
 		t.Fatal(h.ticks)
 	}
@@ -175,7 +161,7 @@ func TestIdleSchedulesNothing(t *testing.T) {
 		t.Fatal("Init schedules a command")
 	}
 	h.send(resize(100, 30))
-	h.press("right", "down", "up", "left", "?", "esc", "enter", "esc")
+	h.press("tab", "down", "up", "shift+tab", "?", "esc", "right", "left", "enter", "esc")
 	if len(h.ticks) != 0 {
 		t.Fatal(h.ticks)
 	}

@@ -34,17 +34,28 @@ func (m *Model) joinPage() []string {
 	j := m.join
 	body := []string{m.joinHeading(), plural(j.servers, "MCP server", "MCP servers") + " picked by the team."}
 	if len(j.notes) > 0 {
-		body = append(append(body, ""), j.notes...)
+		body = append(body, "")
+		for _, note := range j.notes {
+			body = append(body, note.text)
+			for _, line := range wrapAtMost(note.about, w-2, 2) {
+				body = append(body, m.theme.paint(roleDim, "  "+line))
+			}
+		}
 	}
 	ask := j.ask()
 	if ask == nil {
 		return m.page(joinTitle, body, -1, "Enter: continue   q: quit")
 	}
-	question := "This catalog asks for 1Password access to " + requirementLabel(*ask)
+	question := "This catalog asks for a 1Password profile: " + output.DisplayMetadata(ask.ID)
 	if j.total > 1 {
 		question += fmt.Sprintf(" (%d of %d)", j.total-len(j.asks)+1, j.total)
 	}
 	body = append(body, "", question+".")
+	if about := firstLine(ask.Description); about != "" {
+		for _, line := range wrapAtMost(output.DisplayMetadata(about), w-2, 2) {
+			body = append(body, m.theme.paint(roleDim, "  "+line))
+		}
+	}
 	help := "Enter: use it   e: use another account   Esc: skip 1Password for now"
 	if textWidth(strings.ReplaceAll(help, ": ", " ")) > w {
 		help = "Enter: use it   e: other   Esc: skip"
@@ -80,7 +91,7 @@ func (m *Model) presetPage() []string {
 	w, _ := m.size()
 	j, g := m.join, m.theme.glyph
 	body := []string{"What do you work on? Pick any. You can change everything on the next screen.", ""}
-	effective := m.draft.Effective()
+	effective := m.live.Effective()
 	markWidth := textWidth(g.on)
 	lead := 2 + markWidth + 1
 	labelWidth, servers := len("Start empty")+gutter, make([]string, len(j.picked))

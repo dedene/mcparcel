@@ -217,8 +217,9 @@ Consent: the catalog suggests, the teammate confirms. Nothing is created or
 enabled from the catalog alone. A teammate who accepts a suggestion gets a
 local profile whose name is the requirement ID, so it links to every
 connection that declares that requirement; they can pick another account or
-skip 1Password instead. Picking presets only fills the list the teammate then
-reviews before saving. A catalog can never choose a token or an account
+skip 1Password instead. Picking presets turns their connections on at once,
+in one change the teammate sees in the list and can undo with `u` in one
+step. A catalog can never choose a token or an account
 without the user agreeing. A local profile that already has the requirement's
 ID is kept and links to the catalog's connections by name; `join` shows its
 mode and account when they differ from the suggestion. A suggestion no
@@ -407,9 +408,10 @@ created. A requirement with no profile of that ID stays `config_required` until
 you bind one with `config profile bind`, or choose one in setup. In setup, one
 Space on such an entry also asks for missing inputs and binds an existing profile
 ([cli.md](cli.md#exceptional-states)). Setup reads no secret and opens no auth
-prompt while you browse, edit or save. After it exits it checks the stored
-sign-in of each enabled OAuth connection, as `auth status` does, which reads
-that connection's Keychain (or Secret Service) item.
+prompt while you browse or change things. While you browse it reads the stored
+sign-in of each enabled OAuth connection, as `auth status` does, from that
+connection's Keychain (or Secret Service) item, without a prompt: on Linux it
+reads only an unlocked item, and a locked keyring shows `sign-in unknown`.
 
 `config.json` also holds `schemaVersion: 1`, `sources` (registration records),
 `aliases` (short-name → canonical-ID) and optional `runtime` defaults. Local domain
@@ -418,7 +420,7 @@ label overrides are deferred from v1.
 `connections` mapping canonical IDs to `{enabled, inputs, credentialProfile?,
 disabledTools}`. No selection means disabled. Input values are literal strings.
 Catalog `toolPolicy` intersects with personal disabled tools; enabling cannot
-remove a source deny. UI saves and CLI mutations use the same revisioned store.
+remove a source deny. Setup changes and CLI mutations use the same revisioned store.
 
 Write temp + fsync + rename with a config lock. Config files hold references, not
 values, and may be hand-written or symlinked from a dotfiles repository: they must
@@ -447,7 +449,9 @@ path does not exist: a symlink whose target is missing fails closed and never
 falls back to defaults. When a multi-file save would pass through a state that does
 not resolve, the affected connection is written disabled with `reviewRequired`
 first, so a crash between files never blocks unrelated connections.
-A stale UI save gives `config_conflict`, preserving both the disk state and UI draft.
+Setup has no draft: when the store changed elsewhere since setup last read it,
+setup applies its change once more to the fresh state, or does not make a change
+that no longer applies there, and shows the fresh state either way.
 No transaction journal in v1. Each file is replaced atomically on its own. A sync
 writes the new snapshot file first (its name is the commit, so it never overwrites
 anything) and then replaces `config.json`, which points to it; a crash in between

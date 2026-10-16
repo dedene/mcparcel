@@ -28,7 +28,7 @@ func TestTabScrollKeepsActiveVisible(t *testing.T) {
 	for _, unicode := range []bool{false, true} {
 		for _, w := range []int{40, 80, 120, 160} {
 			h := newHarness(t, seedDomains, w, 35, func(o *Options) { o.Color, o.Unicode = true, unicode })
-			all := tabs(h.m.draft.Effective())
+			all := tabs(h.m.live.Effective())
 			prev, next := h.m.theme.glyph.prev, h.m.theme.glyph.next
 			for range len(all) + 1 { // once around, back to the first
 				current := h.m.currentTab()
@@ -46,7 +46,7 @@ func TestTabScrollKeepsActiveVisible(t *testing.T) {
 				if strings.Contains(line, prev+"  ") || strings.Contains(line, "  "+next) {
 					t.Fatalf("%d cols: uneven mark spacing in %q", w, line)
 				}
-				h.press("right")
+				h.press("tab")
 			}
 		}
 	}
@@ -115,24 +115,24 @@ func TestDetailsPaneThreshold(t *testing.T) {
 			t.Fatalf("%dx%d: pane %v:\n%s", tc.w, tc.h, hasPane, h.plain())
 		}
 		if !tc.pane {
-			h.contains("Configuration ready. Connection not") // the summary line, cut to the width
+			h.contains("Off. Space turns it on.") // the summary line
 			continue
 		}
 		// The header shows the only catalog's commit and age; the pane does not
-		// repeat them, nor the state line that State and Needs already say.
-		h.paneContains("State [ ] Off", "Runs Remote - mcp.figma.example", "Tools all tools", "Source acmeco/mcp-catalog")
-		if pane := h.paneText(); strings.Contains(pane, "aaaaaaa") || strings.Contains(pane, "Configuration ready") {
+		// repeat them, nor the summary line its To do already says.
+		h.paneContains("[ ] off", "[*] Turn it on", "Runs remote - mcp.figma.example", "From acmeco/mcp-catalog - Design")
+		if pane := h.paneText(); strings.Contains(pane, "aaaaaaa") || strings.Contains(pane, "Space turns it on") {
 			t.Fatalf("%dx%d: %q", tc.w, tc.h, pane)
 		}
 		h.lacks("QUERY-MARKER", "private/path")
 		h.press("down")
-		h.paneContains("Paper", "Needs [*] paper-fixture - runs on", "Runs This device - paper-fixture")
+		h.paneContains("Paper", "Runs this device - paper-fixture", "From acmeco/mcp-catalog - Design")
 		h.selectTab("Research")
-		h.paneContains("Needs [*] input workspace - not set [*] 1Password team - not linked")
+		h.paneContains("[ ] off - needs workspace", "[*] Set workspace [*] Link a 1Password profile")
 	}
 	// The pane never shows a profile's account or a secret, whatever row it follows.
 	h := newHarness(t, seedSecrets, 120, 35, fixedAges(60))
-	for _, tb := range tabs(h.m.draft.Effective()) {
+	for _, tb := range tabs(h.m.live.Effective()) {
 		h.selectTab(tb.label)
 		for range h.m.rows() {
 			for _, marker := range secretMarkers {
@@ -146,17 +146,17 @@ func TestDetailsPaneThreshold(t *testing.T) {
 }
 
 // The header names the only catalog and counts rows that are on and those
-// of them that need attention.
+// of them that need a step.
 func TestHeaderCountsOnAndAttention(t *testing.T) {
 	h := newHarness(t, seedFixture, 120, 35, fixedAges(120), func(o *Options) { o.Color = true })
-	h.contains("MCParcel  acmeco/mcp-catalog - aaaaaaa - synced 2m ago", "3 on - 2 need attention")
-	if !painted(h.view(), "MCParcel", "1") || !painted(h.view(), "3 on", "32") || !painted(h.view(), "2 need attention", "33") {
+	h.contains("MCParcel  acmeco/mcp-catalog - aaaaaaa - synced 2m ago", "3 on - 2 need a step")
+	if !painted(h.view(), "MCParcel", "1") || !painted(h.view(), "3 on", "32") || !painted(h.view(), "2 need a step", "33") {
 		t.Fatalf("%q", h.view())
 	}
 	h.selectTab("Development")
 	h.selectRow("Reviewer")
 	h.press("space") // accepts the review
-	h.contains("3 on - 1 needs attention")
+	h.contains("3 on - 1 needs a step")
 
 	calm := func(t *testing.T, store *config.Store) {
 		seedFixture(t, store)
@@ -166,8 +166,8 @@ func TestHeaderCountsOnAndAttention(t *testing.T) {
 		})
 	}
 	ok := newHarness(t, calm, 80, 24)
-	ok.contains("1 on")
-	ok.lacks("attention")
+	ok.contains("1 on - all ready")
+	ok.lacks("need")
 
 	none := newHarness(t, nil, 40, 10)
 	none.contains("MCParcel  personal", "0 on")
@@ -181,9 +181,11 @@ func TestKeyHintsAreChips(t *testing.T) {
 		t.Fatalf("%q", h.view())
 	}
 	plain := newHarness(t, seedFixture, 120, 35)
-	plain.contains("Space on/off   Left/Right domain")
+	plain.contains("Space on/off   Tab domain")
 	// The last hint is kept; the ones before it that do not fit are dropped whole.
 	narrow := newHarness(t, seedFixture, 40, 12)
-	narrow.contains("Space on/off   Enter details   ? help")
-	narrow.lacks("Ctrl+S save", "/ sea...")
+	narrow.contains("2 need a step. Next: Reviewer...  ? help")
+	narrow.lacks("Tab dom...", "/ sea...")
+	calm := newHarness(t, nil, 40, 12)
+	calm.contains("Space on/off   Enter open   ? help")
 }

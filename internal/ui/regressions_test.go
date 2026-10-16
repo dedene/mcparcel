@@ -2,7 +2,6 @@ package ui
 
 import (
 	"errors"
-	"fmt"
 	"regexp"
 	"slices"
 	"strings"
@@ -36,7 +35,7 @@ func TestTypingAQuoteNeverCrashes(t *testing.T) {
 	h.press("enter")
 	h.typeText(`"`)
 	h.contains(`Value: "_`)
-	h.press("esc", "esc", "a")
+	h.press("esc", "esc", "n")
 	h.typeText(`"`)
 	h.contains(`> ID:          "_`)
 }
@@ -54,19 +53,22 @@ func TestUnavailableReviewRowTurnsOff(t *testing.T) {
 	h.focused("[-] local:gone", "unavailable")
 	h.press("space")
 	h.focused("[ ] local:gone", "unavailable")
-	h.contains("1 unsaved change")
+	if sel := h.disk().Selections.Connections[idGone]; sel.Enabled {
+		t.Fatal(sel)
+	}
 	h.lacks("The connection is not defined")
 	h.press("space")
 	h.focused("[ ] local:gone", "unavailable")
-	h.contains("Personal no longer defines this connection.")
+	h.contains("Personal no longer has this server.")
 
 	details := newHarness(t, seed, 120, 35)
 	details.selectTab("Other")
 	details.selectRow("local:gone")
 	details.press("enter")
-	details.contains("State: [-] On, unavailable")
+	details.contains("[-] unavailable", "> Turn off")
 	details.press("space")
-	details.contains("State: [ ] Off, unavailable", "1 unsaved change")
+	details.contains("[ ] off - unavailable")
+	details.lacks("Turn off", "Turn on")
 }
 
 func TestAddWithNewDomainKeepsTab(t *testing.T) {
@@ -80,7 +82,7 @@ func TestAddWithNewDomainKeepsTab(t *testing.T) {
 	h := newHarness(t, seed, 120, 35)
 	h.selectTab("Other")
 	h.selectRow("local:gone")
-	h.press("a")
+	h.press("n")
 	h.typeText("dev-tool")
 	h.formTo("domains")
 	h.typeText("dev")
@@ -93,60 +95,22 @@ func TestAddWithNewDomainKeepsTab(t *testing.T) {
 	h.contains("[Other 2/2]", "Added ")
 }
 
-func TestTooSmallDiscardNoKeepsScreen(t *testing.T) {
+// A terminal too small ignores every key but q, and keeps the screen for
+// when it grows again.
+func TestTooSmallKeepsScreen(t *testing.T) {
 	h := newHarness(t, seedFixture, 120, 35)
-	h.press("space", "a")
+	h.press("n")
 	h.typeText("half")
 	h.send(resize(30, 8))
-	h.press("q")
-	h.contains("Discard 1 unsaved change? y/N")
-	h.press("n")
+	h.press("x", "esc", "enter")
 	h.send(resize(120, 35))
 	if h.m.screen != screenForm || h.m.form.get("id").value.String() != "half" {
 		t.Fatalf("form lost:\n%s", h.plain())
 	}
-	h.press("esc", "down", "space")
-	mustUpdate(t, h.store, func(s *config.State) { s.Local.Aliases = map[string]string{"p": idPaper} })
-	h.press("ctrl+s")
 	h.send(resize(30, 8))
-	h.press("q", "esc")
-	h.send(resize(120, 35))
-	if h.m.screen != screenConflict {
-		t.Fatalf("conflict lost:\n%s", h.plain())
-	}
-}
-
-func TestReloadAfterUnconfirmedSaveCountsLandedSave(t *testing.T) {
-	h := newHarness(t, seedFixture, 120, 35)
-	h.selectRow("Figma")
-	h.press("space")
-	// The write landed, but its durable save could not be confirmed.
-	landed := mustUpdate(t, h.store, func(s *config.State) {
-		sel := s.Selections.Connections[idFigma]
-		sel.Enabled = true
-		s.Selections.Connections[idFigma] = sel
-	})
-	h.send(savedMsg{err: errors.Join(config.ErrConfigWrite, errors.New("fsync"))})
-	h.contains("Press r to reload.")
-	if r := h.m.Result(); !r.Unconfirmed || r.Saves != 0 {
-		t.Fatal(r)
-	}
-	h.press("r")
-	h.contains(fmt.Sprintf("Reloaded at revision %d. Reapplied 0 changes. Already in the configuration: enable Figma.", landed.Selections.Revision))
-	h.lacks("Dropped")
-	if r := h.m.Result(); r.Saves != 1 || r.Unconfirmed || r.Revision != landed.Selections.Revision {
-		t.Fatal(r)
-	}
-}
-
-func TestUnconfirmedSaveThatDidNotLandIsReapplied(t *testing.T) {
-	h := newHarness(t, seedFixture, 120, 35)
-	h.press("space")
-	h.send(savedMsg{err: errors.Join(config.ErrConfigWrite, errors.New("fsync"))})
-	h.press("r")
-	h.contains("Reapplied 1 change.")
-	if r := h.m.Result(); r.Saves != 0 || r.Unconfirmed {
-		t.Fatal(r)
+	h.press("q")
+	if !h.quit || h.writes() != 0 {
+		t.Fatal(h.quit, h.writes())
 	}
 }
 
@@ -160,20 +124,11 @@ func TestSearchShowsSearchKeys(t *testing.T) {
 }
 
 func TestHelpListsEveryScreen(t *testing.T) {
-	for _, section := range []string{"List", "Search", "Details", "Tools", "Forms and fields", "Finish", "Join", "Conflict", "Confirm"} {
+	for _, section := range []string{"List", "Server page", "Marks", "Status"} {
 		if !slices.ContainsFunc(helpText(asciiGlyphs), func(line string) bool { return line == section || strings.HasPrefix(line, section+" (") }) {
 			t.Fatalf("help lacks a %s section", section)
 		}
 	}
-}
-
-func TestPersonalDetailsShowLocalRemoveHint(t *testing.T) {
-	h := newHarness(t, seedFixture, 120, 35)
-	h.details("Other", "Excalidraw")
-	h.containsWrapped("Remove it with mcparcel local remove " + idExcali + ".")
-	h.press("esc")
-	h.details("Design", "Paper")
-	h.lacks("local remove")
 }
 
 func TestStringInputInURLShowsHostOnly(t *testing.T) {
@@ -189,13 +144,15 @@ func TestStringInputInURLShowsHostOnly(t *testing.T) {
 	}
 	h := newHarness(t, seed, 120, 35)
 	h.details("Other", "Relay")
-	h.contains("Input endpoint (string): https://relay.example/...")
-	h.press("enter")
-	h.contains("Current: https://relay.example/...", "Value: _")
+	h.contains("Change endpoint", "https://relay.example/...")
+	h.do("Change endpoint")
+	h.contains("Now https://relay.example/...; an empty Enter keeps it.")
 	h.lacks("QUERY-MARKER")
 }
 
-func TestReloadReportsChangesThatNoLongerApply(t *testing.T) {
+// An enable whose input was cleared elsewhere asks for it on the fresh
+// state instead of failing.
+func TestEnableAsksForWhatWasClearedElsewhere(t *testing.T) {
 	seed := func(t *testing.T, store *config.Store) {
 		seedFixture(t, store)
 		mustUpdate(t, store, func(s *config.State) {
@@ -205,24 +162,31 @@ func TestReloadReportsChangesThatNoLongerApply(t *testing.T) {
 	h := newHarness(t, seed, 120, 35)
 	h.selectTab("Research")
 	h.selectRow("Notes")
-	h.press("space")
 	mustUpdate(t, h.store, func(s *config.State) {
 		sel := s.Selections.Connections[idNotes]
 		sel.Inputs = nil
 		s.Selections.Connections[idNotes] = sel
 	})
-	h.press("ctrl+s", "r")
-	h.contains("Reapplied 0 changes. Dropped (no longer applies): enable Notes.")
+	revision := h.disk().Selections.Revision
+	h.press("space")
+	if h.m.screen != screenField || h.disk().Selections.Revision != revision {
+		t.Fatalf("%s", h.plain())
+	}
+	h.contains("Notes needs workspace. Esc keeps it off.")
+	h.typeText("wiki")
+	h.press("enter")
+	if sel := h.disk().Selections.Connections[idNotes]; !sel.Enabled || sel.Inputs["workspace"] != "wiki" {
+		t.Fatal(sel)
+	}
 }
 
-func TestCtrlCDuringUnconfirmedSaveReportsIt(t *testing.T) {
+func TestCtrlCDuringUnconfirmedWriteReportsIt(t *testing.T) {
 	h := newHarness(t, seedFixture, 120, 35)
-	h.press("space")
 	h.hold = true
-	h.press("ctrl+s", "ctrl+c")
+	h.press("space", "ctrl+c")
 	h.held, h.hold = nil, false
-	h.send(savedMsg{err: errors.Join(config.ErrConfigWrite, errors.New("fsync"))})
-	if r := h.m.Result(); !h.quit || !r.Interrupted || !r.Unconfirmed || r.Saves != 0 {
+	h.send(writtenMsg{writeResult{err: errors.Join(config.ErrConfigWrite, errors.New("fsync"))}})
+	if r := h.m.Result(); !h.quit || !r.Interrupted || !r.Unconfirmed {
 		t.Fatal(h.quit, r)
 	}
 }
@@ -253,18 +217,18 @@ func TestListColumnsKeepAGutter(t *testing.T) {
 	}
 	h := newHarness(t, seed, 120, 35)
 	h.selectTab("Other")
-	h.contains("Long label Long label", "...  excalidraw")
+	h.contains("Long label Long label", "...  ")
 	check(h, listWidth(120))
 	h.selectTab("Research")
-	h.focused("input workspace", "...  zenjoy/")
+	h.focused("needs workspace", "zenjoy/")
 
 	compact := newHarness(t, seed, 80, 24)
 	compact.selectTab("Other")
-	compact.contains("Long label Long label", "...  excalidraw")
+	compact.contains("Long label Long label", "...  ")
 	check(compact, 80)
 }
 
-// With a single source the Source column is hidden and MCP and Needs share
+// With a single source the Source column is hidden and MCP and Status share
 // its width.
 func TestSourceColumnHiddenWithSingleSource(t *testing.T) {
 	seed := func(t *testing.T, store *config.Store) {
@@ -289,7 +253,7 @@ func TestSourceColumnHiddenWithSingleSource(t *testing.T) {
 	}
 	single := newHarness(t, seed, 120, 35)
 	with, without := h.m.wideColumns(listWidth(120)), single.m.wideColumns(listWidth(120))
-	if without.source != 0 || without.name <= with.name || without.needs <= with.needs || without.name+without.needs != with.name+with.needs+with.source {
+	if without.source != 0 || without.name < with.name || without.status <= with.status || without.name+without.status != with.name+with.status+with.source {
 		t.Fatalf("with Source %+v, without %+v", with, without)
 	}
 	// Near the wide threshold MCP still shows ordinary labels whole.

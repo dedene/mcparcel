@@ -31,27 +31,28 @@ const (
 // glyphs are the state marks. Each one says its state without color, so a
 // monochrome screen reads the same.
 type glyphs struct {
-	on          string // on and ready
+	on          string // on with nothing to do
 	off         string // off
-	review      string // on, changed upstream: review required
-	unavailable string // its source no longer defines it
-	needsConfig string // off and missing configuration
-	pending     string // on, configuration missing
-	done        string // a finished step
-	todo        string // a step left, in the details pane's Needs checklist
+	pending     string // on, needs a step
+	unavailable string // on, but it cannot run
+	done        string // a finished step, in a To do
+	todo        string // a step left for you, in a To do
+	later       string // a step that happens later, in a To do
+	warn        string // join: a profile that differs from the suggestion
 
-	sep        string // between items of one line
-	prev, next string // tabs scrolled off the left or right
+	sep         string // between items of one line
+	prev, next  string // tabs scrolled off the left or right
+	left, right string // the Left and Right keys in a key hint
 }
 
 var (
 	unicodeGlyphs = glyphs{
-		on: "●", off: "○", review: "!", unavailable: "✕", needsConfig: "◌", pending: "◐", done: "✓", todo: "◆",
-		sep: " · ", prev: "‹", next: "›",
+		on: "●", off: "○", pending: "◐", unavailable: "✕", done: "✓", todo: "◆", later: "○", warn: "!",
+		sep: " · ", prev: "‹", next: "›", left: "←", right: "→",
 	}
 	asciiGlyphs = glyphs{
-		on: "[x]", off: "[ ]", review: "[!]", unavailable: "[-]", needsConfig: "[?]", pending: "[~]", done: "[+]", todo: "[*]",
-		sep: " - ", prev: "<", next: ">",
+		on: "[x]", off: "[ ]", pending: "[~]", unavailable: "[-]", done: "[+]", todo: "[*]", later: "[.]", warn: "[!]",
+		sep: " - ", prev: "<", next: ">", left: "Left", right: "Right",
 	}
 )
 
@@ -84,7 +85,7 @@ func newTheme(opts Options, grey lipgloss.CompleteFunc) theme {
 		motion:  opts.Color && !opts.ReduceMotion,
 		glyph:   asciiGlyphs,
 		border:  lipgloss.ASCIIBorder(),
-		spinner: spinner.Spinner{Frames: spinner.Line.Frames, FPS: frameRate},
+		spinner: spinner.Spinner{Frames: []string{".", "o", "O", "o"}, FPS: frameRate}, // no "-": "[-]" marks a row that cannot run
 	}
 	if opts.Unicode {
 		t.glyph = unicodeGlyphs
@@ -131,7 +132,7 @@ func (t theme) paint(r role, text string) string {
 // glyphSet lists every non-ASCII character the theme may draw.
 func (t theme) glyphSet() string {
 	g := t.glyph
-	set := g.on + g.off + g.review + g.unavailable + g.needsConfig + g.pending + g.done + g.todo + g.sep + g.prev + g.next
+	set := g.on + g.off + g.pending + g.unavailable + g.done + g.todo + g.later + g.warn + g.sep + g.prev + g.next + g.left + g.right
 	for _, frame := range t.spinner.Frames {
 		set += frame
 	}

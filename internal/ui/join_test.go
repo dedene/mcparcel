@@ -65,9 +65,9 @@ func TestJoinIntroWritesOnlyOnEnter(t *testing.T) {
 	h := newHarness(t, seedJoin, 120, 35, withJoin)
 	before := h.fileBytes()
 	h.contains("MCParcel / Join", "Team - fixture-owner/team - bbbbbbb", "3 MCP servers picked by the team.",
-		"This catalog asks for 1Password access to MCP Integrations.",
+		"This catalog asks for a 1Password profile: vault.", "  MCP Integrations",
 		"Use this 1Password account? The catalog suggests it.", "Account: team.1password.com", "1 server uses it.")
-	h.lacks("work.1password.com", "1Password for work") // no server uses it
+	h.lacks("work.1password.com", "1Password work", "1Password for MCP") // no server uses work
 	if !maps.EqualFunc(before, h.fileBytes(), func(a, b []byte) bool { return string(a) == string(b) }) {
 		t.Fatal("showing the suggestion wrote files")
 	}
@@ -76,10 +76,10 @@ func TestJoinIntroWritesOnlyOnEnter(t *testing.T) {
 	if got != (config.Profile{Mode: "desktop", Account: "team.1password.com", SessionDuration: "24h"}) {
 		t.Fatalf("%+v", got)
 	}
-	if h.m.screen != screenPresets || h.m.Result().Saves != 1 || h.m.draft.Changes() != 0 {
-		t.Fatal(h.m.screen, h.m.Result(), h.m.draft.Changes())
+	if h.m.screen != screenPresets || h.writes() != 1 {
+		t.Fatal(h.m.screen, h.writes())
 	}
-	h.contains("1Password for MCP Integrations: team.1password.com")
+	h.contains("[+] 1Password: using your profile vault (desktop app, team.1password.com)")
 }
 
 func TestJoinAnotherAccount(t *testing.T) {
@@ -109,16 +109,13 @@ func TestJoinSkipAndQuitWriteNothing(t *testing.T) {
 	if h.m.screen != screenPresets {
 		t.Fatal(h.m.screen)
 	}
-	h.contains("1Password for MCP Integrations: skipped for now")
+	h.contains("[ ] 1Password vault: skipped for now")
 	h.press("space", "q")
 	if !h.quit {
 		t.Fatal("q did not quit")
 	}
 	if !maps.EqualFunc(before, h.fileBytes(), func(a, b []byte) bool { return string(a) == string(b) }) {
 		t.Fatal("skip or quit wrote files")
-	}
-	if r := h.m.Result(); r.Saves != 0 {
-		t.Fatal(r)
 	}
 	q := newHarness(t, seedJoin, 120, 35, withJoin)
 	q.press("q")
@@ -136,7 +133,7 @@ func TestJoinKeepsExistingProfile(t *testing.T) {
 			s.Local.CredentialProfiles["vault"] = config.Profile{Mode: "desktop", Account: "mine.example"}
 		})
 	}
-	mine := "1Password for MCP Integrations: uses your profile vault (desktop, mine.example), not the suggested team.1password.com"
+	mine := "[!] 1Password: your profile vault uses mine.example, the catalog suggests team.1password.com"
 	h := newHarness(t, seed, 120, 35, withJoin)
 	h.containsWrapped(mine)
 	h.contains("Enter continue")
@@ -157,7 +154,9 @@ func TestJoinKeepsExistingProfile(t *testing.T) {
 	h.containsWrapped(mine)
 }
 
-func TestJoinPresetsStageWithoutSaving(t *testing.T) {
+// Picked presets turn their servers on at once, in one change, as Space
+// does; setting them up waits for s.
+func TestJoinPresetsApplyAtOnce(t *testing.T) {
 	h := newHarness(t, seedJoin, 120, 35, withJoin)
 	h.press("enter") // accept the suggestion
 	h.contains("What do you work on? Pick any.", "Developer", "Lint, Docs", "Start empty", "0 servers selected", "Code and docs.")
@@ -168,31 +167,33 @@ func TestJoinPresetsStageWithoutSaving(t *testing.T) {
 	if h.m.screen != screenList || h.m.join != nil {
 		t.Fatal(h.m.screen)
 	}
-	state := h.m.draft.State()
-	if !state.Selections.Connections[idLint].Enabled || !state.Selections.Connections[idDocs].Enabled || state.Selections.Connections[idCanvas].Enabled {
-		t.Fatalf("%+v", state.Selections.Connections)
+	disk := h.disk()
+	if !disk.Selections.Connections[idLint].Enabled || !disk.Selections.Connections[idDocs].Enabled || disk.Selections.Connections[idCanvas].Enabled {
+		t.Fatalf("%+v", disk.Selections.Connections)
 	}
-	if state.Selections.Connections[idLint].CredentialProfile != "vault" {
+	if disk.Selections.Connections[idLint].CredentialProfile != "vault" {
 		t.Fatal("the accepted profile was not linked")
 	}
-	h.contains("Turned on 2 servers. 1 needs setup first: Space on [?] asks for it.", "3 unsaved changes")
-	if disk := h.disk(); disk.Selections.Revision != saved.Selections.Revision {
-		t.Fatal("presets saved")
+	if disk.Selections.Revision != saved.Selections.Revision+1 {
+		t.Fatal("presets took more than one change", disk.Selections.Revision, saved.Selections.Revision)
 	}
-	h.press("ctrl+s")
-	if disk := h.disk(); !disk.Selections.Connections[idLint].Enabled || !disk.Selections.Connections[idDocs].Enabled {
-		t.Fatal("save lost the preset selection")
+	h.contains("Turned on 2 servers. 1 needs something first; Space asks for it.")
+	h.lacks("Ctrl+S", "unsaved")
+	if h.loads.calls != 0 || h.m.screen != screenList {
+		t.Fatal("setting up did not wait for the user", h.m.screen, h.loads.calls)
 	}
-	if h.m.screen != screenFinish || h.loads.calls != 0 {
-		t.Fatal("the finish step did not wait for the user", h.m.screen, h.loads.calls)
+	h.press("u")
+	h.contains("2 servers are off again.")
+	if disk := h.disk(); disk.Selections.Connections[idLint].Enabled || disk.Selections.Connections[idDocs].Enabled {
+		t.Fatal("undo left presets on")
 	}
 }
 
 func TestJoinStartEmpty(t *testing.T) {
 	h := newHarness(t, seedJoin, 120, 35, withJoin)
 	h.press("esc", "space", "down", "down", "enter")
-	if h.m.screen != screenList || h.m.draft.Changes() != 0 {
-		t.Fatal(h.m.screen, h.m.draft.Changes())
+	if h.m.screen != screenList || h.writes() != 0 {
+		t.Fatal(h.m.screen, h.writes())
 	}
 }
 
@@ -204,7 +205,7 @@ func TestJoinPlainCatalog(t *testing.T) {
 	h.contains("acmeco/mcp-catalog - aaaaaaa", "4 MCP servers picked by the team.", "Enter continue")
 	// A profile the catalog needs but does not suggest is named, with how
 	// to add it.
-	h.containsWrapped("[*] 1Password for team: not set up. Add it with mcparcel config profile set team.")
+	h.containsWrapped("[*] 1Password team: not set up. Add it with mcparcel config profile set team.")
 	h.press("enter")
 	if h.m.screen != screenList {
 		t.Fatal(h.m.screen)
@@ -217,12 +218,12 @@ func TestJoinPlainCatalog(t *testing.T) {
 }
 
 // joinTour adds the join catalog and walks the join screens: the intro, a
-// mistyped account, the presets, Start empty, then the list with staged
-// presets.
+// mistyped account, the presets, Start empty, then the list with the
+// presets turned on.
 func joinTour(h *harness, visit func(name string)) {
 	h.t.Helper()
 	seedJoinCatalog(h.t, h.store)
-	h.run(h.m.reload())
+	h.reread()
 	h.m.openJoin(joinFixture)
 	visit("join intro")
 	h.press("e")
@@ -234,9 +235,10 @@ func joinTour(h *harness, visit func(name string)) {
 	h.press("down", "down")
 	visit("join start empty")
 	h.press("up", "space", "up", "space", "enter")
-	visit("join staged")
+	visit("join presets on")
 }
 
+// Every join screen fits every size and ends in its key line.
 func TestJoinFitsAllSizes(t *testing.T) {
 	// The tour covers the join screens with motion; this run is without.
 	for _, unicode := range []bool{false, true} {
@@ -246,6 +248,10 @@ func TestJoinFitsAllSizes(t *testing.T) {
 				for _, ht := range []int{10, 11, 17, 24, 29, 30, 35, 50} {
 					h.send(resize(w, ht))
 					checkFits(t, h, w, ht, name)
+					lines := strings.Split(h.plain(), "\n")
+					if last := lines[len(lines)-1]; name != "join presets on" && len(lines) == ht && !strings.HasPrefix(last, "Enter") && !strings.HasPrefix(last, "Space") {
+						t.Fatalf("%dx%d %s: no key line:\n%s", w, ht, name, h.plain())
+					}
 				}
 			}
 			h.send(resize(120, 35))
@@ -258,7 +264,7 @@ func TestJoinFitsAllSizes(t *testing.T) {
 func TestJoinWithoutDesktopApp(t *testing.T) {
 	h := newHarness(t, seedJoin, 120, 35, withJoin, func(o *Options) { o.NoDesktopApp = true })
 	before := h.fileBytes()
-	h.containsWrapped("[*] 1Password for MCP Integrations: the desktop app works on macOS only. Add a service-account profile with mcparcel config profile set vault.")
+	h.containsWrapped("[*] 1Password vault: the desktop app works on macOS only. Add a service-account profile with mcparcel config profile set vault.", "MCP Integrations")
 	h.contains("Enter continue")
 	h.lacks("Use this 1Password account?", "team.1password.com")
 	h.press("enter")
@@ -270,27 +276,24 @@ func TestJoinWithoutDesktopApp(t *testing.T) {
 	}
 }
 
-// A local profile with the requirement's ID that differs from the
-// suggestion is what the catalog's connections link to; the intro says so,
-// with its mode and account, instead of calling it set up.
+// A local profile with the requirement's ID and the suggested account is
+// set up, whatever its mode. One with another account, or none, is what
+// the catalog's connections link to: the intro names both accounts.
 func TestJoinNamesDifferentExistingProfile(t *testing.T) {
-	seed := func(t *testing.T, store *config.Store) {
-		seedJoin(t, store)
-		mustUpdate(t, store, func(s *config.State) {
-			s.Local.CredentialProfiles["vault"] = config.Profile{Mode: config.ProfileModeServiceAccount, TokenEnv: "OP_SERVICE_ACCOUNT_TOKEN"}
-		})
+	withVault := func(p config.Profile) func(*testing.T, *config.Store) {
+		return func(t *testing.T, store *config.Store) {
+			seedJoin(t, store)
+			mustUpdate(t, store, func(s *config.State) { s.Local.CredentialProfiles["vault"] = p })
+		}
 	}
-	h := newHarness(t, seed, 120, 35, withJoin)
-	h.containsWrapped("[!] 1Password for MCP Integrations: uses your profile vault (service-account), not the suggested team.1password.com")
-	h.lacks("already set up")
-	same := func(t *testing.T, store *config.Store) {
-		seedJoin(t, store)
-		mustUpdate(t, store, func(s *config.State) {
-			s.Local.CredentialProfiles["vault"] = config.Profile{Mode: "desktop", Account: "team.1password.com"}
-		})
-	}
-	h = newHarness(t, same, 120, 35, withJoin)
-	h.contains("[+] 1Password for MCP Integrations: already set up")
+	h := newHarness(t, withVault(config.Profile{Mode: config.ProfileModeServiceAccount, TokenEnv: "OP_SERVICE_ACCOUNT_TOKEN"}), 120, 35, withJoin)
+	h.containsWrapped("[!] 1Password: your profile vault uses a service-account token, the catalog suggests team.1password.com")
+	h.lacks("using your profile", "OP_SERVICE_ACCOUNT_TOKEN")
+	h = newHarness(t, withVault(config.Profile{Mode: "desktop", Account: "team.1password.com"}), 120, 35, withJoin)
+	h.contains("[+] 1Password: using your profile vault (desktop app, team.1password.com)", "  MCP Integrations")
+	h = newHarness(t, withVault(config.Profile{Mode: config.ProfileModeDesktopServiceAccount, Account: "team.1password.com", BootstrapRef: "op://Vault/item/field"}), 120, 35, withJoin)
+	h.contains("[+] 1Password: using your profile vault (service account, team.1password.com)")
+	h.lacks("[!]", "op://")
 }
 
 // seedTwoSuggestions gives the join catalog a second suggestion that more
@@ -310,15 +313,14 @@ func seedTwoSuggestions(t *testing.T, store *config.Store) {
 }
 
 // Suggestions are asked about most used first, with how far along the
-// intro is; one no server uses is not asked about; and saving one leaves no
-// "Saving..." behind on the next question.
-func TestJoinAsksInOrderAndClearsSaving(t *testing.T) {
+// intro is; one no server uses is not asked about; and confirming one
+// leaves no status behind on the next question.
+func TestJoinAsksInOrder(t *testing.T) {
 	h := newHarness(t, seedTwoSuggestions, 80, 24, withJoin)
-	h.contains("This catalog asks for 1Password access to SEO tools (1 of 2).", "2 servers use it.")
-	h.lacks("zz", "1Password for work")
+	h.contains("This catalog asks for a 1Password profile: seo (1 of 2).", "  SEO tools", "2 servers use it.")
+	h.lacks("zz", "1Password work")
 	h.press("enter")
-	h.contains("[+] 1Password for SEO tools: seo.1password.com", "access to MCP Integrations (2 of 2).")
-	h.lacks("Saving...")
+	h.contains("[+] 1Password: using your profile seo (desktop app, seo.1password.com)", "a 1Password profile: vault (2 of 2).")
 	if h.m.status != "" {
 		t.Fatalf("status %q", h.m.status)
 	}
@@ -364,4 +366,36 @@ func TestJoinStartEmptySaysItDropsPicks(t *testing.T) {
 	h.press("up", "up", "space", "down", "down")
 	h.contains("Enter start empty, without the picks")
 	h.lacks("Space pick")
+}
+
+// After the presets the list opens on the first domain, in tab order, with
+// a picked server, on the first of them there that needs a step, else on
+// the first of them. Once the stored sign-ins are read it lands again.
+func TestJoinLandsOnTheFirstStep(t *testing.T) {
+	seed := func(t *testing.T, store *config.Store) {
+		seedFixture(t, store)
+		seedJoinCatalogWith(t, store, func(c *config.Catalog) {
+			c.Domains = map[string]config.Domain{"design": {Label: "Design"}}
+			lint, docs, canvas := c.Connections["lint"], c.Connections["docs"], c.Connections["canvas"]
+			lint.Domains, docs.Domains, canvas.Domains = []string{"design"}, []string{"design"}, []string{"design"}
+			docs.Label, canvas.Label = "Wiki", "Whiteboard"
+			docs.Auth = &config.OAuth{Type: "oauth"}
+			docs.Transport = config.Transport{HTTP: &config.HTTP{URL: config.Literal("https://wiki.example/mcp")}}
+			c.Connections["lint"], c.Connections["docs"], c.Connections["canvas"] = lint, docs, canvas
+		})
+	}
+	designer := newHarness(t, seed, 120, 35, withJoin)
+	designer.press("enter", "down", "space", "enter")
+	if designer.m.currentTab().label != "Design" {
+		t.Fatal(designer.m.currentTab())
+	}
+	designer.focused("Whiteboard", "needs home") // a step, after Wiki (ready)
+
+	developer := newHarness(t, seed, 120, 35, withJoin)
+	developer.fin.needs = map[string]SignInState{idDocs: {Possible: true, Needed: true}}
+	developer.press("enter", "space", "enter")
+	developer.focused("Wiki", "sign in") // after Lint (ready), once read
+	developer.press("up")                // a key keeps the cursor where it is from now on
+	developer.send(signInsMsg{})
+	developer.focused("Whiteboard")
 }

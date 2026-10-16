@@ -21,7 +21,56 @@ func fixedAges(seconds float64) func(*Options) {
 	}
 }
 
-func TestDetailsShowsBindingsTransportPolicyRevision(t *testing.T) {
+// pick moves the server page's cursor to the action labeled label.
+func (h *harness) pick(label string) {
+	h.t.Helper()
+	actions := h.m.actions(h.detailRow())
+	for i, a := range actions {
+		if a.label == label {
+			h.m.detailCursor = i
+			return
+		}
+	}
+	names := make([]string, 0, len(actions))
+	for _, a := range actions {
+		names = append(names, a.label)
+	}
+	h.t.Fatalf("no action %q in %v", label, names)
+}
+
+// do picks the action labeled label and presses Enter.
+func (h *harness) do(label string) {
+	h.t.Helper()
+	h.pick(label)
+	h.press("enter")
+}
+
+// The page opens on the next step for the row's state, then lists what
+// else it can do; the To do and the plain facts follow.
+func TestServerPageLeadsWithTheNextStep(t *testing.T) {
+	h := newHarness(t, seedFixture, 120, 35, fixedAges(7200))
+	h.details("Research", "Notes")
+	h.contains("Research / Notes", "[ ] off - needs workspace", "Team notes.",
+		"> Turn on", "asks for what it misses first", "  Set workspace", "  Link 1Password profile", "  Choose tools",
+		"To do", "[*] Turn it on", "[*] Set workspace", "[*] Link a 1Password profile", "[.] Tools load on first use",
+		"Runs  this device - notes-fixture", "From  acmeco/mcp-catalog - Research")
+	h.lacks("ID:", "Transport", "Schema", "revision", "unsaved", "SECRET-MARKER", "Turn off", "Remove")
+	h.press("esc")
+	if h.m.screen != screenList {
+		t.Fatal(h.m.screen)
+	}
+	h.details("Development", "Reviewer")
+	h.contains("[~] needs a review", "> Accept the change", "Turn off", "[+] On", "[*] Accept the change")
+	h.press("enter")
+	h.contains("[x] ready", "> Choose tools", "Start", "Turn off")
+	if sel := h.disk().Selections.Connections[idReview]; !sel.Enabled || sel.ReviewRequired {
+		t.Fatal(sel)
+	}
+}
+
+// i shows the technical facts: the ID, the source with its commit, the
+// transport, the tool policy and the 1Password requirement.
+func TestServerPageTechnicalFacts(t *testing.T) {
 	seed := func(t *testing.T, store *config.Store) {
 		seedFixture(t, store)
 		mustUpdate(t, store, func(s *config.State) {
@@ -36,17 +85,16 @@ func TestDetailsShowsBindingsTransportPolicyRevision(t *testing.T) {
 	}
 	h := newHarness(t, seed, 120, 35, fixedAges(7200))
 	h.details("Research", "Notes")
-	revision := h.disk().Selections.Revision
-	h.contains("MCParcel / Setup / Notes", "ID: "+idNotes, "State: [ ] Off",
-		"Source: acmeco/mcp-catalog, commit bbbbbbb, snapshot 2h old", "Domains: Research",
-		"Transport: stdio: notes-fixture (2 arguments)", "Shared definition: read-only.",
-		"> Input workspace (string): docs", "Credential profile: work",
-		"Tools: 3 allowed by source, 1 denied by source, 1 disabled by you", "Connect and load tools",
-		"Schema: none cached", fmt.Sprintf("Config revision %d, no unsaved changes", revision))
-	h.press("esc")
-	if h.m.screen != screenList {
-		t.Fatal(h.m.screen)
-	}
+	h.contains("> Turn on", "Choose tools", "1 tool off", "Change workspace", "docs", "Change 1Password profile", "work",
+		"[+] workspace is set", "[+] 1Password: work")
+	h.lacks("ID", "Tool policy")
+	h.press("i")
+	h.contains("ID           "+idNotes, "Source       acmeco/mcp-catalog, commit bbbbbbb, synced 2h ago",
+		"Transport    stdio: notes-fixture (2 arguments)", "Tool policy  3 allowed by source, 1 denied by source, 1 off",
+		"1Password    needs profile team, linked to work")
+	h.lacks("SECRET-MARKER", "Fixture account")
+	h.press("i")
+	h.lacks("Tool policy")
 }
 
 // visitAll opens every screen for every row and asserts no marker shows.
@@ -60,7 +108,8 @@ func visitAll(t *testing.T, h *harness, markers []string) {
 			}
 		}
 	}
-	for _, tb := range tabs(h.m.draft.Effective()) {
+	h.m.technical = true
+	for _, tb := range tabs(h.m.live.Effective()) {
 		h.selectTab(tb.label)
 		check("list " + tb.label)
 		for i := range h.m.rows() {
@@ -72,16 +121,12 @@ func visitAll(t *testing.T, h *harness, markers []string) {
 			h.press("enter")
 			check("details")
 			row := h.detailRow()
-			for j, item := range h.m.detailItems(row) {
+			for j, a := range h.m.actions(row) {
 				h.m.detailCursor = j
-				switch item.kind {
-				case itemInput, itemProfile, itemEdit:
+				switch a.kind {
+				case actInput, actProfile, actTools, actEdit:
 					h.press("enter")
-					check(fmt.Sprintf("%s item %d", row.ID, j))
-					h.press("esc")
-				case itemTools:
-					h.press("t")
-					check("tools")
+					check(fmt.Sprintf("%s action %q", row.ID, a.label))
 					h.press("esc")
 				}
 			}
@@ -102,50 +147,60 @@ func TestDetailsNeverShowsSecretsOrURLPath(t *testing.T) {
 		t.Fatalf("visit ended on screen %d:\n%s", h.m.screen, h.plain())
 	}
 	h.details("Other", "Hook")
-	h.contains("Transport: HTTP: hook.example")
+	h.contains("Runs  remote - hook.example", "Transport    HTTP: hook.example")
 	h.press("esc")
 	h.details("Other", "Vault")
-	h.contains("Transport: stdio: vault-fixture (2 arguments)", "Input endpoint (url): https://in.example/...")
+	h.contains("Runs  this device - vault-fixture", "Transport    stdio: vault-fixture (2 arguments)", "Change endpoint", "https://in.example/...")
 	small := newHarness(t, seedSecrets, 60, 20)
 	visitAll(t, small, secretMarkers)
 }
 
-func TestSetInputStagesConfigInputSet(t *testing.T) {
+// Set <input> edits the input right on the page; Enter writes it at once
+// and moves the cursor to the next step.
+func TestSetInputOnThePage(t *testing.T) {
 	h := newHarness(t, seedFixture, 120, 35)
-	before := h.disk().Selections.Revision
 	h.details("Research", "Notes")
-	h.press("enter")
-	h.contains("Input workspace (string)", "Workspace", "Value: _")
+	h.do("Set workspace")
+	if !h.m.editing || h.m.screen != screenDetails {
+		t.Fatal(h.m.editing, h.m.screen)
+	}
+	h.contains("> Set workspace", "_", "Workspace", "Enter set it")
 	h.typeText("docs")
 	h.press("enter")
-	h.contains("> Input workspace (string): docs", "1 unsaved change")
-	h.press("enter")
-	h.contains("Value: docs_")
-	h.press("esc", "esc", "ctrl+s")
-	disk := h.disk()
-	if disk.Selections.Revision != before+1 || disk.Selections.Connections[idNotes].Inputs["workspace"] != "docs" {
-		t.Fatal(disk.Selections.Revision, disk.Selections.Connections[idNotes])
+	if h.m.editing || h.writes() != 1 || h.m.detailCursor != 0 {
+		t.Fatal(h.m.editing, h.writes(), h.m.detailCursor)
+	}
+	h.contains("workspace is set.", "> Turn on", "Change workspace", "[+] workspace is set")
+	h.lacks("Set workspace")
+	h.do("Change workspace")
+	h.contains("> Change workspace", "docs_")
+	h.press("esc")
+	if h.m.editing || h.writes() != 1 {
+		t.Fatal("Esc wrote the input")
+	}
+	if sel := h.disk().Selections.Connections[idNotes]; sel.Inputs["workspace"] != "docs" || sel.Enabled {
+		t.Fatal(sel)
 	}
 }
 
 func TestURLInputShowsHostOnlyAndEmptyKeeps(t *testing.T) {
 	h := newHarness(t, seedSecrets, 120, 35)
 	h.details("Other", "Vault")
-	h.contains("> Input endpoint (url): https://in.example/...")
-	h.press("enter")
-	h.contains("Current: https://in.example/...", "Value: _", "empty keeps the current value")
+	h.contains("Change endpoint", "https://in.example/...")
+	h.do("Change endpoint")
+	h.contains("Now https://in.example/...; an empty Enter keeps it.", "empty keeps it")
 	h.press("enter")
 	h.contains("Kept the current value.")
-	if h.m.screen != screenDetails || h.m.draft.Changes() != 0 {
-		t.Fatal(h.m.screen, h.m.draft.Changes())
+	if h.m.editing || h.writes() != 0 {
+		t.Fatal(h.m.editing, h.writes())
 	}
-	h.press("enter")
+	h.do("Change endpoint")
 	h.paste("https://new.example/other/path")
 	h.press("enter")
-	h.contains("Input endpoint (url): https://new.example/...")
+	h.contains("https://new.example/...")
 	h.lacks("other/path")
-	if h.m.draft.State().Selections.Connections["local:vault"].Inputs["endpoint"] != "https://new.example/other/path" {
-		t.Fatal(h.m.draft.State().Selections.Connections["local:vault"])
+	if h.m.live.State().Selections.Connections["local:vault"].Inputs["endpoint"] != "https://new.example/other/path" {
+		t.Fatal(h.m.live.State().Selections.Connections["local:vault"])
 	}
 }
 
@@ -160,21 +215,23 @@ func TestInputValidationErrorInline(t *testing.T) {
 	}
 	h := newHarness(t, seed, 120, 35)
 	h.details("Other", "Files")
-	h.press("enter")
+	h.do("Set root")
 	h.typeText("relative/WRONG-VALUE")
 	h.press("enter")
 	h.contains("Invalid: selections.connections.local:files.inputs.root: absolute path required.")
-	if h.m.screen != screenField || h.m.draft.Changes() != 0 {
-		t.Fatal(h.m.screen, h.m.draft.Changes())
+	if !h.m.editing || h.writes() != 0 {
+		t.Fatal(h.m.editing, h.writes())
 	}
-	if line := strings.Split(h.plain(), "\n"); strings.Contains(strings.Join(line[len(line)-4:], "\n"), "WRONG-VALUE") {
-		t.Fatal("error repeats the value")
+	for _, line := range strings.Split(h.plain(), "\n") {
+		if strings.Contains(line, "Invalid") && strings.Contains(line, "WRONG-VALUE") {
+			t.Fatal("error repeats the value")
+		}
 	}
 	h.press("ctrl+u")
 	h.typeText("/srv/files")
 	h.press("enter")
-	if h.m.screen != screenDetails || h.m.draft.Changes() != 1 {
-		t.Fatal(h.m.screen, h.m.draft.Changes())
+	if h.m.editing || h.writes() != 1 {
+		t.Fatal(h.m.editing, h.writes())
 	}
 }
 
@@ -193,29 +250,31 @@ func withProfiles(names ...string) func(*testing.T, *config.Store) {
 func TestBindProfileFromExistingProfiles(t *testing.T) {
 	h := newHarness(t, withProfiles("other"), 120, 35)
 	h.details("Research", "Notes")
-	h.contains("Credential profile: (not bound)")
-	h.press("down", "enter")
-	h.contains("Choose a credential profile for Notes.", "> other", "  work")
+	h.do("Link 1Password profile")
+	h.contains("Research / Notes / 1Password profile", "Choose a 1Password profile for Notes.", "> other", "  work")
 	h.lacks("Fixture account")
 	h.press("down", "enter")
-	h.contains("Credential profile: work", "1 unsaved change")
-	if h.m.draft.State().Selections.Connections[idNotes].CredentialProfile != "work" {
-		t.Fatal(h.m.draft.State().Selections.Connections[idNotes])
+	if h.m.screen != screenDetails || h.m.detailCursor != 0 {
+		t.Fatal(h.m.screen, h.m.detailCursor)
 	}
-	h.press("enter")
-	h.contains("> other", "  work (bound)")
+	h.contains("Linked 1Password profile work.", "Change 1Password profile", "[+] 1Password: work")
+	if h.disk().Selections.Connections[idNotes].CredentialProfile != "work" {
+		t.Fatal(h.m.live.State().Selections.Connections[idNotes])
+	}
+	h.do("Change 1Password profile")
+	h.contains("> other", "  work (linked)")
 }
 
 func TestSingleProfileLinksWithoutPicker(t *testing.T) {
 	h := newHarness(t, seedFixture, 120, 35)
 	h.details("Research", "Notes")
-	h.press("down", "enter")
+	h.do("Link 1Password profile")
 	if h.m.screen != screenDetails {
 		t.Fatal(h.m.screen)
 	}
-	h.contains("Credential profile: work", "Linked credential profile work.", "1 unsaved change")
-	h.lacks("Choose a credential profile", "Fixture account")
-	if sel := h.m.draft.State().Selections.Connections[idNotes]; sel.CredentialProfile != "work" || sel.Enabled {
+	h.contains("Change 1Password profile", "Linked 1Password profile work.")
+	h.lacks("Choose a 1Password profile", "Fixture account")
+	if sel := h.disk().Selections.Connections[idNotes]; sel.CredentialProfile != "work" || sel.Enabled {
 		t.Fatal(sel)
 	}
 }
@@ -227,219 +286,121 @@ func TestNoProfilesShowsProfileSetHint(t *testing.T) {
 	}
 	h := newHarness(t, seed, 120, 35)
 	h.details("Research", "Notes")
-	h.press("down", "enter")
+	h.do("Link 1Password profile")
 	h.contains("No profiles yet. Create one: mcparcel config profile set <name> --file <profile.json>.")
 	h.press("enter", "esc")
-	if h.m.screen != screenDetails || h.m.draft.Changes() != 0 {
-		t.Fatal(h.m.screen, h.m.draft.Changes())
+	if h.m.screen != screenDetails || h.writes() != 0 {
+		t.Fatal(h.m.screen, h.writes())
 	}
 }
 
-// One Space asks for each missing item, then turns the row on: the input,
-// then the only local profile, linked without asking.
-func TestSpaceOnConfigRequiredFillsThenEnables(t *testing.T) {
+// Turn on, from the page, of a row that misses something asks for it as
+// Space does, then comes back to the page.
+func TestTurnOnFromThePageAsksThenReturns(t *testing.T) {
 	h := newHarness(t, seedFixture, 120, 35)
-	h.selectTab("Research")
-	h.selectRow("Notes")
-	h.press("space")
-	if h.m.screen != screenField || h.m.draft.Changes() != 0 {
-		t.Fatal(h.m.screen, h.m.draft.Changes())
-	}
-	h.contains("Input workspace (string)", "Notes needs: input workspace, credential profile. Esc keeps it off.")
-	h.typeText("docs")
+	h.details("Research", "Notes")
 	h.press("enter")
-	if h.m.screen != screenList || h.m.pendingEnable != "" {
-		t.Fatal(h.m.screen, h.m.pendingEnable)
-	}
-	h.focused("[x] Notes")
-	h.contains("Linked credential profile work. Notes is on.", "3 unsaved changes")
-	h.lacks("Fixture account")
-	h.press("ctrl+s")
-	if sel := h.disk().Selections.Connections[idNotes]; !sel.Enabled || sel.CredentialProfile != "work" || sel.Inputs["workspace"] != "docs" {
-		t.Fatal(sel)
-	}
-}
-
-// A local profile with the required ID is linked by the enable itself
-// (edit.StageEnabled), so setup neither asks for it nor lists it as missing.
-func TestSpaceLinksProfileMatchingRequirement(t *testing.T) {
-	h := newHarness(t, withProfiles("team"), 120, 35)
-	h.selectTab("Research")
-	h.selectRow("Notes")
-	h.paneContains("[*] input workspace - not set", "[+] 1Password team - links automatically")
-	h.lacks("credential profile")
-	h.press("space")
-	h.contains("Notes needs: input workspace. Esc keeps it off.")
-	h.typeText("docs")
-	h.press("enter")
-	h.focused("[x] Notes")
-	h.contains("Linked credential profile team. Notes is on.", "3 unsaved changes")
-	if sel := h.m.draft.State().Selections.Connections[idNotes]; !sel.Enabled || sel.CredentialProfile != "team" {
-		t.Fatal(sel)
-	}
-
-	ready := func(t *testing.T, store *config.Store) {
-		withProfiles("team")(t, store)
-		mustUpdate(t, store, func(s *config.State) {
-			s.Selections.Connections[idNotes] = config.Selection{Inputs: map[string]string{"workspace": "docs"}}
-		})
-	}
-	direct := newHarness(t, ready, 120, 35)
-	direct.selectTab("Research")
-	direct.selectRow("Notes")
-	direct.paneContains("Space turns it on and links credential profile team.", "1Password team - links automatically")
-	direct.press("space")
-	if direct.m.screen != screenList {
-		t.Fatal(direct.m.screen)
-	}
-	direct.focused("[x] Notes")
-	direct.contains("Linked credential profile team.", "2 unsaved changes")
-}
-
-// A row that misses only the profile Space links by itself reads ready (off,
-// nothing missing) in the wide list, the compact list and details, not
-// configuration required.
-func TestAutoLinkedProfileRowReadsReady(t *testing.T) {
-	seed := func(t *testing.T, store *config.Store) {
-		withProfiles("team")(t, store)
-		mustUpdate(t, store, func(s *config.State) {
-			s.Selections.Connections[idNotes] = config.Selection{Inputs: map[string]string{"workspace": "docs"}}
-		})
-	}
-	wide := newHarness(t, seed, 120, 35)
-	wide.selectTab("Research")
-	wide.selectRow("Notes")
-	if line := wide.focused("[ ] Notes", "1Password"); strings.Contains(line, "input") {
-		t.Fatalf("%q", line)
-	}
-	wide.lacks("Configuration required", "[?]")
-	wide.press("enter")
-	wide.contains("State: [ ] Off", "Space turns it on and links credential profile team.")
-
-	compact := newHarness(t, seed, 80, 24)
-	compact.selectTab("Research")
-	compact.selectRow("Notes")
-	compact.focused("[ ] Notes")
-	compact.lacks("[?]")
-	compact.contains("Space turns it on and links credential profile team.")
-}
-
-func TestSpaceOpensPickerWithSeveralProfiles(t *testing.T) {
-	h := newHarness(t, withProfiles("other"), 120, 35)
-	h.selectTab("Research")
-	h.selectRow("Notes")
-	h.press("space")
-	h.typeText("docs")
-	h.press("enter")
-	if h.m.screen != screenProfile {
-		t.Fatal(h.m.screen)
-	}
-	h.contains("Choose a credential profile for Notes.", "Notes needs: credential profile. Esc keeps it off.")
-	h.press("down", "enter")
-	if h.m.screen != screenList {
-		t.Fatal(h.m.screen)
-	}
-	h.focused("[x] Notes")
-	h.contains("Linked credential profile work. Notes is on.", "3 unsaved changes")
-}
-
-func TestSpaceWithoutProfilesShowsHint(t *testing.T) {
-	seed := func(t *testing.T, store *config.Store) {
-		seedFixture(t, store)
-		mustUpdate(t, store, func(s *config.State) { delete(s.Local.CredentialProfiles, "work") })
-	}
-	h := newHarness(t, seed, 120, 35)
-	h.selectTab("Research")
-	h.selectRow("Notes")
-	h.press("space")
-	h.typeText("docs")
-	h.press("enter")
-	h.contains("No profiles yet. Create one: mcparcel config profile set <name> --file <profile.json>.", "Notes needs: credential profile.")
-	h.press("enter", "esc")
-	if h.m.screen != screenList || h.m.pendingEnable != "" {
-		t.Fatal(h.m.screen, h.m.pendingEnable)
-	}
-	h.focused("[?] Notes")
-	h.contains("Notes stays off.", "1 unsaved change")
-	if h.m.draft.State().Selections.Connections[idNotes].Enabled {
-		t.Fatal("enabled without a profile")
-	}
-}
-
-// Esc ends a pending enable; a later edit of the same row never turns it on.
-func TestEscClearsPendingEnable(t *testing.T) {
-	h := newHarness(t, withProfiles("other"), 120, 35)
-	h.selectTab("Research")
-	h.selectRow("Notes")
-	h.press("space", "esc")
-	if h.m.screen != screenList || h.m.pendingEnable != "" || h.m.draft.Changes() != 0 {
-		t.Fatal(h.m.screen, h.m.pendingEnable, h.m.draft.Changes())
-	}
-	h.focused("[?] Notes")
-	h.contains("Notes stays off.")
-
-	h.press("space")
-	h.typeText("docs")
-	h.press("enter", "esc")
-	h.contains("Notes stays off.", "1 unsaved change")
-
-	h.press("enter", "enter")
-	h.press("ctrl+u")
-	h.typeText("wiki")
-	h.press("enter")
-	h.press("down", "enter", "enter")
-	if h.m.screen != screenDetails {
-		t.Fatal(h.m.screen)
-	}
-	h.contains("Credential profile: other", "State: [ ] Off")
-	if sel := h.m.draft.State().Selections.Connections[idNotes]; sel.Enabled || sel.Inputs["workspace"] != "wiki" {
-		t.Fatal(sel)
-	}
-}
-
-// Esc on a pending accept of a [!] row leaves it on and under review.
-func TestEscKeepsReviewOnPendingAccept(t *testing.T) {
-	seed := func(t *testing.T, store *config.Store) {
-		withProfiles("other")(t, store)
-		mustUpdate(t, store, func(s *config.State) {
-			s.Selections.Connections[idNotes] = config.Selection{Enabled: true, ReviewRequired: true}
-		})
-	}
-	h := newHarness(t, seed, 120, 35)
-	h.selectTab("Research")
-	h.selectRow("Notes")
-	h.press("space")
 	if h.m.screen != screenField {
 		t.Fatal(h.m.screen)
 	}
-	h.contains("Notes needs: input workspace, credential profile. Esc leaves it unchanged.")
-	h.lacks("Esc keeps it off.")
-	h.press("esc")
-	if h.m.screen != screenList || h.m.pendingEnable != "" || h.m.draft.Changes() != 0 {
-		t.Fatal(h.m.screen, h.m.pendingEnable, h.m.draft.Changes())
+	h.contains("Research / Notes / workspace", "Notes needs workspace and a 1Password profile. Esc keeps it off.")
+	h.typeText("docs")
+	h.press("enter")
+	if h.m.screen != screenDetails || h.m.detailID != idNotes || h.writes() != 1 {
+		t.Fatal(h.m.screen, h.m.detailID, h.writes())
 	}
-	h.focused("[!] Notes", "review")
-	h.contains("Notes is unchanged.")
-	if sel := h.m.draft.State().Selections.Connections[idNotes]; !sel.Enabled || !sel.ReviewRequired {
-		t.Fatal(sel)
+	h.contains("Linked 1Password profile work. Notes is on.", "[x] ready", "> Choose tools", "Turn off")
+	h.press("space")
+	h.contains("[ ] off", "> Turn on")
+	h.lacks("asks for what it misses first")
+	h.press("enter")
+	if h.m.screen != screenDetails || h.writes() != 3 {
+		t.Fatal(h.m.screen, h.writes())
+	}
+	h.contains("[x] ready", "> Choose tools")
+}
+
+// Sign in, Start and Test again set this server up, as s does on its page.
+func TestServerPageSignsInAndStarts(t *testing.T) {
+	h := statusHarness(t)
+	h.details("Other", "Calendar")
+	h.contains("Other / Calendar", "[~] needs a sign-in", "> Sign in to Calendar", "opens your browser",
+		"Choose tools", "all, after sign-in", "[*] Sign in with your browser", "[.] Tools load after sign-in", "Runs  remote - calendar.example")
+	h.press("enter")
+	_, signIns, signed := h.fin.counts()
+	if signIns != 1 || len(signed) != 1 {
+		t.Fatal(signIns, signed)
+	}
+	h.contains("Calendar is ready.", "[x] ready - 2 tools", "> Choose tools", "2 of 2 on", "Test again", "last ok just now",
+		"Tools", "draw", "Draw a diagram.", "erase")
+	h.lacks("To do", "Second line.")
+	h.press("esc")
+	h.details("Other", "Search")
+	h.contains("> Choose tools", "Start", "loads its tools")
+	h.do("Start")
+	h.contains("Search is ready.", "Test again")
+
+	headless := statusHarness(t, func(o *Options) { o.SignIn = nil })
+	headless.details("Other", "Calendar")
+	headless.contains("> Sign in to Calendar", "run mcparcel auth calendar")
+	headless.press("enter")
+	headless.contains("Setup can't sign in here: run mcparcel auth calendar in a terminal.")
+	if _, signIns, _ := headless.fin.counts(); signIns != 0 || headless.loads.calls != 0 {
+		t.Fatal("a headless sign-in started something")
 	}
 }
 
+// A command that is not found says so first; Enter looks for it again.
+func TestServerPageCommandNotInstalled(t *testing.T) {
+	found := false
+	h := statusHarness(t, func(o *Options) {
+		o.CommandAvailable = func(command, _ string) bool { return command != "maps-fixture" || found }
+	})
+	h.details("Other", "Maps")
+	h.contains("[-] maps-fixture not installed", "> maps-fixture not installed", "Enter looks again", "[*] Install maps-fixture")
+	h.lacks("Start  ")
+	h.press("enter")
+	h.contains("maps-fixture is still not installed: it is not found on PATH.", "> maps-fixture not installed")
+	found = true
+	h.press("enter")
+	h.contains("Found maps-fixture.", "[x] ready", "> Choose tools", "Start")
+}
+
+// Remove removes a personal connection and turns it off, as local remove
+// does; u brings both back.
+func TestRemovePersonalAndUndo(t *testing.T) {
+	h := newHarness(t, seedFixture, 120, 35)
+	h.details("Other", "Excalidraw")
+	h.contains("Edit", "Remove", "u brings it back")
+	h.do("Remove")
+	if h.m.screen != screenList {
+		t.Fatal(h.m.screen)
+	}
+	h.contains("Removed Excalidraw. u brings it back.")
+	disk := h.disk()
+	if _, ok := disk.Personal.Connections["excalidraw"]; ok || disk.Selections.Connections[idExcali].Enabled {
+		t.Fatal("remove did not match local remove", disk.Personal.Connections, disk.Selections.Connections[idExcali])
+	}
+	if h.m.statusOf(h.m.live.Effective().Connections[idExcali]).step() {
+		t.Fatal("a removed connection still counts as a step")
+	}
+	h.press("u")
+	h.contains("Excalidraw is back.")
+	if _, ok := h.disk().Personal.Connections["excalidraw"]; !ok || !h.disk().Selections.Connections[idExcali].Enabled {
+		t.Fatal("undo did not bring it back on")
+	}
+}
+
+// A shared definition has no Edit or Remove; a personal one opens its form.
 func TestSharedDefinitionReadOnly(t *testing.T) {
 	h := newHarness(t, seedFixture, 120, 35)
 	h.details("Design", "Paper")
-	h.contains("Shared definition: read-only.")
-	h.lacks("Edit personal connection", "e edit")
-	h.press("e")
-	if h.m.screen != screenDetails || h.m.form != nil {
-		t.Fatal(h.m.screen)
-	}
+	h.lacks("Edit", "Remove")
 	h.press("esc")
 	h.details("Other", "Excalidraw")
-	h.contains("Edit personal connection", "e edit")
-	h.lacks("Shared definition")
-	h.press("e")
+	h.do("Edit")
 	if h.m.screen != screenForm {
 		t.Fatal(h.m.screen)
 	}
+	h.contains("Other / Excalidraw / Edit")
 }

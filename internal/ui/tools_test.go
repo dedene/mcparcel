@@ -26,114 +26,145 @@ func toolHarness(t *testing.T, seed func(*testing.T, *config.Store), opts ...fun
 	return h
 }
 
-func TestConnectAndLoadToolsCallsLoaderOnce(t *testing.T) {
+// Opening the tools page of a server that is on loads its tools once per
+// session; browsing details never does.
+func TestToolsLoadWhenThePageOpens(t *testing.T) {
 	h := toolHarness(t, seedFixture)
 	h.details("Other", "Excalidraw")
-	h.press("t", "esc", "down", "up", "esc")
+	h.press("down", "up", "esc", "down", "up")
 	if h.loads.calls != 0 {
 		t.Fatal("browsing loaded tools", h.loads.calls)
 	}
 	h.details("Other", "Excalidraw")
-	h.press("l")
+	h.press("enter")
 	if h.loads.calls != 1 || h.loads.ids[0] != idExcali || h.m.screen != screenTools {
 		t.Fatal(h.loads.calls, h.loads.ids, h.m.screen)
 	}
-	h.contains("Loaded this session less than 1m ago (2 tools).", "> [x] draw", "Draw a diagram.", "[x] erase")
-	h.lacks("Second line.", "Press l to connect")
-	h.press("esc")
-	h.contains("Schema: loaded this session less than 1m ago")
-	h.press("t", "esc", "esc", "down", "up")
+	h.contains("Loaded less than 1m ago (2 tools).", "> [+] draw", "Draw a diagram.", "[+] erase")
+	h.lacks("Second line.", "Press l", "Save first", "l connect")
+	h.press("left")
+	if h.m.screen != screenDetails {
+		t.Fatal(h.m.screen)
+	}
+	h.press("right", "esc", "esc", "down", "up")
 	if h.loads.calls != 1 {
 		t.Fatal(h.loads.calls)
 	}
 }
 
-func TestConnectRequiresSavedEnabledConnection(t *testing.T) {
+// The tools page says what is missing before tools can load, and loads
+// them once it is not: there is no save step in between.
+func TestToolsPageSaysWhatIsMissing(t *testing.T) {
 	h := toolHarness(t, seedFixture)
 	h.details("Design", "Paper")
-	h.press("l")
-	h.contains("Paper is off. Turn it on and save first: the runtime uses the saved configuration.")
-	h.press("esc", "space", "l")
-	h.contains("Save first: the runtime uses the saved configuration.")
-	h.press("esc", "esc", "ctrl+s", "esc") // Esc: start it later
-	h.details("Design", "Paper")
-	h.press("l")
+	h.do("Choose tools")
+	h.contains("Paper is off: Left back, then Space turns it on.")
+	h.press("esc", "space")
+	h.do("Choose tools")
 	if h.loads.calls != 1 || h.loads.ids[0] != idPaper {
 		t.Fatal(h.loads.calls, h.loads.ids)
 	}
+	h.lacks("Save first", "save")
 	h.press("esc", "esc")
 	h.details("Development", "Reviewer")
-	h.press("l")
-	h.contains("Reviewer needs review. Press Space to accept it, then save.")
+	h.do("Choose tools")
+	h.contains("Reviewer changed upstream: Left back, then Space accepts it.")
 	if h.loads.calls != 1 {
 		t.Fatal(h.loads.calls)
 	}
 
 	hidden := newHarness(t, seedFixture, 120, 35, func(o *Options) { o.LoadTools = nil })
 	hidden.details("Other", "Excalidraw")
-	hidden.lacks("Connect and load tools", "l: connect")
-	hidden.press("l")
-	if hidden.m.screen != screenDetails {
+	hidden.press("enter")
+	if hidden.m.screen != screenTools {
 		t.Fatal(hidden.m.screen)
 	}
-	hidden.press("t")
-	hidden.lacks("Press l")
+	hidden.lacks("Loading", "Turn it on")
 }
 
-func TestConnectAllowedWithPendingToolToggles(t *testing.T) {
-	h := toolHarness(t, seedFixture)
-	h.details("Other", "Excalidraw")
-	h.press("l", "space")
-	if h.m.draft.Changes() != 1 || h.m.draft.Pending(idExcali) {
-		t.Fatal(h.m.draft.Changes(), h.m.draft.Pending(idExcali))
-	}
-	h.press("l")
-	if h.loads.calls != 2 {
-		t.Fatal(h.loads.calls)
-	}
-	h.contains("> [ ] draw")
-}
-
-func TestConnectAuthRequiredShowsLoginHint(t *testing.T) {
+// A load that asks for a sign-in is a sign-in, not a failure, as when
+// setting up: the tools page, the Status and the exit summary all say so.
+// Where setup can sign in, s on the tools page does it and the tools show
+// right there; elsewhere mcparcel auth does.
+func TestToolsNeedingSignInPointAtSetUp(t *testing.T) {
 	h := toolHarness(t, seedFixture)
 	h.loads.err = output.NewError("auth_required", nil)
 	h.details("Other", "Excalidraw")
-	h.press("l")
-	h.contains("Credential authorization is required.", "Run mcparcel auth local:excalidraw.")
-	h.lacks("Could not connect.")
+	h.press("enter")
+	h.contains("Needs a sign-in first: run mcparcel auth excalidraw in a terminal.")
+	h.lacks("Could not connect.", "could not start")
+	h.press("esc", "esc")
+	h.lineHas("Excalidraw", "[~]", "run mcparcel auth excalidraw")
+	if step, ok := stepFor(h.m.Result(), idExcali); !ok || step.Need != NeedSignIn || step.Command != "mcparcel auth excalidraw" {
+		t.Fatal(step)
+	}
+
+	oauth := finishHarness(t, seedFinish, 120, 35)
+	oauth.turnOn("Calendar")
+	oauth.loads.errs[idCalendar] = output.NewError("auth_required", nil)
+	oauth.details("Other", "Calendar")
+	oauth.do("Choose tools")
+	oauth.contains("Needs a sign-in first: s signs you in.")
+	oauth.press("?")
+	oauth.contains("Help")
+	oauth.press("esc")
+	if oauth.m.screen != screenTools {
+		t.Fatal(oauth.m.screen)
+	}
+	if step, ok := stepFor(oauth.m.Result(), idCalendar); !ok || step.Need != NeedSignIn || step.Command != "" {
+		t.Fatal(step)
+	}
+	oauth.fin.mu.Lock()
+	oauth.fin.needs[idCalendar] = SignInState{Possible: true, Needed: true}
+	oauth.fin.mu.Unlock()
+	oauth.press("s")
+	if _, signIns, signed := oauth.fin.counts(); signIns != 1 || !slices.Equal(signed, []string{idCalendar}) || oauth.m.screen != screenTools {
+		t.Fatal(signIns, signed, oauth.m.screen)
+	}
+	oauth.contains("Loaded less than 1m ago (2 tools).", "[+] draw")
+	oauth.press("q")
+	if !oauth.quit {
+		t.Fatal("q does not quit the tools page")
+	}
 }
 
-func TestConnectFailureKeepsMetadata(t *testing.T) {
+func TestToolsLoadFailureKeepsMetadata(t *testing.T) {
 	h := toolHarness(t, seedFixture)
 	h.loads.err = output.NewError("connection_failed", nil)
 	h.details("Other", "Excalidraw")
-	h.press("l")
-	h.contains("Could not connect to the MCP server.", "Check the connection configuration and prerequisites.",
-		"Could not connect. Configured MCPs on this device still work.")
+	h.press("enter")
+	h.contains("Could not start Excalidraw.", "mcparcel doctor shows why.")
+	h.lacks("configuration", "Could not connect.")
 	h.press("esc")
-	h.contains("Transport: stdio: excalidraw-fixture (0 arguments)", "Schema: none cached", "State: [x] On")
+	h.contains("[-] could not start", "> Start again", "Could not start Excalidraw.", "Runs  this device - excalidraw-fixture")
 	h.loads.err = nil
-	h.press("l")
-	h.contains("> [x] draw")
-	h.lacks("Could not connect")
+	h.do("Choose tools") // opening the page again tries again
+	h.contains("> [+] draw")
+	h.lacks("Could not start")
 }
 
-func TestToolToggleStagesToolsDisable(t *testing.T) {
+// A tool toggle is written at once, as tools enable|disable would.
+func TestToolToggleIsWrittenAtOnce(t *testing.T) {
 	h := toolHarness(t, seedFixture)
 	before := h.disk().Selections.Revision
 	h.details("Other", "Excalidraw")
-	h.press("l", "down", "space")
-	h.contains("[x] draw", "> [ ] erase", "Policy: all tools, 1 disabled by you")
-	h.press("esc", "esc", "ctrl+s")
+	h.press("enter", "down", "space")
+	h.contains("[+] draw", "> [ ] erase", "Tool policy: all tools, 1 off")
 	disk := h.disk()
 	if disk.Selections.Revision != before+1 || !slices.Equal(disk.Selections.Connections[idExcali].DisabledTools, []string{"erase"}) {
 		t.Fatal(disk.Selections.Revision, disk.Selections.Connections[idExcali])
 	}
-	h.details("Other", "Excalidraw")
-	h.press("t", "down", "space")
-	h.contains("> [x] erase", "1 unsaved change")
+	h.press("space")
+	h.contains("> [+] erase")
+	if got := h.disk().Selections.Connections[idExcali].DisabledTools; len(got) != 0 {
+		t.Fatal(got)
+	}
+	h.press("u")
+	h.contains("> [ ] erase", "Tool erase of Excalidraw is off again.")
 }
 
+// A tool disabled before setup opened stays listed while the tools load,
+// and after it is turned back on.
 func TestDisabledToolsListedBeforeLoad(t *testing.T) {
 	seed := func(t *testing.T, store *config.Store) {
 		seedFixture(t, store)
@@ -145,12 +176,15 @@ func TestDisabledToolsListedBeforeLoad(t *testing.T) {
 	}
 	h := toolHarness(t, seed)
 	h.details("Other", "Excalidraw")
-	h.press("t")
-	h.contains("> [ ] old (disabled)", "Press l to connect and load tools.")
+	h.hold = true
+	h.press("enter")
+	h.contains("> [ ] old (disabled)", "Loading the tools of Excalidraw...")
+	h.held, h.hold = nil, false
+	h.m.cancelLoad()
 	h.press("space")
-	h.contains("> [x] old", "1 unsaved change")
-	if h.loads.calls != 0 {
-		t.Fatal(h.loads.calls)
+	h.contains("> [+] old")
+	if got := h.disk().Selections.Connections[idExcali].DisabledTools; len(got) != 0 {
+		t.Fatal(got)
 	}
 }
 
@@ -158,7 +192,7 @@ func TestToolTextSanitized(t *testing.T) {
 	h := toolHarness(t, seedFixture)
 	h.loads.items = []string{`{"name":"bad\u001b[31mname","description":"desc\u001b]0;title\u0007 ok\nhidden"}`, `{"description":"no name"}`, `not json`}
 	h.details("Other", "Excalidraw")
-	h.press("l")
+	h.press("enter")
 	if strings.ContainsRune(h.view(), 0x1b) || strings.ContainsRune(h.view(), 0x07) {
 		t.Fatalf("%q", h.view())
 	}
@@ -166,7 +200,7 @@ func TestToolTextSanitized(t *testing.T) {
 	h.contains("(1 tool)")
 	h.lacks("hidden", "no name")
 	h.press("space")
-	if got := h.m.draft.State().Selections.Connections[idExcali].DisabledTools; !slices.Equal(got, []string{"bad\x1b[31mname"}) {
+	if got := h.disk().Selections.Connections[idExcali].DisabledTools; !slices.Equal(got, []string{"bad\x1b[31mname"}) {
 		t.Fatalf("%q", got)
 	}
 }
@@ -175,8 +209,8 @@ func TestQuitCancelsPendingLoad(t *testing.T) {
 	h := toolHarness(t, seedFixture)
 	h.details("Other", "Excalidraw")
 	h.hold = true
-	h.press("l")
-	h.contains("Connecting to Excalidraw... Credentials may be requested.")
+	h.press("enter")
+	h.contains("Loading the tools of Excalidraw... 1Password may ask you to approve.")
 	h.press("ctrl+c")
 	h.flush()
 	if !h.quit || h.loads.calls != 1 || !h.loads.canceled[0] {
@@ -186,11 +220,13 @@ func TestQuitCancelsPendingLoad(t *testing.T) {
 	back := toolHarness(t, seedFixture)
 	back.details("Other", "Excalidraw")
 	back.hold = true
-	back.press("l", "esc")
+	back.press("enter", "esc")
 	back.flush()
 	if back.loads.calls != 1 || !back.loads.canceled[0] || back.m.loaded[idExcali].tools != nil || back.m.loading != "" {
 		t.Fatal(back.loads.calls, back.loads.canceled, back.m.loaded)
 	}
-	back.press("t")
-	back.contains("Press l to connect and load tools.")
+	back.press("enter") // opening it again loads again
+	if back.loads.calls != 2 {
+		t.Fatal(back.loads.calls)
+	}
 }

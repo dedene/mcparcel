@@ -90,7 +90,7 @@ func (c *AuthMCPCmd) Run(ctx context.Context, s *Streams, opts *CommandOptions) 
 
 // signInPreflight refuses, offline, a sign-in auth <mcp> cannot start: in
 // headless mode, under --no-input and, when no runtime runs, without a
-// reachable keyring (Linux without a session bus). Setup's finish step
+// reachable keyring (Linux without a session bus). Setting up in setup (s)
 // checks the same before it signs in.
 func signInPreflight(ctx context.Context, paths config.Paths, plan runtimeclient.AuthPlan, name string, noInput bool) error {
 	if !plan.SignIn {

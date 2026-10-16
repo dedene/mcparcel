@@ -1,9 +1,9 @@
-MCParcel  acmeco/mcp-catalog - aaaaaaa                   3 on - 2 need attention
+MCParcel  acmeco/mcp-catalog - aaaaaaa                      3 on - 2 need a step
 [Design 0/2]  Development 1/2   Research 0/1   Other 2/2
 
-      MCP                                         Needs
+      MCP         Status
 > [ ] Figma
-  [ ] Paper                                       paper-fixture
+  [ ] Paper
 
 
 
@@ -18,7 +18,7 @@ MCParcel  acmeco/mcp-catalog - aaaaaaa                   3 on - 2 need attention
 
 
 
-Configuration ready. Connection not checked.
 
-Space on/off   Enter details   / search   Ctrl+S save   ? help
-No unsaved changes                                               [Save] [Cancel]
+Off. Space turns it on.
+
+2 need a step. Next: Reviewer, review change.  ? help

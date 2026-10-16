@@ -12,7 +12,7 @@ import (
 const (
 	wideWidth, wideHeight = 100, 30
 	minWidth, minHeight   = 40, 10
-	compactChrome         = 8 // header, tabs, search, columns, summary, status, help, actions
+	compactChrome         = 6 // header, tabs, search, columns, summary, status; then the bottom lines
 )
 
 func (m *Model) tooSmall() bool {
@@ -31,9 +31,6 @@ func (m *Model) render() string {
 	switch {
 	case m.tooSmall():
 		lines = wrap("Terminal too small (need 40x10). Resize, or press q.", w)
-		if m.screen == screenConfirm {
-			lines = append(lines, fit(m.statusLine(), w))
-		}
 	case m.screen == screenHelp:
 		lines = m.helpPage()
 	case m.screen == screenDetails:
@@ -46,8 +43,6 @@ func (m *Model) render() string {
 		lines = m.toolsPage()
 	case m.screen == screenForm:
 		lines = m.formPage()
-	case m.screen == screenFinish:
-		lines = m.finishPage()
 	case m.screen == screenJoin:
 		lines = m.joinPage()
 	case m.screen == screenPresets:
@@ -71,6 +66,12 @@ func (m *Model) render() string {
 // status (up to two lines) and one help line at the bottom. Long lines wrap.
 func (m *Model) page(title string, body []string, focus int, help string) []string {
 	w, _ := m.size()
+	return m.titledPage(m.theme.paint(roleTitle, fit(title, w)), body, focus, help)
+}
+
+// titledPage is page with a title line the caller rendered.
+func (m *Model) titledPage(title string, body []string, focus int, help string) []string {
+	w, _ := m.size()
 	status, room := m.pageStatus()
 	// at is the focus line's index once the lines before it have wrapped;
 	// the focus line itself is cut, not wrapped, so it stays one line.
@@ -85,17 +86,25 @@ func (m *Model) page(title string, body []string, focus int, help string) []stri
 		wrapped = append(wrapped, wrap(line, w)...)
 	}
 	body = wrapped
-	offset := 0
-	if at >= room {
-		offset = at - room + 1
+	// A body that does not fit ends in a line that says how much is cut.
+	shown := room
+	if len(body) > room && room > 1 {
+		shown--
 	}
-	lines := []string{m.theme.paint(roleTitle, fit(title, w))}
-	for i := offset; i < len(body) && i < offset+room; i++ {
+	offset := 0
+	if at >= shown {
+		offset = at - shown + 1
+	}
+	lines := []string{title}
+	for i := offset; i < len(body) && i < offset+shown; i++ {
 		line := fit(body[i], w)
 		if i == at {
 			line = m.theme.paint(roleSelected, pad(line, w))
 		}
 		lines = append(lines, line)
+	}
+	if cut := len(body) - offset - shown; cut > 0 && shown < room {
+		lines = append(lines, m.theme.paint(roleDim, fit(plural(cut, "more line", "more lines")+" below.", w)))
 	}
 	for len(lines) < 1+room {
 		lines = append(lines, "")
@@ -162,19 +171,33 @@ func wrap(text string, n int) []string {
 	return append(lines, line)
 }
 
-// Compact list: the focus prefix, the glyph, MCP and a short Needs column
-// (as many of the row's needs as fit, open ones first, see
-// rowLook.listNeeds). It fits 40 columns. The Needs column ends in the gutter
+// Compact list: the focus prefix, the glyph, MCP and a Status column. It
+// fits 40 columns. MCP is as wide as the longest label needs, so Status gets
+// the rest, and at least compactTag. The Status column ends in the gutter
 // like the others.
 func compactTag(w int) int { return min(max(w*2/5, 14), 30) }
 
-func (m *Model) compactRow(w int) rowFormat {
-	state := m.draft.State()
+func (m *Model) compactTagWidth(w int) int {
 	lead := 2 + textWidth(m.theme.glyph.on) + 1
-	tag := compactTag(w)
+	return min(max(w-lead-m.labelWidth(), compactTag(w)), max(w-lead-8, 1))
+}
+
+// labelWidth is the cells the longest label of any server takes, with its
+// gutter, so the columns stay put across domains.
+func (m *Model) labelWidth() int {
+	n := 0
+	for _, row := range m.live.Effective().Connections {
+		n = max(n, textWidth(rowLabel(row))+gutter)
+	}
+	return n
+}
+
+func (m *Model) compactRow(w int) rowFormat {
+	lead := 2 + textWidth(m.theme.glyph.on) + 1
+	tag := m.compactTagWidth(w)
 	return func(row config.EffectiveConnection, prefix string, styled bool) string {
-		look := lookOf(state, row)
-		line := prefix + m.markText(look, styled) + " " + cell(rowLabel(row), max(w-lead-tag, 8)) + m.needsText(look.listNeeds(), tag, styled)
+		st := m.statusOf(row)
+		line := prefix + m.markText(st, styled) + " " + cell(rowLabel(row), max(w-lead-tag, 8)) + m.statusText(st, tag, styled)
 		return fit(line, w)
 	}
 }
@@ -182,91 +205,50 @@ func (m *Model) compactRow(w int) rowFormat {
 func (m *Model) compactList() []string {
 	w, _ := m.size()
 	lead := 2 + textWidth(m.theme.glyph.on) + 1
-	columns := m.theme.paint(roleDim, fit(strings.Repeat(" ", lead)+cell("MCP", max(w-lead-compactTag(w), 8))+"Needs", w))
+	columns := m.theme.paint(roleDim, fit(strings.Repeat(" ", lead)+cell("MCP", max(w-lead-m.compactTagWidth(w), 8))+"Status", w))
 	lines := []string{m.header(w), m.scrollTabs(w), m.searchLine(w), columns}
 	lines = append(lines, m.listBody(w, m.compactRow(w))...)
-	summary, status := "", m.statusText(w)
+	summary := ""
 	if row, ok := m.selected(); ok {
 		summary = fit(m.stateText(row), w)
 	}
-	help := "Space: on/off   Enter: details   /: search   Ctrl+S: save   ?: help"
-	switch m.screen {
-	case screenSearch:
-		help = searchHelp
-	case screenConflict: // the message takes the summary and status lines
-		conflict := wrapAtMost(m.conflict, w, 2)
-		summary, status = conflict[0], ""
-		if len(conflict) > 1 {
-			status = conflict[1]
-		}
-		help = conflictKeys
-	}
-	return append(lines, summary, status, m.keys(help, w), m.actionLine(w))
+	lines = append(lines, summary, m.statusLine(w))
+	return append(lines, m.bottomLines(w)...)
 }
 
 // helpText is the English key reference shown with ?, with the theme's
 // glyphs in its legend.
 func helpText(g glyphs) []string {
 	return []string{
+		"Every change applies at once; u undoes it.",
 		"List",
-		"  Left/Right      domain tab",
-		"  Up/Down         MCP; PgUp/PgDn, Home/End jump",
-		"  Space           turn on or off; on " + g.review + " it accepts the review",
-		"                  asks for missing configuration first; Esc keeps it off",
-		"  Enter           details",
-		"  /               search label, ID and description in every tab",
-		"  Tab, Shift+Tab  focus [Save] or [Cancel]; Enter activates",
-		"  A               add a personal connection",
-		"  Ctrl+S          save; setup stays open",
-		"  q, Esc          cancel; Esc clears an active search first",
-		"  Ctrl+C          quit now and discard unsaved changes",
-		"Search",
-		"  Typing          filters label, ID and description in every tab;",
-		"                  with no match here it moves to the first tab with one",
-		"  Backspace       delete a character; Ctrl+U clears the query",
-		"  Enter, Down     back to the list, filter kept; Esc clears it",
-		"Details",
-		"  Up/Down, Enter  choose a field: input, profile, tools",
-		"                  a single credential profile is linked without asking",
-		"  Space           turn on or off",
-		"  t               tools   l: connect and load tools",
-		"  e               edit a personal connection",
-		"  Esc             back",
-		"Tools",
-		"  Up/Down, Space  choose and turn a tool on or off",
-		"  l               connect and load tools; Esc cancels a load and goes back",
-		"Forms and fields",
-		"  Tab, Shift+Tab  next or previous field; Enter applies; Esc discards",
-		"Finish (after a save turns MCPs on)",
-		"  Enter           start them, sign in where needed, load their tools",
-		"  Esc             later; on the running screen it stops",
-		"  Enter, s        sign in to the one asked for, or skip it",
-		"  r               retry the ones that failed",
-		"Join (mcparcel join, before the list)",
-		"  Enter           use the suggested 1Password account",
-		"  e               type another account; Esc: back",
-		"  Esc             skip 1Password for now",
-		"  Space           pick a preset; Enter: on to the list",
-		"  q               quit; a profile you confirmed stays",
-		"Conflict",
-		"  r               reload and reapply your changes; Esc: back to the draft",
-		"Confirm",
-		"  y               discard; n, Enter or Esc keep editing",
+		"  Tab, Shift+Tab  next or previous domain",
+		"  Up/Down         choose a server",
+		"  Right, Enter    open the server",
+		"  Space           turn on or off; asks for what is missing first",
+		"  s               set up what is on: start it, sign in, load its tools",
+		"  u               undo the last change, again and again",
+		"  n               new personal connection",
+		"  /               search every domain; Esc clears it",
+		"  q               quit; while setting up, stop (Esc skips a sign-in)",
+		"Server page",
+		"  Up/Down         choose an action; the first is the next step",
+		"  Enter           do it; Right only opens Tools or Edit",
+		"  Space, s, u     on or off, set up this server, undo",
+		"  i               technical facts",
+		"  Left, Esc       back",
 		"Marks",
-		"  " + g.on + " on and ready      " + g.off + " off",
-		"  " + g.needsConfig + " off, needs configuration",
-		"  " + g.pending + " on, needs configuration",
-		"  " + g.review + " on, review required",
-		"  " + g.unavailable + " on, but its source no longer defines it",
-		"Needs",
-		"  1Password       a credential profile to link",
-		"  sign-in         an OAuth sign-in in a browser on first connect",
-		"  input <name>    a value to fill in",
-		"  a command       runs on this device (npx, docker, uvx, ...)",
-		"Setup never contacts GitHub. While it is open, only Connect and the",
-		"finish step contact the runtime, and credentials may then be",
-		"requested. On exit setup checks stored sign-ins, as auth status does.",
-		"Every change has a command: run mcparcel --help.",
+		"  " + g.on + " on and ready     " + g.pending + " on, needs a step",
+		"  " + g.unavailable + " on, can't run    " + g.off + " off",
+		"  " + g.done + " done   " + g.todo + " to do   " + g.later + " happens later",
+		"Status",
+		"  review change   accept it on its page",
+		"  needs <input>   set it on its page",
+		"  link 1Password  link a profile on its page",
+		"  not installed   install the command",
+		"  sign in         s signs you in, in your browser",
+		"  N tools         it works; it started this session",
+		"  starts on first use: nothing left to do",
 	}
 }
 
@@ -314,7 +296,7 @@ func (m *Model) helpPage() []string {
 	text := helpLines(m.theme.glyph, w)
 	_, room := m.pageStatus()
 	m.helpOffset = min(max(m.helpOffset, 0), max(len(text)-room, 0))
-	return m.page("MCParcel / Setup / Help", text[m.helpOffset:], -1, "Up/Down: scroll   Esc or ?: close")
+	return m.page("Help", text[m.helpOffset:], -1, "Up/Down: scroll   Esc or ?: close")
 }
 
 func (m *Model) helpKey(k string) {
@@ -323,8 +305,8 @@ func (m *Model) helpKey(k string) {
 		m.helpOffset--
 	case "down":
 		m.helpOffset++
-	case "esc", "?", "q", "enter":
-		m.screen = screenList
+	case "esc", "left", "?", "q", "enter":
+		m.screen = m.back
 	}
 	_ = m.helpPage() // clamps the offset
 }

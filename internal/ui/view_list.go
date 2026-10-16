@@ -10,15 +10,17 @@ import (
 )
 
 // Wide list layout: header, tabs, search, then the column header and the
-// list on the left with the details pane beside them, then a blank line, two
-// help lines, the status and the action line.
-const listChrome = 9
+// list on the left with the details pane beside them, then a blank line,
+// the bottom lines (two, or more while a sign-in shows its URL) and the
+// status.
+const listChrome = 6
 
-// Wide list columns, after the focus prefix and the glyph: MCP, Needs and,
+// Wide list columns, after the focus prefix and the glyph: MCP, Status and,
 // with two or more sources, Source. Each column ends in the gutter. Where a
 // row runs is in the details pane.
 const (
 	colMinName   = 14
+	colMinStatus = 21
 	colMaxName   = 28
 	colMinSource = 12
 	colMaxSource = 30
@@ -32,11 +34,11 @@ func (m *Model) size() (int, int) {
 }
 
 func (m *Model) listHeight() int {
-	_, h := m.size()
+	w, h := m.size()
 	if m.compact() {
-		return max(h-compactChrome, 1)
+		return max(h-compactChrome-len(m.bottomLines(w)), 1)
 	}
-	return max(h-listChrome, 1)
+	return max(h-listChrome-len(m.bottomLines(w)), 1)
 }
 
 func (m *Model) wideList() []string {
@@ -49,23 +51,124 @@ func (m *Model) wideList() []string {
 	for i, line := range left {
 		lines = append(lines, pad(line, lw)+" "+rule+" "+pane[i])
 	}
-	first := m.keys("Space: on/off   Left/Right: domain   Up/Down: MCP   Enter: details   Ctrl+S: save", w)
-	second := m.keys("/: search   Tab: actions   A: add personal connection   q: cancel   ?: help", w)
-	switch m.screen {
-	case screenSearch:
-		first, second = m.keys(searchHelp, w), fit("Typing filters label, ID and description in every tab.", w)
-	case screenConflict:
-		first, second = fit(m.conflict, w), m.keys(conflictKeys, w)
+	lines = append(lines, "")
+	return append(append(lines, m.bottomLines(w)...), m.statusLine(w))
+}
+
+// bottomLines are the lines under the list, above the status. While a
+// sign-in waits they say where to sign in, with its URL, and how to skip
+// it; while setting up runs, how to stop it. Otherwise, when a server that
+// is on has a step left, the first line says so and offers s when s takes
+// a step, and Right when the cursor is on one, else names the next step;
+// the rest are key hints. The compact list has room for one key line.
+func (m *Model) bottomLines(w int) []string {
+	_, h := m.size()
+	compact := m.compact()
+	switch {
+	case m.screen == screenSearch && compact:
+		return []string{m.keys(searchHelp, w)}
+	case m.screen == screenSearch:
+		return []string{m.keys(searchHelp, w), fit("Typing filters label, ID and description in every domain.", w)}
+	case m.finish != nil:
+		// The sign-in leaves the list a row at least.
+		room := max(h-listChrome-1, 2)
+		if compact {
+			room = max(h-compactChrome-1, 2)
+		}
+		text := wrap(m.signInText(), w)
+		if m.signInText() == "" {
+			text = []string{fit(m.runText(), w)}
+		}
+		if len(text) > room-1 {
+			text = append(text[:room-2], fit(strings.Join(text[room-2:], " "), w))
+		}
+		return append(text, m.keys(m.runHelp(), w))
 	}
-	return append(lines, "", first, second, m.statusText(w), m.actionLine(w))
+	_, steps := m.steps()
+	keys := "Space: on/off   Tab: domain   /: search   u: undo   ?: help   q: quit"
+	if compact {
+		keys = "Space: on/off   Enter: open   Tab: domain   u: undo   s: set up   q: quit   ?: help"
+	}
+	if len(steps) > 0 {
+		count := plural(len(steps), "server needs a step.", "servers need a step.") + "  "
+		if compact {
+			count = plural(len(steps), "needs a step.", "need a step.") + " "
+		}
+		// s only when it takes a step; Right only on a server with one.
+		// With neither, the line names the next step.
+		lead := count
+		var hints []string
+		if m.setUpTakes() {
+			hints = append(hints, "s: set up all")
+		}
+		if row, ok := m.selected(); ok && m.statusOf(row).step() {
+			hints = append(hints, m.theme.glyph.right+": open "+rowLabel(row))
+		}
+		if len(hints) == 0 {
+			next := steps[0]
+			lead += "Next: " + next.Label + ", " + m.statusOf(m.live.Effective().Connections[next.ID]).text + ".  "
+		}
+		if compact {
+			hints = append(hints, "?: help")
+		}
+		// The keys get the room after the count; the next step the rest.
+		hint := ""
+		if len(hints) > 0 {
+			hint = m.keys(strings.Join(hints, "   "), max(w-textWidth(count), 1))
+		}
+		text := strings.TrimRight(lead, " ")
+		gap := strings.Repeat(" ", len(lead)-len(text))
+		first := fit(text, w)
+		if hint != "" {
+			first = fit(text, max(w-textWidth(hint)-len(gap), 0)) + gap + hint
+		}
+		if compact {
+			return []string{fit(first, w)}
+		}
+		return []string{fit(first, w), m.keys(keys, w)}
+	}
+	if compact {
+		return []string{m.keys(keys, w)}
+	}
+	return []string{
+		m.keys("Space: on/off   Tab: domain   Up/Down: server   Right/Enter: open   u: undo   s: set up", w),
+		m.keys("/: search   n: new personal connection   q: quit   ?: help", w),
+	}
+}
+
+// signInText says where the running sign-in waits, with its URL once the
+// sign-in passed it; "" when none runs.
+func (m *Model) signInText() string {
+	r := m.finish.current()
+	switch {
+	case r == nil:
+		return ""
+	case r.url == "":
+		return "Sign in to " + r.label + " in your browser."
+	case r.browser:
+		return "Sign in to " + r.label + " in your browser. Didn't open? " + r.url
+	}
+	return "Open this to sign in to " + r.label + ": " + r.url
+}
+
+// runText is the line under the list while setting up runs without a
+// sign-in: how far it got.
+func (m *Model) runText() string {
+	f := m.finish
+	return fmt.Sprintf("Setting up: %d of %d ready.", f.count(finStarted), len(f.rows))
+}
+
+// runHelp is the key line while setting up runs.
+func (m *Model) runHelp() string {
+	if m.finish.current() != nil {
+		return "Esc: skip this one   q: stop"
+	}
+	return "Space: on/off   Tab: domain   Right/Enter: open   q: stop"
 }
 
 // searchHelp replaces the list keys while typing a search: Space and letters
 // type into the query.
 const searchHelp = "Enter/Down: list   Backspace/Ctrl+U: edit   Esc: clear"
-
-// conflictKeys are the choices a save conflict offers.
-const conflictKeys = "r: reload and reapply   Esc: back"
 
 func (m *Model) searchLine(w int) string {
 	switch {
@@ -79,17 +182,17 @@ func (m *Model) searchLine(w int) string {
 
 // showSource reports whether the rows come from two or more sources (a
 // catalog or Personal). With a single source the Source column is hidden and
-// MCP and Needs share its width.
+// MCP and Status share its width.
 func (m *Model) showSource() bool {
 	seen := map[string]bool{}
-	for _, row := range m.draft.Effective().Connections {
+	for _, row := range m.live.Effective().Connections {
 		seen[row.SourceID] = true
 	}
 	return len(seen) > 1
 }
 
 // wideColumns are the list's column widths for a list lw cells wide.
-type wideColumns struct{ lead, name, needs, source int }
+type wideColumns struct{ lead, name, status, source int }
 
 func (m *Model) wideColumns(lw int) wideColumns {
 	c := wideColumns{lead: 2 + textWidth(m.theme.glyph.on) + 1}
@@ -97,8 +200,11 @@ func (m *Model) wideColumns(lw int) wideColumns {
 		c.source = min(max(lw/4, colMinSource), colMaxSource)
 	}
 	rest := max(lw-c.lead-c.source, 2*colMinName)
-	c.name = min(max(rest/2, colMinName), colMaxName)
-	c.needs = rest - c.name
+	// MCP as wide as the longest label, while Status keeps room for
+	// "starts on first use".
+	c.name = min(max(m.labelWidth(), colMinName), colMaxName, max(rest-colMinStatus, colMinName))
+
+	c.status = rest - c.name
 	return c
 }
 
@@ -106,9 +212,9 @@ func (m *Model) columnHeader(lw int) string {
 	c := m.wideColumns(lw)
 	line := strings.Repeat(" ", c.lead) + cell("MCP", c.name)
 	if c.source > 0 {
-		return fit(line+cell("Needs", c.needs)+"Source", lw)
+		return fit(line+cell("Status", c.status)+"Source", lw)
 	}
-	return fit(line+"Needs", lw)
+	return fit(line+"Status", lw)
 }
 
 // wideRow renders a row in the wide columns. Styled, each part is painted;
@@ -116,55 +222,26 @@ func (m *Model) columnHeader(lw int) string {
 // reset ends that style early.
 func (m *Model) wideRow(lw int) rowFormat {
 	c := m.wideColumns(lw)
-	state := m.draft.State()
+	state := m.live.State()
 	return func(row config.EffectiveConnection, prefix string, styled bool) string {
-		look := lookOf(state, row)
-		line := prefix + m.markText(look, styled) + " " + cell(rowLabel(row), c.name) + m.needsText(look.listNeeds(), c.needs, styled)
+		st := m.statusOf(row)
+		line := prefix + m.markText(st, styled) + " " + cell(rowLabel(row), c.name) + m.statusText(st, c.status, styled)
 		if c.source > 0 {
-			return fit(line+sourceLabel(state, row), lw)
+			return fit(line+sourceName(state, row), lw)
 		}
 		return fit(line, lw)
 	}
 }
 
-// markText is the row's glyph, colored when styled.
-func (m *Model) markText(look rowLook, styled bool) string {
-	glyph, r := look.mark(m.theme.glyph)
+// markText is the row's glyph, colored when styled, padded to the width of
+// the on glyph (a spinner frame may be narrower).
+func (m *Model) markText(st status, styled bool) string {
+	glyph, r := m.mark(st)
+	glyph = pad(glyph, textWidth(m.theme.glyph.on))
 	if !styled {
 		return glyph
 	}
 	return m.theme.paint(r, glyph)
-}
-
-// needsText fits needs into a column of n cells that ends in the gutter,
-// two spaces apart, each colored by its role when styled. A need that does
-// not fit whole is cut with "..." and ends the column; a later need is left
-// out unless at least minNeed cells (or all of it) fit.
-func (m *Model) needsText(needs []need, n int, styled bool) string {
-	const minNeed = 6
-	room := n - gutter
-	var out string
-	used := 0
-	for i, nd := range needs {
-		text := nd.text
-		if i > 0 {
-			if room-used-2 < min(textWidth(text), minNeed) {
-				break
-			}
-			out += "  "
-			used += 2
-		}
-		text = fit(text, room-used)
-		used += textWidth(text)
-		if styled {
-			text = m.theme.paint(nd.role, text)
-		}
-		out += text
-		if used >= room {
-			break
-		}
-	}
-	return out + strings.Repeat(" ", max(n-used, 0))
 }
 
 // rowFormat renders one list row after its focus prefix; styled is false
@@ -179,12 +256,12 @@ func (m *Model) listBody(w int, format rowFormat) []string {
 	lines := make([]string, 0, page)
 	if len(rows) == 0 {
 		name := m.currentTab().label
-		state := m.draft.State()
+		state := m.live.State()
 		switch q := m.search.String(); {
 		case q != "":
 			lines = append(lines, fit(fmt.Sprintf("  No MCPs match %s in %s. Esc clears the search.", quoted(q), name), w))
 		case len(state.Local.Sources) == 0 && len(state.Personal.Connections) == 0:
-			lines = append(lines, fit("  No catalogs yet. Add one from a terminal: mcparcel add <owner/repo>.", w), fit("  Press A to add a personal connection.", w))
+			lines = append(lines, fit("  No catalogs yet. Add one from a terminal: mcparcel add <owner/repo>.", w), fit("  Press n to add a personal connection.", w))
 		default:
 			lines = append(lines, fit("  No MCPs in "+name+".", w))
 		}
@@ -192,7 +269,7 @@ func (m *Model) listBody(w int, format rowFormat) []string {
 	for i := m.offset; i < len(rows) && i < m.offset+page; i++ {
 		row := rows[i]
 		prefix := "  "
-		focused := i == m.cursor && m.focus == focusList
+		focused := i == m.cursor
 		if focused {
 			prefix = "> "
 		}
@@ -224,75 +301,61 @@ func firstLine(text string) string {
 }
 
 func (m *Model) stateText(row config.EffectiveConnection) string {
-	state := m.draft.State()
-	switch lookOf(state, row).state {
-	case rowUnavailable:
+	state := m.live.State()
+	switch m.statusOf(row).kind {
+	case stUnavailable:
 		return unavailableText(state, row)
-	case rowReview:
+	case stReview:
 		return "Review required. Space accepts it (same as mcparcel enable " + output.DisplayMetadata(row.ID) + ")."
-	case rowNeedsConfig:
-		return "Configuration required: " + strings.Join(missingConfig(state, row), ", ") + "."
+	case stInput, stProfile:
+		return "Needs " + needsText(missingConfig(state, row)) + "."
 	}
 	if profile := autoLinks(state, row); profile != "" {
-		return "Space turns it on and links credential profile " + output.DisplayMetadata(profile) + "."
+		return "Space turns it on and links 1Password profile " + output.DisplayMetadata(profile) + "."
 	}
 	if text := m.sessionText(row); text != "" {
 		return text
 	}
-	return "Configuration ready. Connection not checked."
+	if row.Enabled {
+		return "On. It starts on first use; s sets it up now."
+	}
+	return "Off. Space turns it on."
 }
 
-// sessionText is what the finish step or Connect found this session for a
-// connection that is on: why it could not start, that it started, or that
-// it still needs a sign-in. Empty when nothing was tried.
+// sessionText is what the Status of a row knows beyond its definition:
+// that its command is not installed, that setting up runs or what it found, or
+// what its stored sign-in says. Empty when there is nothing to add.
 func (m *Model) sessionText(row config.EffectiveConnection) string {
-	if !row.Enabled {
-		return ""
-	}
-	if failure := m.loadErr[row.ID]; len(failure) > 0 {
-		return "Not started. " + failure[0]
-	}
-	if loaded, ok := m.loaded[row.ID]; ok {
-		return "Started this session, " + plural(len(loaded.tools), "tool", "tools") + "."
-	}
-	if outcome, ok := m.outcomes[row.ID]; ok && outcome == finSkipped {
-		return "Needs a sign-in: run mcparcel auth " + output.DisplayMetadata(output.AuthTarget(row.ID, row.ID)) + "."
+	st := m.statusOf(row)
+	auth := authName(m.live.Effective(), row.ID)
+	switch st.kind {
+	case stCommand:
+		return st.detail + " is not installed: it is not found on PATH. Install it, then press s."
+	case stFailed:
+		return m.loadErr[row.ID][0]
+	case stManual:
+		return "Needs a sign-in: run mcparcel auth " + auth + "."
+	case stSignIn:
+		if m.opts.SignIn == nil {
+			return "Needs a sign-in: run mcparcel auth " + auth + "."
+		}
+		return "Needs a sign-in: s signs you in, in your browser."
+	case stSigning, stWorking:
+		return "Setting up: " + st.text
+	case stSignInUnknown:
+		return "Its sign-in cannot be read without a prompt; s starts it anyway."
+	case stTools:
+		return "Started this session, " + st.text + "."
 	}
 	return ""
 }
 
-func (m *Model) statusLine() string {
-	if m.screen == screenConfirm {
-		return fmt.Sprintf("Discard %s? y/N", plural(m.draft.Changes(), "unsaved change", "unsaved changes"))
-	}
-	return m.status
-}
-
-// statusText is the status line fitted to w; a toast that is fading out is
-// dim (see motion.go).
-func (m *Model) statusText(w int) string {
-	line := fit(m.statusLine(), w)
-	if m.toastFading && m.screen != screenConfirm {
+// statusLine is the status fitted to w; a toast that is fading out is dim
+// (see motion.go).
+func (m *Model) statusLine(w int) string {
+	line := fit(m.status, w)
+	if m.toastFading {
 		return m.theme.paint(roleDim, line)
 	}
 	return line
-}
-
-func (m *Model) actionLine(w int) string {
-	changes := "No unsaved changes"
-	if n := m.draft.Changes(); n > 0 {
-		changes = plural(n, "unsaved change", "unsaved changes")
-	}
-	button := func(label string, focus int) string {
-		if m.focus == focus {
-			return ">" + m.theme.paint(roleSelected, "["+label+"]")
-		}
-		return " [" + label + "]"
-	}
-	right := button("Save", focusSave) + button("Cancel", focusCancel)
-	width := textWidth(right)
-	if width >= w {
-		return fit(stripSGR(right), w)
-	}
-	return pad(changes, w-width) + right
 }

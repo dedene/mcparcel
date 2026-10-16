@@ -81,11 +81,7 @@ func (c *LocalRemoveCmd) Run(ctx context.Context, s *Streams, opts *CommandOptio
 		return err
 	}
 	next, err := store.Update(ctx, state.Selections.Revision, func(draft *config.State) error {
-		if _, exists := draft.Personal.Connections[id]; !exists {
-			return config.ErrNotFound
-		}
-		delete(draft.Personal.Connections, id)
-		return nil
+		return edit.StageLocalRemove(draft, id)
 	})
 	if err != nil {
 		return err

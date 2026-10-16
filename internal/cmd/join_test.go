@@ -60,27 +60,70 @@ func newJoinFetcher(t *testing.T) *joinFetcher {
 	return &joinFetcher{Fetcher: minVersionFetcher{&catalog.GitHub{Public: api, Private: api}}}
 }
 
-// keys turns names into key presses: enter, esc, space, ctrl+s, or text
-// typed one character at a time.
+// keys turns names into key presses: enter, esc, space, tab, shift+tab,
+// arrows and ctrl+u, or text typed one character at a time.
 func keys(names ...string) []tea.KeyPressMsg {
+	named := map[string]tea.KeyPressMsg{
+		"enter": {Code: tea.KeyEnter}, "esc": {Code: tea.KeyEscape}, "space": {Code: tea.KeySpace, Text: " "},
+		"tab": {Code: tea.KeyTab}, "shift+tab": {Code: tea.KeyTab, Mod: tea.ModShift},
+		"up": {Code: tea.KeyUp}, "down": {Code: tea.KeyDown}, "left": {Code: tea.KeyLeft}, "right": {Code: tea.KeyRight},
+		"ctrl+u": {Code: 'u', Mod: tea.ModCtrl},
+	}
 	var out []tea.KeyPressMsg
 	for _, name := range names {
-		switch name {
-		case "enter":
-			out = append(out, tea.KeyPressMsg{Code: tea.KeyEnter})
-		case "esc":
-			out = append(out, tea.KeyPressMsg{Code: tea.KeyEscape})
-		case "space":
-			out = append(out, tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
-		case "ctrl+s":
-			out = append(out, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
-		default:
-			for _, r := range name {
-				out = append(out, tea.KeyPressMsg{Code: r, Text: string(r)})
-			}
+		if k, ok := named[name]; ok {
+			out = append(out, k)
+			continue
+		}
+		for _, r := range name {
+			out = append(out, tea.KeyPressMsg{Code: r, Text: string(r)})
 		}
 	}
 	return out
+}
+
+// driveSetup runs the real setup model in a pretend terminal: each press
+// goes to Update with every command run synchronously. The presses must
+// end setup.
+func driveSetup(t *testing.T, ctx context.Context, store *config.Store, state config.State, opts ui.Options, presses ...string) (ui.Result, error) {
+	t.Helper()
+	opts.Tick = func(time.Duration, func(time.Time) tea.Msg) tea.Cmd { return nil }
+	m, err := ui.NewModel(ctx, store, state, opts)
+	if err != nil {
+		return ui.Result{}, err
+	}
+	quit := false
+	var run func(tea.Cmd)
+	send := func(msg tea.Msg) {
+		_, cmd := m.Update(msg)
+		run(cmd)
+	}
+	run = func(cmd tea.Cmd) {
+		if cmd == nil {
+			return
+		}
+		switch msg := cmd().(type) {
+		case nil:
+		case tea.QuitMsg:
+			quit = true
+		case tea.BatchMsg:
+			for _, c := range msg {
+				run(c)
+			}
+		default:
+			send(msg)
+		}
+	}
+	send(tea.WindowSizeMsg{Width: 120, Height: 35})
+	for _, k := range keys(presses...) {
+		if !quit {
+			send(k)
+		}
+	}
+	if !quit {
+		t.Error("the script did not end setup")
+	}
+	return m.Result(), nil
 }
 
 // scriptJoin runs join in a pretend terminal: the setup program is the real
@@ -98,47 +141,11 @@ func scriptJoin(t *testing.T, presses ...string) *ui.Options {
 			t.Error("join contacted the runtime")
 			return output.ToolList{}, nil
 		}
-		opts.NeedsSignIn, opts.SignIn, opts.SourceAges = nil, nil, nil
+		opts.StoredSignIn, opts.SignIn, opts.SourceAges, opts.CommandAvailable = nil, nil, nil, nil
 		// The suggestion flow as on macOS, whatever runs the test;
 		// TestSetupOptionsDesktopApp covers where join does not ask.
 		opts.NoDesktopApp = false
-		opts.Tick = func(time.Duration, func(time.Time) tea.Msg) tea.Cmd { return nil }
-		m, err := ui.NewModel(ctx, store, state, opts)
-		if err != nil {
-			return ui.Result{}, err
-		}
-		quit := false
-		var run func(tea.Cmd)
-		send := func(msg tea.Msg) {
-			_, cmd := m.Update(msg)
-			run(cmd)
-		}
-		run = func(cmd tea.Cmd) {
-			if cmd == nil {
-				return
-			}
-			switch msg := cmd().(type) {
-			case nil:
-			case tea.QuitMsg:
-				quit = true
-			case tea.BatchMsg:
-				for _, c := range msg {
-					run(c)
-				}
-			default:
-				send(msg)
-			}
-		}
-		send(tea.WindowSizeMsg{Width: 120, Height: 35})
-		for _, k := range keys(presses...) {
-			if !quit {
-				send(k)
-			}
-		}
-		if !quit {
-			t.Error("the script did not end setup")
-		}
-		return m.Result(), nil
+		return driveSetup(t, ctx, store, state, opts, presses...)
 	}
 	return got
 }
@@ -215,7 +222,7 @@ func TestJoinRegistersLikeAdd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stdout != "Added fixture/team (ccccccc).\nNo changes saved.\n" {
+	if stdout != "Added fixture/team (ccccccc).\nNothing is on.\n" {
 		t.Fatalf("%q", stdout)
 	}
 	a, j := read(added), read(joined)
@@ -236,7 +243,7 @@ func TestJoinReusesRegisteredSource(t *testing.T) {
 	if err != nil || f.fetches != 1 {
 		t.Fatal(err, f.fetches)
 	}
-	if stdout != "fixture/team is already added (ccccccc). Run mcparcel sync to update it.\nNo changes saved.\n" {
+	if stdout != "fixture/team is already added (ccccccc). Run mcparcel sync to update it.\nNothing is on.\n" {
 		t.Fatalf("%q", stdout)
 	}
 	if got.Join == nil || *got.Join != (ui.Join{SourceID: "github-7", Repository: "fixture/team", Commit: "ccccccc"}) {
@@ -272,59 +279,48 @@ func TestJoinSuggestion(t *testing.T) {
 				t.Fatal(err)
 			}
 			profile, ok := state.Local.CredentialProfiles["vault"]
+			// Every change was written as it was made: setup adds no
+			// summary line of its own.
+			if stdout != "Added fixture/team (ccccccc).\nNothing is on.\n" {
+				t.Fatalf("%q", stdout)
+			}
 			if tc.account == "" {
-				if ok || !strings.HasSuffix(stdout, "No changes saved.\n") {
-					t.Fatal(profile, stdout)
+				if ok {
+					t.Fatal(profile)
 				}
 				return
 			}
 			if profile != (config.Profile{Mode: config.ProfileModeDesktop, Account: tc.account, SessionDuration: profile.SessionDuration}) {
 				t.Fatalf("%+v", profile)
 			}
-			if !strings.HasSuffix(stdout, "Configuration saved at revision 2.\n") {
-				t.Fatalf("%q", stdout)
-			}
 		})
 	}
 }
 
-// Presets turn connections on in the draft; only Ctrl+S saves them, and the
-// finish offer that follows is declined.
-func TestJoinPresetsStage(t *testing.T) {
-	enabled := func(p config.Paths) []string {
-		state, err := config.NewStore(p).Read(context.Background())
-		if err != nil {
-			t.Fatal(err)
-		}
-		var ids []string
-		for id, sel := range state.Selections.Connections {
-			if sel.Enabled {
-				ids = append(ids, id+"="+sel.CredentialProfile)
-			}
-		}
-		return ids
-	}
+// Picked presets turn their connections on at once, as enable would,
+// linking the profile the intro just created; quitting keeps them.
+func TestJoinPresetsApplyAtOnce(t *testing.T) {
 	p := metadataEnv(t)
-	scriptJoin(t, "enter", "space", "enter", "q", "y")
-	if _, err := runJoin(t, newJoinFetcher(t)); err != nil {
-		t.Fatal(err)
-	}
-	if got := enabled(p); len(got) != 0 {
-		t.Fatal("presets were saved without Ctrl+S", got)
-	}
-
-	p = metadataEnv(t)
-	scriptJoin(t, "enter", "space", "enter", "ctrl+s", "esc", "q")
+	scriptJoin(t, "enter", "space", "enter", "q")
 	stdout, err := runJoin(t, newJoinFetcher(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := enabled(p)
+	state, err := config.NewStore(p).Read(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for id, sel := range state.Selections.Connections {
+		if sel.Enabled {
+			got = append(got, id+"="+sel.CredentialProfile)
+		}
+	}
 	slices.Sort(got)
 	if !reflect.DeepEqual(got, []string{"github:fixture/team#docs=", "github:fixture/team#lint=vault"}) {
 		t.Fatal(got)
 	}
-	if !strings.Contains(stdout, "Configuration saved at revision 3.\n") {
+	if stdout != "Added fixture/team (ccccccc).\n2 on, all ready.\n" {
 		t.Fatalf("%q", stdout)
 	}
 }

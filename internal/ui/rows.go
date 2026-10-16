@@ -2,7 +2,7 @@ package ui
 
 import (
 	"fmt"
-	"net/url"
+	"maps"
 	"slices"
 	"strings"
 
@@ -62,13 +62,16 @@ func rowsFor(effective config.EffectiveConfig, domain, query string) []config.Ef
 			out = append(out, row)
 		}
 	}
-	slices.SortFunc(out, func(a, b config.EffectiveConnection) int {
-		if c := strings.Compare(rowLabel(a), rowLabel(b)); c != 0 {
-			return c
-		}
-		return strings.Compare(a.ID, b.ID)
-	})
+	slices.SortFunc(out, compareRows)
 	return out
+}
+
+// compareRows orders rows by label, then ID.
+func compareRows(a, b config.EffectiveConnection) int {
+	if c := strings.Compare(rowLabel(a), rowLabel(b)); c != 0 {
+		return c
+	}
+	return strings.Compare(a.ID, b.ID)
 }
 
 // tabCount reads "2/3" (enabled/total), or "(2)" while searching.
@@ -90,22 +93,6 @@ func isLoopback(host string) bool {
 	return host == "127.0.0.1" || host == "::1" || host == "localhost"
 }
 
-func runsOn(row config.EffectiveConnection) string {
-	if !row.Available || row.Connection == nil {
-		return "-"
-	}
-	h := row.Connection.Transport.HTTP
-	if h == nil {
-		return "This device"
-	}
-	if h.URL.Literal != nil {
-		if u, err := url.Parse(*h.URL.Literal); err == nil && isLoopback(u.Hostname()) {
-			return "This device"
-		}
-	}
-	return "Remote"
-}
-
 func sourceLabel(state config.State, row config.EffectiveConnection) string {
 	if row.SourceID == "personal" {
 		return "Personal"
@@ -118,19 +105,32 @@ func sourceLabel(state config.State, row config.EffectiveConnection) string {
 	return "-"
 }
 
-// missingConfig names each declared input without a value or default, then the
-// credential profile when it is unbound or the bound profile is gone. A profile
-// the next enable links by itself (edit.AutoProfile) is left out.
+// missingConfig names each declared input without a value or default, then
+// profileNeed when the 1Password profile is unbound or the bound profile is
+// gone. A profile the next enable links by itself (edit.AutoProfile) is left
+// out.
 func missingConfig(state config.State, row config.EffectiveConnection) []string {
 	inputs, profile := config.MissingConfig(state, row)
 	var out []string
 	for _, name := range inputs {
-		out = append(out, "input "+output.DisplayMetadata(name))
+		out = append(out, output.DisplayMetadata(name))
 	}
 	if profile && (edit.AutoProfile(state, row) == "" || !enabling(row)) {
-		out = append(out, "credential profile")
+		out = append(out, profileNeed)
 	}
 	return out
+}
+
+// profileNeed is what missingConfig lists for a profile to link.
+const profileNeed = "a 1Password profile"
+
+// needsText joins what a row misses: "workspace", "workspace and a
+// 1Password profile", "a, b and c".
+func needsText(items []string) string {
+	if len(items) < 2 {
+		return strings.Join(items, "")
+	}
+	return strings.Join(items[:len(items)-1], ", ") + " and " + items[len(items)-1]
 }
 
 // autoLinks returns the profile Space links when that link is all the row
@@ -149,5 +149,32 @@ func enabling(row config.EffectiveConnection) bool {
 }
 
 func linkedText(profile string) string {
-	return "Linked credential profile " + output.DisplayMetadata(profile) + "."
+	return "Linked 1Password profile " + output.DisplayMetadata(profile) + "."
+}
+
+// authName is the name mcparcel auth accepts for id, display-safe: a
+// personal connection's base name when it resolves back to id, else id.
+func authName(effective config.EffectiveConfig, id string) string {
+	name := id
+	if base := config.ConnectionBase(id); base != "" {
+		ids := slices.Collect(maps.Keys(effective.Connections))
+		if resolved, err := config.ResolveID(base, effective.Aliases, ids); err == nil && resolved == id {
+			name = base
+		}
+	}
+	return output.DisplayMetadata(output.AuthTarget(name, id))
+}
+
+func rowLabel(row config.EffectiveConnection) string {
+	if row.Definition != nil && row.Definition.Label != "" {
+		return output.DisplayMetadata(row.Definition.Label)
+	}
+	return output.DisplayMetadata(row.ID)
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return "1 " + one
+	}
+	return fmt.Sprintf("%d %s", n, many)
 }
