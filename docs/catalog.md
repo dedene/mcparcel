@@ -261,6 +261,9 @@ Public repositories use GitHub HTTPS API directly. Private ones use an installed
 authenticated `gh api` process for repository metadata, commit resolution and content
 fetches. No GitHub token copied into MCParcel storage or shared with MCP subprocesses.
 Missing `gh`/login gives instructions; adding a public catalog does not require it.
+The unauthenticated API allows 60 requests an hour per IP address, which a whole
+office shares. When it is rate limited, MCParcel uses `gh api` instead; without
+`gh` the fetch fails as rate limited and the saved snapshot stays active.
 This is a stated prerequisite for private catalogs, not a new silent login flow.
 
 Fetch validation is strict: GitHub responses with case-variant duplicates of a consumed

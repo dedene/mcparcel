@@ -359,7 +359,10 @@ func (g *GitHub) Fetch(ctx context.Context, source config.Source) (Snapshot, err
 		return Snapshot{}, err
 	}
 	var metadata repositoryResponse
-	fallback := !rateLimited(resp) && (resp.Status == 401 || resp.Status == 403 || resp.Status == 404)
+	// A public rate limit (60 requests an hour per IP address) also goes
+	// through gh, whose authenticated limit is separate and much larger.
+	limited := rateLimited(resp)
+	fallback := limited || resp.Status == 401 || resp.Status == 403 || resp.Status == 404
 	if !fallback {
 		if err = responseError(resp); err != nil {
 			return Snapshot{}, err
@@ -372,6 +375,9 @@ func (g *GitHub) Fetch(ctx context.Context, source config.Source) (Snapshot, err
 	if fallback {
 		api = g.Private
 		if err = getWire(ctx, api, base, &metadata); err != nil {
+			if limited && errors.Is(err, ErrGHRequired) {
+				return Snapshot{}, ErrRateLimited
+			}
 			return Snapshot{}, err
 		}
 	}

@@ -191,6 +191,29 @@ func TestFetchPrivateFallback(t *testing.T) {
 	}
 }
 
+// The unauthenticated API allows 60 requests an hour per IP address, which
+// one office shares, so a public rate limit falls back to gh, which has its
+// own, much larger limit. Without gh it stays a rate limit.
+func TestFetchRateLimitFallsBackToGH(t *testing.T) {
+	limits := map[string]APIResponse{
+		"429": {Status: 429},
+		"403": {Status: 403, Header: http.Header{"X-Ratelimit-Remaining": []string{"0"}}},
+	}
+	for name, limited := range limits {
+		t.Run(name, func(t *testing.T) {
+			pub := apiFunc(func(context.Context, string) (APIResponse, error) { return limited, nil })
+			r := newFetchRig()
+			if _, err := (&GitHub{Public: pub, Private: r}).Fetch(t.Context(), initialSource()); err != nil || len(r.calls) != 4 {
+				t.Fatal(err, r.calls)
+			}
+			noGH := apiFunc(func(context.Context, string) (APIResponse, error) { return APIResponse{}, ErrGHRequired })
+			if _, err := (&GitHub{Public: pub, Private: noGH}).Fetch(t.Context(), initialSource()); !errors.Is(err, ErrRateLimited) {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 func TestFetchFailures(t *testing.T) {
 	for _, tc := range []struct {
 		name          string
