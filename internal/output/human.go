@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/dedene/mcparcel/internal/args"
 	"github.com/dedene/mcparcel/internal/elicit"
 )
 
@@ -138,10 +139,15 @@ func humanCall(b *strings.Builder, data CallData) error {
 
 func isString(raw json.RawMessage) bool { return len(raw) > 0 && raw[0] == '"' }
 
+// humanTools prints each tool as its signature, then its description
+// indented by two spaces: "echo(text: string, times?: integer)". Server text
+// is cleaned of terminal controls; blank description lines are dropped so
+// every line at the margin starts a tool.
 func humanTools(b *strings.Builder, data ToolList) error {
 	type tool struct {
-		Name        string `json:"name"`
-		Description string `json:"description"`
+		Name        string          `json:"name"`
+		Description string          `json:"description"`
+		InputSchema json.RawMessage `json:"inputSchema"`
 	}
 	items := make([]tool, 0, len(data.Items))
 	for _, raw := range data.Items {
@@ -153,12 +159,16 @@ func humanTools(b *strings.Builder, data ToolList) error {
 	}
 	sort.SliceStable(items, func(i, j int) bool { return items[i].Name < items[j].Name })
 	for _, item := range items {
-		b.WriteString(item.Name)
-		if item.Description != "" {
-			b.WriteString(": ")
-			b.WriteString(item.Description)
+		b.WriteString(elicit.Clean(item.Name, 128))
+		if params, ok := args.Signature(item.InputSchema); ok {
+			b.WriteString("(" + params + ")")
 		}
 		b.WriteByte('\n')
+		for _, line := range strings.Split(elicit.CleanLines(item.Description), "\n") {
+			if line = strings.TrimRight(line, " \t"); strings.TrimSpace(line) != "" {
+				b.WriteString("  " + line + "\n")
+			}
+		}
 	}
 	return nil
 }

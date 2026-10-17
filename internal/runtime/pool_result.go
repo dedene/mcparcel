@@ -99,8 +99,12 @@ func poolError(err, cause error, id string, dispatched bool) *output.Error {
 	if errors.As(err, &ambiguous) {
 		details = &output.Details{Candidates: append([]string(nil), ambiguous.Candidates...)}
 	}
-	if !dispatched && safe != nil && safe.Details != nil && len(safe.Details.Variables) > 0 {
-		details = &output.Details{Variables: safe.Details.Variables}
+	if !dispatched && safe != nil && safe.Details != nil {
+		// Missing variable names and the identifiers that name what failed.
+		d := safe.Details
+		if len(d.Variables) > 0 || d.Connection != "" || d.Tool != "" || d.Argument != "" || d.Suggestion != "" {
+			details = &output.Details{Variables: d.Variables, Connection: d.Connection, Tool: d.Tool, Argument: d.Argument, Suggestion: d.Suggestion}
+		}
 	}
 	if dispatched {
 		details = &output.Details{RequestID: id, Dispatched: true}

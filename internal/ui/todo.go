@@ -24,13 +24,16 @@ type todoMark int
 const (
 	todoDone  todoMark = iota // ✓
 	todoStep                  // ◆ left for you
-	todoLater                 // ○ happens on its own, after the steps
+	todoLater                 // ⋯ happens on its own, after the steps
 )
 
 type todoItem struct {
-	mark todoMark
-	text string
-	role role // a step's color
+	mark  todoMark
+	text  string
+	role  role       // a step's color
+	does  actionKind // the server page action that takes this step, if any
+	name  string     // that action's input or command
+	state bool       // says what the state line says: on, off, a review, a failure
 }
 
 // todo is the row's To do: on, a review, each input, the 1Password
@@ -44,20 +47,27 @@ func (m *Model) todo(row config.EffectiveConnection) []todoItem {
 	state := m.live.State()
 	st := m.statusOf(row)
 	var items []todoItem
-	add := func(mark todoMark, r role, text string) { items = append(items, todoItem{mark, text, r}) }
+	add := func(mark todoMark, r role, text string) {
+		items = append(items, todoItem{mark: mark, text: text, role: r})
+	}
+	// step adds a step left for you, with the server page action that takes it.
+	step := func(r role, text string, does actionKind, name string) {
+		items = append(items, todoItem{mark: todoStep, text: text, role: r, does: does, name: name})
+	}
+	// Whether it is on, under review or failed, the state line says too.
+	on := todoItem{mark: todoDone, text: "On", role: roleOK, state: true}
 	switch {
 	case !row.Enabled:
-		add(todoStep, roleWarn, "Turn it on")
+		items = append(items, todoItem{mark: todoStep, text: "Turn it on", role: roleWarn, does: actTurnOn, state: true})
 	case row.ReviewRequired:
-		add(todoDone, roleOK, "On")
-		add(todoStep, roleWarn, "Accept the change")
+		items = append(items, on, todoItem{mark: todoStep, text: "Accept the change", role: roleWarn, does: actAccept, state: true})
 	default:
-		add(todoDone, roleOK, "On")
+		items = append(items, on)
 	}
 	missing, profileMissing := config.MissingConfig(state, row)
 	for _, name := range sortedInputs(d) {
 		if slices.Contains(missing, name) {
-			add(todoStep, roleWarn, "Set "+output.DisplayMetadata(name))
+			step(roleWarn, "Set "+output.DisplayMetadata(name), actInput, name)
 		} else {
 			add(todoDone, roleOK, output.DisplayMetadata(name)+" is set")
 		}
@@ -69,19 +79,19 @@ func (m *Model) todo(row config.EffectiveConnection) []todoItem {
 		case auto != "" && enabling(row):
 			add(todoDone, roleOK, "1Password: links "+output.DisplayMetadata(auto)+" when on")
 		default:
-			add(todoStep, roleWarn, "Link a 1Password profile")
+			step(roleWarn, "Link a 1Password profile", actProfile, "")
 		}
 	}
 	if command := m.missingCommand(row); command != "" {
-		add(todoStep, roleBad, "Install "+command)
+		step(roleBad, "Install "+command, actCommand, command)
 	}
 	if signIn(d) {
 		s, known := m.storedSignIn(row)
 		switch {
 		case st.kind == stManual || st.kind == stSignIn && m.opts.SignIn == nil:
-			add(todoStep, roleWarn, "Sign in: run mcparcel auth "+authName(m.live.Effective(), row.ID))
+			step(roleWarn, "Sign in: run mcparcel auth "+authName(m.live.Effective(), row.ID), actSignIn, "")
 		case st.kind == stSignIn || st.kind == stSigning:
-			add(todoStep, roleAccent, "Sign in with your browser")
+			step(roleAccent, "Sign in with your browser", actSignIn, "")
 		case known && s.Unknown:
 			add(todoLater, roleDim, "Sign-in unknown: it can't be read without a prompt")
 		case known && !s.Needed:
@@ -92,9 +102,9 @@ func (m *Model) todo(row config.EffectiveConnection) []todoItem {
 	}
 	switch tools := m.loaded[row.ID].tools; {
 	case st.kind == stFailed && st.text == "could not start":
-		add(todoStep, roleBad, "Could not start")
+		items = append(items, todoItem{mark: todoStep, text: "Could not start", role: roleBad, does: actStart, state: true})
 	case st.kind == stFailed:
-		add(todoStep, roleBad, "Could not start: "+st.text)
+		items = append(items, todoItem{mark: todoStep, text: "Could not start: " + st.text, role: roleBad, does: actStart, state: true})
 	case tools != nil:
 		add(todoDone, roleOK, plural(len(tools), "tool", "tools")+" loaded")
 	case st.kind == stWorking:
@@ -105,6 +115,23 @@ func (m *Model) todo(row config.EffectiveConnection) []todoItem {
 		add(todoLater, roleDim, "Tools load on first use")
 	}
 	return items
+}
+
+// pageTodo is the To do on the server page: the actions above it are the
+// steps left for you, so a step one of them takes is not listed again.
+func pageTodo(items []todoItem, actions []action) []todoItem {
+	return slices.DeleteFunc(slices.Clone(items), func(item todoItem) bool {
+		return item.does != actNone && slices.ContainsFunc(actions, func(a action) bool {
+			return a.kind == item.does && a.name == item.name
+		})
+	})
+}
+
+// paneTodo is the To do in the details pane: the state line above it
+// already says whether the row is on, under review or failed, so those
+// items are left out.
+func paneTodo(items []todoItem) []todoItem {
+	return slices.DeleteFunc(slices.Clone(items), func(item todoItem) bool { return item.state })
 }
 
 // todoLine renders one To do item after an indent, colored when styled.
@@ -207,12 +234,7 @@ func (m *Model) fromText(row config.EffectiveConnection) string {
 	return from + m.theme.glyph.sep + strings.Join(names, ", ")
 }
 
-func (m *Model) domainLabel(id string) string {
-	if label := m.live.Effective().Domains[id].Label; label != "" {
-		return output.DisplayMetadata(label)
-	}
-	return output.DisplayMetadata(id)
-}
+func (m *Model) domainLabel(id string) string { return domainName(m.live.Effective(), id) }
 
 // facts are the Runs and From lines, their names dim, in n cells.
 func (m *Model) facts(row config.EffectiveConnection, n int) []string {

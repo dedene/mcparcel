@@ -20,6 +20,12 @@ type Details struct {
 	RPCCode *int `json:"rpcCode,omitempty"`
 	// Variables names the environment variables a headless runtime is missing.
 	Variables []string `json:"variables,omitempty"`
+	// Connection, Tool, Argument and Suggestion name what failed: only values
+	// that pass the identifier grammars in errors_identity.go, never a value.
+	Connection string `json:"connection,omitempty"`
+	Tool       string `json:"tool,omitempty"`
+	Argument   string `json:"argument,omitempty"`
+	Suggestion string `json:"suggestion,omitempty"`
 }
 type Error struct {
 	Code       string   `json:"code"`
@@ -51,7 +57,7 @@ var registry = map[string]errorSpec{
 	"import_blocked":      {2, "Selected import entries require changes.", "Review the import report, provide bindings, or choose an applicable --only subset."},
 	"alias_collision":     {2, "The alias already names another connection.", "Use the existing alias or choose a different personal ID."},
 	"config_write_failed": {1, "Configuration may have changed, but its durable save could not be confirmed.", "Reload the configuration before retrying."},
-	"connection_disabled": {4, "The connection is disabled.", "Enable the connection before calling it."},
+	"connection_disabled": {4, "The connection is disabled.", "Run mcparcel enable <mcp>."},
 	"review_required":     {4, "The connection requires review.", "Review its definition and accept it by ID."},
 	"tool_denied":         {4, "The tool is denied by connection policy.", "Check the source policy and personal tool selection."},
 	"ambiguous_id":        {2, "The connection name is ambiguous.", "Use a canonical connection ID."},
@@ -61,17 +67,17 @@ var registry = map[string]errorSpec{
 	"terminal_required":   {2, "Setup needs an interactive terminal; it does not run with --json, --no-input or without a terminal.", "Use mcparcel catalog, enable, disable, tools enable/disable, config input set, config profile bind and local add/update instead."},
 
 	"internal_error":           {1, "An internal error occurred.", "Report this error with the mcparcel version."},
-	"invalid_arguments":        {2, "Invalid call arguments.", "Check the tool schema and argument syntax."},
+	"invalid_arguments":        {2, "Invalid call arguments.", "Run mcparcel tools <mcp> to see the tool's arguments."},
 	"invalid_config":           {2, "Invalid personal configuration.", "Check personal.json and config.json."},
 	"config_changed":           {2, "The connection configuration changed before dispatch.", "Review the current definition and invoke the command again."},
-	"config_required":          {2, "Configuration is required.", "Create personal.json and bind the required local profile."},
+	"config_required":          {2, "Required configuration is missing.", "Run mcparcel inspect <mcp> to see what the connection needs, then mcparcel setup."},
 	"unsafe_local_path":        {2, "A local runtime or configuration path is unsafe.", "Make the mcparcel runtime directory mode 700 and owned by you; config files must be owned by you and not writable by others."},
 	"auth_required":            {3, "Credential authorization is required.", "Run the command interactively with 1Password desktop integration enabled."},
 	"auth_expired":             {3, "The credential session expired.", "Run the command interactively to authorize again."},
 	"auth_account_conflict":    {3, "This daemon already uses another 1Password account; run mcparcel runtime restart.", ""},
 	"auth_failed":              {3, "Credential resolution failed.", "Check the profile, desktop integration and vault access."},
 	"auth_rate_limited":        {6, "1Password rate limited the request.", "Wait, then run the call again. Service-account limits are hourly and daily."},
-	"connection_unavailable":   {4, "The connection is not defined.", "Check the connection ID in personal.json."},
+	"connection_unavailable":   {4, "The connection is not defined.", "Run mcparcel list to see enabled connections, or mcparcel catalog for all of them."},
 	"tool_error":               {5, "The MCP tool returned an error result.", ""},
 	"connection_failed":        {6, "Could not connect to the MCP server.", "Check the connection configuration and prerequisites."},
 	"timeout":                  {6, "The operation timed out before tool dispatch.", "Check the server and timeout."},
@@ -83,7 +89,7 @@ var registry = map[string]errorSpec{
 	"runtime_supervised":       {6, "A supervisor runs this runtime (mcparcel runtime serve).", "Start or restart it through its supervisor. To let the CLI start one, remove runtime.supervised from config.json and the supervised file in the runtime directory."},
 	"schema_cache_miss":        {6, "No cached tool schema is available.", "Run mcparcel tools without --cached."},
 	"invalid_schema":           {6, "The server returned an invalid tool schema.", "Check the MCP server implementation."},
-	"tool_not_found":           {2, "The tool is not advertised by this connection.", "Run mcparcel tools for this connection."},
+	"tool_not_found":           {2, "The tool is not advertised by this connection.", "Run mcparcel tools <mcp> to see its tools."},
 	"protocol_error":           {6, "The runtime or MCP response is invalid.", "Check the daemon log and server compatibility."},
 	"elicitation_declined":     {3, "The server asked for approval and MCParcel declined it.", "Approve this in the server's own app, then retry."},
 	"server_error":             {6, "The MCP server returned an error for this call.", "Check the arguments with mcparcel tools <mcp>. If the tool may have changed remote state, inspect it before calling again."},
@@ -100,17 +106,16 @@ var registry = map[string]errorSpec{
 
 func (e *Error) Error() string { return e.Message }
 
-func CommandUsageError() *Error {
-	err := NewError("invalid_arguments", nil)
-	err.Message = "Invalid command arguments."
-	err.NextAction = "Run 'mcparcel --help' for command usage."
-	return err
+// CommandUsageError is invalid_arguments for a command line whose specific
+// problem cannot be named safely. command is the command path for --help.
+func CommandUsageError(command string) *Error {
+	return UsageError(command, "Invalid command arguments.", "", "")
 }
 
 func SourceNotRegisteredError() *Error {
 	err := NewError("catalog_unavailable", nil)
 	err.Message = "This catalog is not registered."
-	err.NextAction = "Run 'mcparcel add <owner/repo>' to register a catalog."
+	err.NextAction = "Run mcparcel add <owner/repo> to register a catalog."
 	return err
 }
 

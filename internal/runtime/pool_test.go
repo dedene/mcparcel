@@ -453,6 +453,21 @@ func TestMissingTool(t *testing.T) {
 	}
 }
 
+// A policy-denied tool is never offered as the "Did you mean" suggestion.
+func TestMissingToolSkipsDeniedSuggestion(t *testing.T) {
+	r := newRig(t)
+	r.http("a", testutil.FixtureOptions{}, false)
+	c := r.personal.Connections["a"]
+	c.ToolPolicy = &config.ToolPolicy{Deny: []string{"counter"}}
+	r.personal.Connections["a"] = c
+	r.start()
+	resp := r.call(testCtx(t), "a", "counte")
+	responseCode(t, resp, "tool_not_found", false)
+	if resp.Error.Details == nil || resp.Error.Details.Suggestion == "counter" || strings.Contains(resp.Error.Message, "counter") {
+		t.Fatalf("denied tool suggested: %+v", resp.Error)
+	}
+}
+
 func editAtList(t *testing.T, edit func(*poolRig), want string) {
 	t.Helper()
 	r := newRig(t)

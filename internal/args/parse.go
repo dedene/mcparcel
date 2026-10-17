@@ -44,8 +44,10 @@ func Parse(assignments []string, inlineJSON string, payload io.Reader) (Raw, err
 			return Raw{}, fmt.Errorf("%w: expected key=value, key:value or key:=json", ErrInvalidArgs)
 		}
 		key := assignment[:i]
+		// Errors leave the key out: nothing checked it, and it may be a
+		// pasted secret.
 		if _, exists := out.Values[key]; exists {
-			return Raw{}, fmt.Errorf("%w: duplicate key %q", ErrInvalidArgs, key)
+			return Raw{}, fmt.Errorf("%w: duplicate key", ErrInvalidArgs)
 		}
 		forced := assignment[i] == ':' && len(assignment) > i+1 && assignment[i+1] == '='
 		start := i + 1
@@ -56,7 +58,7 @@ func Parse(assignments []string, inlineJSON string, payload io.Reader) (Raw, err
 		if forced {
 			v, err := jsonutil.Decode([]byte(value.Text))
 			if err != nil {
-				return Raw{}, fmt.Errorf("%w: argument %q requires valid JSON", ErrInvalidArgs, key)
+				return Raw{}, fmt.Errorf("%w: an argument requires valid JSON", ErrInvalidArgs)
 			}
 			value.JSON, _ = json.Marshal(v)
 			value.Text = ""

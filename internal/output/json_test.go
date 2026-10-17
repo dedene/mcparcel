@@ -181,7 +181,7 @@ func TestToolListAndHuman(t *testing.T) {
 	}
 	list.Items = []json.RawMessage{json.RawMessage(`{"name":"zeta","description":"Last"}`), json.RawMessage(`{"name":"alpha","description":"First"}`)}
 	b.Reset()
-	if err := WriteHuman(&b, list); err != nil || b.String() != "alpha: First\nzeta: Last\n" {
+	if err := WriteHuman(&b, list); err != nil || b.String() != "alpha()\n  First\nzeta()\n  Last\n" {
 		t.Fatal(b.String(), err)
 	}
 	if string(list.Items[0]) != `{"name":"zeta","description":"Last"}` {

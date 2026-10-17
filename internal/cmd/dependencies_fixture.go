@@ -320,6 +320,23 @@ func newTerminal(paths config.Paths, _, _ *os.File) func(context.Context) io.Rea
 	return func(context.Context) io.Reader { return typed }
 }
 
+// stdoutTerminal is true when StateDir/fixture-stdout-terminal exists, so
+// list and catalog print their terminal table without a pty.
+func stdoutTerminal(io.Writer) bool {
+	paths, err := commandPaths()
+	return err == nil && fixturePresent(paths, "fixture-stdout-terminal")
+}
+
+// stderrTerminal is true when StateDir/fixture-stderr-terminal exists, so a
+// slow command prints its progress line without a pty.
+func stderrTerminal(io.Writer) bool {
+	paths, err := commandPaths()
+	return err == nil && fixturePresent(paths, "fixture-stderr-terminal")
+}
+
+// writerColumns is unknown (0) in fixture builds: lines are never cut.
+func writerColumns(io.Writer) int { return 0 }
+
 // newSetupTerminal is always false: fixture binaries never start the setup UI.
 func newSetupTerminal(_, _ *os.File) bool { return false }
 

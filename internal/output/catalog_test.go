@@ -16,7 +16,7 @@ func TestMetadataHumanEscapes(t *testing.T) {
 	if err := WriteHuman(&b, data); err != nil {
 		t.Fatal(err)
 	}
-	want := "Revision: 7\nlocal:paper\t\"Label\\x1b\\nInjected\"\tReady\n"
+	want := "local:paper\t\"Label\\x1b\\nInjected\"\tReady\n"
 	if b.String() != want {
 		t.Fatalf("%q", b.String())
 	}

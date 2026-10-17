@@ -51,7 +51,10 @@ func TestParseEmptyAndDottedKey(t *testing.T) {
 }
 
 func TestParseDuplicate(t *testing.T) {
-	parseError(t, []string{"a=1", "a:2"}, "", nil, `duplicate key "a"`)
+	parseError(t, []string{"a=1", "a:2"}, "", nil, `duplicate key`)
+	// A key is unchecked text, maybe a pasted secret: the error never repeats it.
+	parseError(t, []string{"c2VjcmV0dG9rZW4xMjM0NQ==", "c2VjcmV0dG9rZW4xMjM0NQ=="}, "", nil, `duplicate key`)
+	parseError(t, []string{"c2VjcmV0dG9rZW4xMjM0NQ:={"}, "", nil, `an argument requires valid JSON`)
 }
 
 func TestParseSourceConflict(t *testing.T) {
@@ -76,7 +79,7 @@ func TestParseInvalidAssignment(t *testing.T) {
 
 func TestParseBadForcedJSON(t *testing.T) {
 	for _, s := range []string{"x:=NaN", "x:=", `x:={"a":1,"a":2}`} {
-		parseError(t, []string{s}, "", nil, `argument "x" requires valid JSON`)
+		parseError(t, []string{s}, "", nil, `an argument requires valid JSON`)
 	}
 }
 

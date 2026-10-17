@@ -374,3 +374,27 @@ func TestSetupOpensOnTheFirstStep(t *testing.T) {
 	h.m.signInsRead(signInsMsg{})
 	h.contains("[Research 0/1]")
 }
+
+// The wide footer grows from one line to two while searching, so the list
+// loses a row: the cursor on the last visible row scrolls into view.
+func TestCursorStaysVisibleWhenFooterGrows(t *testing.T) {
+	h := newHarness(t, seedMany(20), 100, 20)
+	page := h.m.listHeight()
+	for range page - 1 {
+		h.press("down")
+	}
+	if h.m.cursor != page-1 || h.m.offset != 0 {
+		t.Fatal("setup: cursor", h.m.cursor, "offset", h.m.offset, "page", page)
+	}
+	h.press("/")
+	if h.m.listHeight() >= page {
+		t.Fatal("the footer did not grow; the test needs another size", h.m.listHeight(), page)
+	}
+	if h.m.cursor < h.m.offset || h.m.cursor >= h.m.offset+h.m.listHeight() {
+		t.Fatal("cursor off screen", h.m.cursor, h.m.offset, h.m.listHeight())
+	}
+	row, _ := h.m.selected()
+	if line := h.focusedLine(); !strings.Contains(line, rowLabel(row)) {
+		t.Fatalf("focused line %q, selected %q:\n%s", line, rowLabel(row), h.plain())
+	}
+}

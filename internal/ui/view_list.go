@@ -11,8 +11,8 @@ import (
 
 // Wide list layout: header, tabs, search, then the column header and the
 // list on the left with the details pane beside them, then a blank line,
-// the bottom lines (two, or more while a sign-in shows its URL) and the
-// status.
+// the bottom lines (one key line; two when a server needs a step or while
+// searching; more while a sign-in shows its URL) and the status.
 const listChrome = 6
 
 // Wide list columns, after the focus prefix and the glyph: MCP, Status and,
@@ -21,7 +21,7 @@ const listChrome = 6
 const (
 	colMinName   = 14
 	colMinStatus = 21
-	colMaxName   = 28
+	colMaxName   = 28 // MCP gives way to Status past this, when Status needs it
 	colMinSource = 12
 	colMaxSource = 30
 )
@@ -60,7 +60,8 @@ func (m *Model) wideList() []string {
 // it; while setting up runs, how to stop it. Otherwise, when a server that
 // is on has a step left, the first line says so and offers s when s takes
 // a step, and Right when the cursor is on one, else names the next step;
-// the rest are key hints. The compact list has room for one key line.
+// the other is the key hints. With no step left the wide list has one key
+// line (the arrow keys are only in ? help); the compact list always has one.
 func (m *Model) bottomLines(w int) []string {
 	_, h := m.size()
 	compact := m.compact()
@@ -85,10 +86,6 @@ func (m *Model) bottomLines(w int) []string {
 		return append(text, m.keys(m.runHelp(), w))
 	}
 	_, steps := m.steps()
-	keys := "Space: on/off   Tab: domain   /: search   u: undo   ?: help   q: quit"
-	if compact {
-		keys = "Space: on/off   Enter: open   Tab: domain   u: undo   s: set up   q: quit   ?: help"
-	}
 	if len(steps) > 0 {
 		count := plural(len(steps), "server needs a step.", "servers need a step.") + "  "
 		if compact {
@@ -125,16 +122,19 @@ func (m *Model) bottomLines(w int) []string {
 		if compact {
 			return []string{fit(first, w)}
 		}
-		return []string{fit(first, w), m.keys(keys, w)}
+		return []string{fit(first, w), m.keys(stepKeys, w)}
 	}
-	if compact {
-		return []string{m.keys(keys, w)}
-	}
-	return []string{
-		m.keys("Space: on/off   Tab: domain   Up/Down: server   Right/Enter: open   u: undo   s: set up", w),
-		m.keys("/: search   n: new personal connection   q: quit   ?: help", w),
-	}
+	return []string{m.keys(mainKeys, w)}
 }
+
+// mainKeys are the list's key hints, in one order at every width: keys()
+// drops what does not fit, keeping "? help" last. With a step left the wide
+// list's first line offers s and Enter, so its key line, stepKeys, leaves
+// them out.
+const (
+	mainKeys = "Space: on/off   Tab: domain   Enter: open   s: set up   u: undo   /: search   n: new   q: quit   ?: help"
+	stepKeys = "Space: on/off   Tab: domain   u: undo   /: search   q: quit   ?: help"
+)
 
 // signInText says where the running sign-in waits, with its URL once the
 // sign-in passed it; "" when none runs.
@@ -200,9 +200,16 @@ func (m *Model) wideColumns(lw int) wideColumns {
 		c.source = min(max(lw/4, colMinSource), colMaxSource)
 	}
 	rest := max(lw-c.lead-c.source, 2*colMinName)
-	// MCP as wide as the longest label, while Status keeps room for
-	// "starts on first use".
-	c.name = min(max(m.labelWidth(), colMinName), colMaxName, max(rest-colMinStatus, colMinName))
+	// MCP as wide as the longest label when Status keeps room for its
+	// longest text (at least "starts on first use"); when both cannot fit,
+	// MCP keeps colMaxName and Status cuts the command or input it names.
+	// Both measure every server, so the columns stay put across domains.
+	need := colMinStatus
+	for _, row := range m.live.Effective().Connections {
+		need = max(need, textWidth(m.statusOf(row).text)+gutter)
+	}
+	label := max(m.labelWidth(), colMinName)
+	c.name = max(min(label, max(rest-need, min(label, colMaxName)), rest-colMinStatus), colMinName)
 
 	c.status = rest - c.name
 	return c

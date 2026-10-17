@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"context"
+	"fmt"
+	"maps"
 	"path/filepath"
 	"slices"
 	"time"
@@ -34,7 +36,8 @@ func sourceMetadata(paths config.Paths, state config.State, now time.Time) ([]ou
 func metadataItems(effective config.EffectiveConfig, enabledOnly bool, domain string) ([]config.EffectiveConnection, error) {
 	if domain != "" {
 		if _, ok := effective.Domains[domain]; !ok {
-			return nil, config.ErrConfig
+			ids := slices.Sorted(maps.Keys(effective.Domains))
+			return nil, output.UnknownDomainError(domain, output.Closest(domain, ids))
 		}
 	}
 	items := []config.EffectiveConnection{}
@@ -91,7 +94,22 @@ func writeMetadata(ctx context.Context, s *Streams, opts *CommandOptions, enable
 	if err != nil {
 		return err
 	}
-	return writeSuccess(s, opts, output.MetadataData{Revision: effective.Revision, Items: items, Domains: effective.Domains, SourceRevisions: effective.SourceRevisions, Sources: sources})
+	available := 0
+	for _, row := range effective.Connections {
+		if row.Available {
+			available++
+		}
+	}
+	data := output.MetadataData{Revision: effective.Revision, Items: items, Domains: effective.Domains, SourceRevisions: effective.SourceRevisions, Sources: sources, Table: stdoutTerminal(s.Out), List: enabledOnly, Domain: domain, Available: available}
+	if data.Table {
+		data.Width = writerColumns(s.Out)
+	}
+	// A pipe gets rows only, so with none stdout stays empty (wc -l is 0)
+	// and the sentence that says why goes to stderr.
+	if !opts.JSON && !data.Table && len(items) == 0 {
+		fmt.Fprint(s.Err, output.EmptyMetadata(data))
+	}
+	return writeSuccess(s, opts, data)
 }
 
 func inspectMetadata(state config.State, effective config.EffectiveConfig, sources []output.SourceMetadata, id string) output.InspectData {

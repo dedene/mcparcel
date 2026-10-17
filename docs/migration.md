@@ -1,6 +1,6 @@
 # Installing, upgrading and rolling back MCParcel
 
-Version `0.1.0`. MCParcel is installed with Homebrew or from a GitHub release
+MCParcel is installed with Homebrew or from a GitHub release
 archive; it is not published to npm. On macOS it runs on Apple Silicon only;
 on Linux it is a static binary for amd64 and arm64 (see
 [runtime.md](runtime.md#linux-desktop-mode) and [headless.md](headless.md)). Moving from mcporter
@@ -26,7 +26,8 @@ newer): `make npm-pack` writes `dist/mcparcel-<version>.tgz`, which
 `mcparcel doctor` is offline. It does not start the runtime, read the Keychain or
 1Password, or write anything. It exits 0 when no check failed and 8 when at least
 one did; every failed row has a next action. `mcparcel version` prints
-`mcparcel 0.1.0 (<commit>, <date>)` for a release; an npm tarball built from a
+`mcparcel <version> (<commit>, <date>)` for a release (`--version` and `-V`
+print the same); an npm tarball built from a
 checkout prints `<version>+<commit>`, and adds `.dirty.<UTC seconds>` when the
 checkout has uncommitted changes.
 
@@ -58,6 +59,27 @@ copies except the most recent one, which stays for a rollback.
 If `add` or `sync` reports `catalog_requires_upgrade`, the team catalog needs a
 newer MCParcel than the one you run: upgrade first. Your saved snapshot of that
 catalog stays active in the meantime.
+
+### Human output changed after 0.3.0
+
+The human (non `--json`) output of several commands changed. `--json` and exit
+codes did not, so scripts that parse human output need updating; better, move
+them to `--json`:
+
+- `list` and `catalog` in a pipe or file print tab-separated rows only: no
+  `Revision:` line before them and no `Source:` lines after them, so drop any
+  `tail -n +2`. With no rows, stdout is empty and the sentence goes to stderr.
+- Commands that change configuration (`enable`, `disable`, `tools
+  enable|disable`, `local add|update|remove`, `config input set`, `config
+  profile set|bind`) print a sentence that says what changed, such as `echo is
+  on.`, instead of `Configuration saved at revision N.`. `add` prints `Added
+  <owner/repo> (<commit>).` instead of `Source:`, `Revision:` and `Registered.`
+  lines. Check the exit code, or `data.revision` in `--json`.
+- `inspect` prints `Label: value` lines instead of a JSON dump; use `inspect
+  --json`.
+- `tools <mcp>` prints `name(arguments)` with the description indented below,
+  instead of `name: description`; use `tools <mcp> --json` for
+  `data.items[].name`.
 
 ## Roll back to a previous MCParcel
 

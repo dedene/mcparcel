@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -235,7 +234,7 @@ func TestEnableLinksMatchingProfile(t *testing.T) {
 	}
 	code, out, errOut := run(t, "enable", "protected", "bound")
 	next := selectionRead(t, store)
-	if code != 0 || errOut != "" || out != fmt.Sprintf("Configuration saved at revision %d.\nLinked credential profile team to protected.\n", next.Selections.Revision) {
+	if code != 0 || errOut != "" || out != "protected is on.\nbound is on.\nLinked credential profile team to protected.\n" {
 		t.Fatalf("%d %q %q", code, out, errOut)
 	}
 	if strings.Contains(out, "Secret Account Name") {

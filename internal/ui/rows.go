@@ -5,6 +5,8 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/dedene/mcparcel/internal/config"
 	"github.com/dedene/mcparcel/internal/edit"
@@ -16,15 +18,11 @@ type tab struct{ id, label string }
 // tabs lists the effective domains sorted by label then ID, with Other last.
 func tabs(effective config.EffectiveConfig) []tab {
 	out := make([]tab, 0, len(effective.Domains))
-	for id, domain := range effective.Domains {
+	for id := range effective.Domains {
 		if id == "other" {
 			continue
 		}
-		label := domain.Label
-		if label == "" {
-			label = id
-		}
-		out = append(out, tab{id: id, label: output.DisplayMetadata(label)})
+		out = append(out, tab{id: id, label: domainName(effective, id)})
 	}
 	slices.SortFunc(out, func(a, b tab) int {
 		if c := strings.Compare(a.label, b.label); c != 0 {
@@ -33,6 +31,33 @@ func tabs(effective config.EffectiveConfig) []tab {
 		return strings.Compare(a.id, b.id)
 	})
 	return append(out, tab{id: "other", label: "Other"})
+}
+
+// domainName is the domain's label, display-safe. A domain without a label
+// of its own, none or just its ID (as local add declares the domains a
+// personal connection names), reads as its ID humanized: "dev-tools" shows
+// as "Dev tools".
+func domainName(effective config.EffectiveConfig, id string) string {
+	if label := effective.Domains[id].Label; label != "" && label != id {
+		return output.DisplayMetadata(label)
+	}
+	return output.DisplayMetadata(humanize(id))
+}
+
+// humanize turns an ID into words: '-' and '_' become spaces and the first
+// letter is upper case.
+func humanize(id string) string {
+	text := strings.Map(func(r rune) rune {
+		if r == '-' || r == '_' {
+			return ' '
+		}
+		return r
+	}, id)
+	r, size := utf8.DecodeRuneInString(text)
+	if size == 0 {
+		return text
+	}
+	return string(unicode.ToUpper(r)) + text[size:]
 }
 
 func inDomain(row config.EffectiveConnection, domain string) bool {

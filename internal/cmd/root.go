@@ -32,33 +32,36 @@ type Streams struct {
 	Err io.Writer
 }
 
-// CLI is the root command tree.
+// CLI is the root command tree. Field order is help order; the group tags
+// are the --help sections (see commandGroups).
 type CLI struct {
-	Add     AddCmd     `cmd:"" json:"-" help:"Register a repository catalog."`
-	Join    JoinCmd    `cmd:"" json:"-" help:"Add a team catalog, then choose and start its connections in an interactive terminal."`
-	Remove  RemoveCmd  `cmd:"" json:"-" help:"Remove a repository catalog offline."`
-	Sync    SyncCmd    `cmd:"" json:"-" help:"Preview or apply repository catalog updates."`
-	Local   LocalCmd   `cmd:"" json:"-" help:"Add, update or remove personal definitions offline."`
-	Enable  EnableCmd  `cmd:"" json:"-" help:"Enable and accept selected connections offline."`
-	Disable DisableCmd `cmd:"" json:"-" help:"Disable selected connections offline."`
-	Setup   SetupCmd   `cmd:"" json:"-" help:"Choose connections and tools in an interactive terminal."`
-	Catalog CatalogCmd `cmd:"" json:"-" help:"Show all connection metadata offline."`
-	List    ListCmd    `cmd:"" json:"-" help:"Show enabled connections offline."`
-	Inspect InspectCmd `cmd:"" json:"-" help:"Inspect a connection offline."`
-	Config  ConfigCmd  `cmd:"" json:"-" help:"Validate and edit local configuration offline."`
-	Import  ImportCmd  `cmd:"" json:"-" help:"Preview and apply imported definitions offline."`
-	JSON    bool       `help:"Print one JSON envelope."`
-	NoInput bool       `help:"Do not prompt or initiate credential authorization."`
-	Version VersionCmd `cmd:"" help:"Print the mcparcel version."`
-	Tools   ToolsCmd   `cmd:"" help:"List a connection's tools."`
-	Call    CallCmd    `cmd:"" help:"Call an MCP tool."`
-	Auth    AuthCmd    `cmd:"" help:"Make a connection's credentials fresh, or show, remove or lock stored credentials."`
-	Runtime RuntimeCmd `cmd:"" help:"Inspect, restart or stop the runtime."`
-	Doctor  DoctorCmd  `cmd:"" help:"Check prerequisites, credential mapping, runtime and stored configuration."`
-	Daemon  DaemonCmd  `cmd:"" hidden:""`
+	Tools      ToolsCmd      `cmd:"" group:"use" help:"List a connection's tools, or turn tools on or off."`
+	Call       CallCmd       `cmd:"" group:"use" help:"Call an MCP tool."`
+	Setup      SetupCmd      `cmd:"" group:"choose" json:"-" help:"Choose connections and tools in an interactive terminal."`
+	Enable     EnableCmd     `cmd:"" group:"choose" json:"-" help:"Enable and accept selected connections offline."`
+	Disable    DisableCmd    `cmd:"" group:"choose" json:"-" help:"Disable selected connections offline."`
+	List       ListCmd       `cmd:"" group:"choose" json:"-" help:"Show enabled connections offline."`
+	Catalog    CatalogCmd    `cmd:"" group:"choose" json:"-" help:"Show all connection metadata offline."`
+	Inspect    InspectCmd    `cmd:"" group:"choose" json:"-" help:"Inspect a connection offline."`
+	Add        AddCmd        `cmd:"" group:"catalogs" json:"-" help:"Register a repository catalog."`
+	Join       JoinCmd       `cmd:"" group:"catalogs" json:"-" help:"Add a team catalog, then choose and start its connections in an interactive terminal."`
+	Remove     RemoveCmd     `cmd:"" group:"catalogs" json:"-" help:"Remove a repository catalog offline."`
+	Sync       SyncCmd       `cmd:"" group:"catalogs" json:"-" help:"Preview or apply repository catalog updates."`
+	Local      LocalCmd      `cmd:"" group:"catalogs" json:"-" help:"Add, update or remove personal definitions offline."`
+	Import     ImportCmd     `cmd:"" group:"catalogs" json:"-" help:"Preview and apply imported definitions offline."`
+	Auth       AuthCmd       `cmd:"" group:"credentials" help:"Make a connection's credentials fresh, or show, remove or lock stored credentials."`
+	Config     ConfigCmd     `cmd:"" group:"credentials" json:"-" help:"Validate and edit local configuration offline."`
+	Doctor     DoctorCmd     `cmd:"" group:"diagnose" help:"Check prerequisites, credential mapping, runtime and stored configuration."`
+	Runtime    RuntimeCmd    `cmd:"" group:"diagnose" help:"Inspect, restart or stop the runtime."`
+	Version    VersionCmd    `cmd:"" group:"diagnose" help:"Print the mcparcel version."`
+	Help       HelpCmd       `cmd:"" group:"diagnose" help:"Show help for a command, as --help does."`
+	Completion CompletionCmd `cmd:"" group:"diagnose" help:"Print a shell completion script for bash, zsh or fish."`
+	JSON       bool          `help:"Print one JSON envelope."`
+	NoInput    bool          `help:"Do not prompt or initiate credential authorization."`
+	Daemon     DaemonCmd     `cmd:"" hidden:""`
 
 	// VersionFlag is --version; it prints what the version command prints.
-	VersionFlag versionFlag `name:"version" help:"Print the mcparcel version and exit."`
+	VersionFlag versionFlag `name:"version" short:"V" help:"Print the mcparcel version and exit."`
 
 	// SignalWait is a hidden hook for the npm launcher's signal tests.
 	SignalWait SignalWaitCmd `cmd:"" name:"signal-wait" hidden:"" help:"Print 'ready' and block until interrupted."`
@@ -98,39 +101,42 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	intent := scanIntent(args)
 	parser, err := kong.New(&cli,
 		kong.Name("mcparcel"),
-		kong.Description("One CLI for every MCP call: team catalogs, personal selections, on-demand credentials."),
+		kong.Description(appDescription),
 		kong.Writers(out, errOut),
 		kong.Exit(func(c int) { panic(exitSignal(c)) }),
+		kong.ExplicitGroups(commandGroups),
+		kong.Help(helpPrinter(intent.json)),
 		kong.BindTo(ctx, (*context.Context)(nil)),
 		kong.Bind(&Streams{In: in, Out: out, Err: errOut}),
-		kong.Bind(opts),
+		kong.Bind(opts, jsonIntent(intent.json)),
 		kong.BindToProvider(catalogDependencies),
 	)
 	if err != nil {
 		fmt.Fprintf(errOut, "mcparcel: %v\n", err)
 		return ExitInternal
 	}
+	// __complete serves the completion scripts: its words are the command
+	// line being typed, so kong never parses them.
+	if len(args) > 0 && args[0] == completeCommand {
+		return writeCandidates(ctx, out, parser.Model, args[1:])
+	}
 
 	kctx, err := parser.Parse(args)
 	if err != nil {
-		if intent.product {
-			return writeFailure(out, errOut, intent.json, usageFailure(intent.command))
+		if intent.command == "" && missingCommand(err) {
+			return writeShortHelp(out, parser.Model, intent.json)
 		}
-		fmt.Fprintf(errOut, "mcparcel: %v\nRun 'mcparcel --help' for usage.\n", err)
+		if intent.product || intent.json {
+			return writeFailure(out, errOut, intent.json, parseFailure(err, intent))
+		}
+		fmt.Fprintf(errOut, "mcparcel: %v\nRun mcparcel --help for usage.\n", err)
 		return ExitUsage
 	}
 	opts.JSON, opts.NoInput = cli.JSON, cli.NoInput
-	if intent.command == "config" || intent.command == "import" || intent.command == "local" {
-		if intent.flags["--file"] > 1 || intent.flags["--bindings"] > 1 || intent.flags["empty"] > 0 {
-			return writeFailure(out, errOut, intent.json, usageFailure(intent.command))
-		}
-	}
-	if intent.flags["--domain"] > 1 || intent.command == "catalog" && intent.flags["empty"] > 0 {
-		return writeFailure(out, errOut, intent.json, usageFailure(intent.command))
-	}
-	if intent.command == "add" || intent.command == "sync" || intent.command == "join" {
-		if intent.flags["--path"] > 1 || intent.flags["--ref"] > 1 || intent.flags["empty"] > 0 {
-			return writeFailure(out, errOut, intent.json, usageFailure(intent.command))
+	path := helpPath(kctx.Command())
+	if intent.product {
+		if failure := flagFailure(intent, path); failure != nil {
+			return writeFailure(out, errOut, intent.json, failure)
 		}
 	}
 	if intent.command == "call" {
@@ -139,12 +145,12 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 		}
 	}
 	if err := kctx.Run(); err != nil {
-		if intent.product {
+		if intent.product || opts.JSON {
 			var writeErr *commandWriteFailure
 			if errors.As(err, &writeErr) {
 				return ExitInternal
 			}
-			return writeFailure(out, errOut, opts.JSON, contextualFailure(intent.command, err))
+			return writeFailure(out, errOut, opts.JSON, contextualFailure(ctx, &cli, intent.command, path, err))
 		}
 		if errors.Is(err, context.Canceled) {
 			return ExitInterrupted
@@ -160,20 +166,8 @@ type parseIntent struct {
 	product bool
 	command string
 	flags   map[string]int
-}
-
-func usageFailure(command string) *output.Error {
-	if command == "call" {
-		return output.NewError("invalid_arguments", nil)
-	}
-	return output.CommandUsageError()
-}
-
-func contextualFailure(command string, err error) error {
-	if command != "call" && errors.Is(err, args.ErrInvalidArgs) {
-		return output.CommandUsageError()
-	}
-	return err
+	// emptyFlag is the first value-taking flag given an empty value.
+	emptyFlag string
 }
 
 // Payload values are opaque, including values that look like flags.
@@ -191,6 +185,9 @@ func scanIntent(argv []string) parseIntent {
 			if name == "--file" || name == "--bindings" || name == "--only" || name == "--domain" || name == "--path" || name == "--ref" || name == "--accept" {
 				if inline && value == "" || !inline && (n+1 == len(argv) || argv[n+1] == "") {
 					i.flags["empty"]++
+					if i.emptyFlag == "" {
+						i.emptyFlag = name
+					}
 				}
 			}
 			if !inline {
@@ -206,7 +203,7 @@ func scanIntent(argv []string) parseIntent {
 		}
 		if i.command == "" && !strings.HasPrefix(token, "-") {
 			i.command = token
-			i.product = token == "tools" || token == "call" || token == "auth" || token == "runtime" || token == "daemon" || token == "config" || token == "import" || token == "catalog" || token == "list" || token == "inspect" || token == "enable" || token == "disable" || token == "local" || token == "add" || token == "join" || token == "remove" || token == "sync" || token == "setup" || token == "doctor"
+			i.product = token == "tools" || token == "call" || token == "auth" || token == "runtime" || token == "daemon" || token == "config" || token == "import" || token == "catalog" || token == "list" || token == "inspect" || token == "enable" || token == "disable" || token == "local" || token == "add" || token == "join" || token == "remove" || token == "sync" || token == "setup" || token == "doctor" || token == "version" || token == "help" || token == "completion"
 		}
 	}
 	return i

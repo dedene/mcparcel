@@ -43,6 +43,15 @@ func TestThemeGlyphs(t *testing.T) {
 				t.Fatalf("%q is %d wide, %q is %d", mark, textWidth(mark), marks[0], textWidth(marks[0]))
 			}
 		}
+		// The To do marks line up too, and none of them reads as a row's state.
+		for _, mark := range []string{set.done, set.todo, set.later} {
+			if textWidth(mark) != textWidth(set.done) || mark == set.off || mark == set.on {
+				t.Fatalf("To do mark %q", mark)
+			}
+		}
+	}
+	if ascii.glyph.later != "[.]" || g.later != "⋯" || !strings.Contains(uni.glyphSet(), "⋯") {
+		t.Fatalf("later %q %q", ascii.glyph.later, g.later)
 	}
 	for _, frame := range append(ascii.spinner.Frames, uni.spinner.Frames...) {
 		if textWidth(frame) != 1 {

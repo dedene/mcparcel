@@ -98,6 +98,7 @@ func (c *AuthStatusCmd) Run(ctx context.Context, s *Streams, opts *CommandOption
 			if c.MCP != "" && profile == "" {
 				e := output.NewError("invalid_arguments", nil)
 				e.Message = c.MCP + " uses neither sign-in nor 1Password."
+				e.NextAction = "" // nothing to do; not the default's tools hint
 				return e
 			}
 			continue

@@ -64,7 +64,8 @@ func TestAuthClientCredentialsNothingToSignIn(t *testing.T) {
 			for _, argv := range [][]string{{"auth", "logout", "front"}, {"auth", "logout", "local:front"}, {"auth", "status", "front"}} {
 				code, stdout, stderr := run(t, append(argv, "--json")...)
 				e := envelopeError(t, stdout)
-				if code != 2 || e.Code != "invalid_arguments" || e.Message != argv[2]+" uses client credentials; there is nothing to sign in to." || stderr != "" {
+				// Nothing to do, so no next action (not the default's tools hint).
+				if code != 2 || e.Code != "invalid_arguments" || e.Message != argv[2]+" uses client credentials; there is nothing to sign in to." || e.NextAction != "" || stderr != "" {
 					t.Fatal(argv, code, stdout, stderr)
 				}
 			}

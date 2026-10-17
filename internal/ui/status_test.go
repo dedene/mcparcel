@@ -195,9 +195,10 @@ func TestOlderSignInReadIsIgnored(t *testing.T) {
 	h := statusHarness(t)
 	row := h.m.live.Effective().Connections[idCalendar]
 	key := signInKey(row)
-	h.m.signInPending[key] = true
+	h.m.signInSeq++
+	h.m.signInPending[key] = h.m.signInSeq
 	h.m.keepSignIn(idCalendar, SignInState{Possible: true})
-	h.send(signInsMsg{states: map[string]SignInState{key: {Possible: true, Needed: true}}})
+	h.send(signInsMsg{seq: h.m.signInSeq, states: map[string]SignInState{key: {Possible: true, Needed: true}}})
 	h.selectTab("Other")
 	h.lineHas("Calendar", "[x]", "starts on first use")
 }

@@ -216,6 +216,7 @@ func clientCredentialsConn(c *config.Connection) bool {
 func nothingToSignIn(name string) *output.Error {
 	e := output.NewError("invalid_arguments", nil)
 	e.Message = name + " uses client credentials; there is nothing to sign in to."
+	e.NextAction = "" // nothing to do; not the default's tools hint
 	return e
 }
 

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/dedene/mcparcel/internal/config"
@@ -22,7 +23,8 @@ type LocalUpdateCmd struct {
 	File string `required:"" name:"file" json:"-"`
 }
 type LocalRemoveCmd struct {
-	ID string `arg:"" required:"" json:"-"`
+	ID     string `arg:"" required:"" json:"-"`
+	DryRun bool   `name:"dry-run" json:"-" help:"Show what would change without saving."`
 }
 
 var (
@@ -39,14 +41,21 @@ func (c *LocalAddCmd) Run(ctx context.Context, s *Streams, opts *CommandOptions)
 	if err != nil {
 		return err
 	}
+	var id string
 	next, err := store.Update(ctx, state.Selections.Revision, func(draft *config.State) error {
-		_, err := edit.StageLocalAdd(draft, raw)
+		var err error
+		id, err = edit.StageLocalAdd(draft, raw)
 		return definitionError(err)
 	})
 	if err != nil {
 		return err
 	}
-	return writeMutation(s, opts, next)
+	name := connectionNamer(next)("local:"+id, id)
+	summary := fmt.Sprintf("Added personal connection %s. It is off: run mcparcel enable local:%s to turn it on.\n", name, id)
+	if _, existed := state.Personal.Connections[id]; existed {
+		summary = fmt.Sprintf("Personal connection %s already exists with this definition. Nothing changed.\n", name)
+	}
+	return writeMutation(s, opts, next, summary)
 }
 
 func (c *LocalUpdateCmd) Run(ctx context.Context, s *Streams, opts *CommandOptions) error {
@@ -68,7 +77,12 @@ func (c *LocalUpdateCmd) Run(ctx context.Context, s *Streams, opts *CommandOptio
 	if err != nil {
 		return err
 	}
-	return writeMutation(s, opts, next)
+	canonical := "local:" + id
+	summary := fmt.Sprintf("Updated personal connection %s.\n", connectionNamer(next)(canonical, id))
+	if next.Selections.Connections[canonical].ReviewRequired && !state.Selections.Connections[canonical].ReviewRequired {
+		summary += fmt.Sprintf("Its command or sign-in changed, so it needs review: run mcparcel enable %s to accept it.\n", canonical)
+	}
+	return writeMutation(s, opts, next, summary)
 }
 
 func (c *LocalRemoveCmd) Run(ctx context.Context, s *Streams, opts *CommandOptions) error {
@@ -76,9 +90,28 @@ func (c *LocalRemoveCmd) Run(ctx context.Context, s *Streams, opts *CommandOptio
 	if err != nil {
 		return err
 	}
+	if c.DryRun {
+		if err := refuseReadOnly(); err != nil {
+			return err
+		}
+	}
 	store, state, err := metadataStore(ctx)
 	if err != nil {
 		return err
+	}
+	canonical := "local:" + id
+	name := connectionNamer(state)(canonical, id)
+	on := state.Selections.Connections[canonical].Enabled
+	if c.DryRun {
+		if _, exists := state.Personal.Connections[id]; !exists {
+			return config.ErrNotFound
+		}
+		summary := fmt.Sprintf("Would remove personal connection %s.\n", name)
+		if on {
+			summary = fmt.Sprintf("Would remove personal connection %s and turn it off.\n", name)
+		}
+		plan := output.PlanData{Revision: state.Selections.Revision, Changes: []output.PlanChange{{Connection: canonical, Change: "remove", Enabled: on}}}
+		return writePlan(s, opts, plan, summary)
 	}
 	next, err := store.Update(ctx, state.Selections.Revision, func(draft *config.State) error {
 		return edit.StageLocalRemove(draft, id)
@@ -86,7 +119,11 @@ func (c *LocalRemoveCmd) Run(ctx context.Context, s *Streams, opts *CommandOptio
 	if err != nil {
 		return err
 	}
-	return writeMutation(s, opts, next)
+	summary := fmt.Sprintf("Removed personal connection %s.\n", name)
+	if on {
+		summary = fmt.Sprintf("Removed personal connection %s. It is off now.\n", name)
+	}
+	return writeMutation(s, opts, next, summary)
 }
 
 // definitionError points a field error in the --file definition at that file

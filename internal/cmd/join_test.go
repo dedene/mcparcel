@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"io"
 	"os"
 	"reflect"
 	"slices"
@@ -322,5 +323,34 @@ func TestJoinPresetsApplyAtOnce(t *testing.T) {
 	}
 	if stdout != "Added fixture/team (ccccccc).\n2 on, all ready.\n" {
 		t.Fatalf("%q", stdout)
+	}
+}
+
+// join says what it fetches while it adds a new catalog, then erases the
+// line before setup opens; a catalog already added is not fetched, so no
+// line shows.
+func TestJoinShowsItsFetch(t *testing.T) {
+	metadataEnv(t)
+	t.Setenv("LC_ALL", "C")
+	after, isTerminal := progressAfter, progressTerminal
+	progressAfter = func(_ time.Duration, f func()) func() bool { f(); return func() bool { return true } } // as if the fetch took a while
+	progressTerminal = func(io.Writer) bool { return true }
+	t.Cleanup(func() { progressAfter, progressTerminal = after, isTerminal })
+	f := newJoinFetcher(t)
+	join := func() string {
+		t.Helper()
+		scriptJoin(t, "q")
+		var out, errOut bytes.Buffer
+		cmd := &JoinCmd{Repository: "fixture/team"}
+		if err := cmd.Run(context.Background(), &Streams{In: strings.NewReader(""), Out: &out, Err: &errOut}, &CommandOptions{}, &CatalogDependencies{Fetcher: f}); err != nil {
+			t.Fatal(err)
+		}
+		return errOut.String()
+	}
+	if got, want := join(), "Fetching fixture/team...\r"+strings.Repeat(" ", 24)+"\r"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+	if got := join(); got != "" || f.fetches != 1 {
+		t.Fatalf("an added catalog showed %q, fetches %d", got, f.fetches)
 	}
 }

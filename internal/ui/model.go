@@ -60,6 +60,7 @@ type Model struct {
 	writing     *change             // the change being written
 	then        func(error) tea.Cmd // runs once it is written
 	queued      []tea.Msg           // tea.KeyPressMsg and tea.PasteMsg
+	suspending  bool                // after a Ctrl+Z; keys and pastes wait in queued until tea.ResumeMsg
 	interrupted bool
 	unconfirmed bool // the last write failed part way and no read settled it
 
@@ -87,7 +88,8 @@ type Model struct {
 	failed   map[string]string      // why a server could not start, short (Status)
 
 	signIns       map[string]SignInState // stored sign-ins read, by signInKey (status.go)
-	signInPending map[string]bool        // being read
+	signInPending map[string]uint64      // being read, by the read that answers it
+	signInSeq     uint64                 // numbers the reads; a reply from another read is dropped
 	commands      map[string]bool        // whether each local command was found
 
 	join     *joinRun // the join screens, while they show
@@ -116,6 +118,7 @@ func (m *Model) Result() Result {
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	status, flash := m.status, m.flashSeq
 	cmd := m.update(msg)
+	m.clamp() // the bottom lines (search, steps, sign-ins) can change the list's height
 	return m, tea.Batch(cmd, m.animate(status, flash), m.readSignIns())
 }
 
@@ -144,8 +147,12 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 		m.flashEnded(msg)
 	case spinMsg:
 		return m.spun()
+	case tea.ResumeMsg:
+		return m.resumed()
+	case reloadedMsg:
+		m.reloaded(msg)
 	case tea.PasteMsg:
-		if m.busy {
+		if m.busy || m.suspending {
 			m.queued = append(m.queued, msg)
 			return nil
 		}
@@ -206,7 +213,10 @@ func (m *Model) key(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		return m.quit()
 	}
-	if m.busy {
+	if k == "ctrl+z" && !m.busy && !m.suspending {
+		return m.suspend() // on any screen; while a change is written it waits, as every key does
+	}
+	if m.busy || m.suspending {
 		m.queued = append(m.queued, msg)
 		return nil
 	}

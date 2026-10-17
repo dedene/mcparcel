@@ -35,6 +35,7 @@ type ExportDir struct {
 func OpenExportDir(dir string) (*ExportDir, error) {
 	invalid := NewError("invalid_arguments", nil)
 	invalid.Message = "--output-dir must name an existing directory."
+	invalid.NextAction = HelpAction("call")
 	if dir == "" {
 		return nil, invalid
 	}

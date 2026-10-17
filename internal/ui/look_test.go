@@ -166,3 +166,41 @@ func TestUnicodeFalseRendersASCIIMarks(t *testing.T) {
 		}
 	}
 }
+
+// The server page leaves out a To do step an action above it takes; the
+// pane leaves out what its state line says. Facts and steps no action takes
+// stay.
+func TestToDoLeavesOutWhatIsSaidAbove(t *testing.T) {
+	m := &Model{theme: newTheme(Options{}, nil)}
+	items := []todoItem{
+		{mark: todoStep, text: "Turn it on", does: actTurnOn, state: true},
+		{mark: todoStep, text: "Set workspace", does: actInput, name: "workspace"},
+		{mark: todoStep, text: "Set root", does: actInput, name: "root"},
+		{mark: todoDone, text: "token is set"},
+		{mark: todoStep, text: "Sign in with your browser", does: actSignIn},
+		{mark: todoStep, text: "Could not start: timed out", does: actStart, state: true},
+		{mark: todoLater, text: "Tools load on first use"},
+	}
+	text := func(items []todoItem) []string {
+		var out []string
+		for _, item := range items {
+			out = append(out, m.todoLine(item, "", 80, false))
+		}
+		return out
+	}
+	actions := []action{{kind: actTurnOn}, {kind: actInput, name: "workspace"}, {kind: actStart}, {kind: actTools}}
+	want := []string{"[*] Set root", "[+] token is set", "[*] Sign in with your browser", "[.] Tools load on first use"}
+	if got := text(pageTodo(items, actions)); !slices.Equal(got, want) {
+		t.Errorf("page %q, want %q", got, want)
+	}
+	want = []string{"[*] Set workspace", "[*] Set root", "[+] token is set", "[*] Sign in with your browser", "[.] Tools load on first use"}
+	if got := text(paneTodo(items)); !slices.Equal(got, want) {
+		t.Errorf("pane %q, want %q", got, want)
+	}
+	if len(items) != 7 || items[0].text != "Turn it on" {
+		t.Fatalf("the filters changed the To do: %q", text(items))
+	}
+	if got := pageTodo(items[:1], actions); len(got) != 0 {
+		t.Fatalf("%q", text(got))
+	}
+}

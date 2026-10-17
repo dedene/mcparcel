@@ -86,7 +86,7 @@ func (m *Model) statusOf(row config.EffectiveConnection) status {
 		s.kind, s.text, s.role = stSignIn, "sign in", roleAccent
 	case m.loaded[row.ID].tools != nil:
 		s.kind, s.text, s.role = stTools, plural(len(m.loaded[row.ID].tools), "tool", "tools"), roleOK
-	case m.signInPending[signInKey(row)]:
+	case m.readingSignIn(signInKey(row)):
 		s.kind, s.text, s.role = stChecking, "checking sign-in", roleDim
 	case known && signIn.Unknown:
 		s.kind, s.text, s.role = stSignInUnknown, "sign-in unknown", roleDim
@@ -287,7 +287,18 @@ func (m *Model) keepSignIn(id string, s SignInState) {
 	delete(m.signInPending, signInKey(row)) // a read still running is older
 }
 
-type signInsMsg struct{ states map[string]SignInState }
+// signInsMsg is one read's answer; seq names the read, so a key read again
+// since (after a resume, say) takes only the newer read's answer.
+type signInsMsg struct {
+	seq    uint64
+	states map[string]SignInState
+}
+
+// readingSignIn reports whether a read of key is running.
+func (m *Model) readingSignIn(key string) bool {
+	_, ok := m.signInPending[key]
+	return ok
+}
 
 // readSignIns reads, in one command, the stored sign-in of every row that
 // is on and whose Status depends on it, unless the session read it or a
@@ -297,7 +308,7 @@ func (m *Model) readSignIns() tea.Cmd {
 	var rows []config.EffectiveConnection
 	for _, row := range m.live.Effective().Connections {
 		key := signInKey(row)
-		if _, ok := m.signIns[key]; !ok && !m.signInPending[key] && m.readsSignIn(row) {
+		if _, ok := m.signIns[key]; !ok && !m.readingSignIn(key) && m.readsSignIn(row) {
 			rows = append(rows, row)
 		}
 	}
@@ -305,10 +316,12 @@ func (m *Model) readSignIns() tea.Cmd {
 		return nil
 	}
 	if m.signInPending == nil {
-		m.signInPending = map[string]bool{}
+		m.signInPending = map[string]uint64{}
 	}
+	m.signInSeq++
+	seq := m.signInSeq
 	for _, row := range rows {
-		m.signInPending[signInKey(row)] = true
+		m.signInPending[signInKey(row)] = seq
 	}
 	ctx, read := m.ctx, m.opts.StoredSignIn
 	return func() tea.Msg {
@@ -316,7 +329,7 @@ func (m *Model) readSignIns() tea.Cmd {
 		for _, row := range rows {
 			states[signInKey(row)] = read(ctx, row.ID)
 		}
-		return signInsMsg{states}
+		return signInsMsg{seq, states}
 	}
 }
 
@@ -325,7 +338,8 @@ func (m *Model) signInsRead(msg signInsMsg) {
 		m.signIns = map[string]SignInState{}
 	}
 	for key, s := range msg.states {
-		if m.signInPending[key] { // else a sign-in since settled it
+		// Else a sign-in since settled it, or a newer read owns the key.
+		if seq, ok := m.signInPending[key]; ok && seq == msg.seq {
 			delete(m.signInPending, key)
 			m.signIns[key] = s
 		}
@@ -339,9 +353,21 @@ func (m *Model) signInsRead(msg signInsMsg) {
 }
 
 // statusText is a status in a column of n cells that ends in the gutter,
-// colored when styled.
+// colored when styled. Too long, it cuts the input or command it names,
+// never the verdict: "needs <input>", "<command> not installed".
 func (m *Model) statusText(s status, n int, styled bool) string {
-	text := fit(s.text, n-gutter)
+	text := s.text
+	if room := n - gutter; textWidth(text) > room {
+		switch s.kind {
+		case stCommand:
+			const suffix = " not installed"
+			text = fit(s.detail, max(room-textWidth(suffix), 1)) + suffix
+		case stInput:
+			const prefix = "needs "
+			text = prefix + fit(s.detail, max(room-textWidth(prefix), 1))
+		}
+	}
+	text = fit(text, n-gutter)
 	width := textWidth(text)
 	if styled {
 		text = m.theme.paint(s.role, text)

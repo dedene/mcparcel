@@ -52,15 +52,18 @@ func TestServerPageLeadsWithTheNextStep(t *testing.T) {
 	h.details("Research", "Notes")
 	h.contains("Research / Notes", "[ ] off - needs workspace", "Team notes.",
 		"> Turn on", "asks for what it misses first", "  Set workspace", "  Link 1Password profile", "  Choose tools",
-		"To do", "[*] Turn it on", "[*] Set workspace", "[*] Link a 1Password profile", "[.] Tools load on first use",
+		"To do", "[.] Tools load on first use",
 		"Runs  this device - notes-fixture", "From  acmeco/mcp-catalog - Research")
+	// The actions are the steps left; the To do does not list them again.
+	h.lacks("[*] Turn it on", "[*] Set workspace", "[*] Link a 1Password profile")
 	h.lacks("ID:", "Transport", "Schema", "revision", "unsaved", "SECRET-MARKER", "Turn off", "Remove")
 	h.press("esc")
 	if h.m.screen != screenList {
 		t.Fatal(h.m.screen)
 	}
 	h.details("Development", "Reviewer")
-	h.contains("[~] needs a review", "> Accept the change", "Turn off", "[+] On", "[*] Accept the change")
+	h.contains("[~] needs a review", "> Accept the change", "Turn off", "To do", "[+] On")
+	h.lacks("[*] Accept the change")
 	h.press("enter")
 	h.contains("[x] ready", "> Choose tools", "Start", "Turn off")
 	if sel := h.disk().Selections.Connections[idReview]; !sel.Enabled || sel.ReviewRequired {
@@ -325,7 +328,8 @@ func TestServerPageSignsInAndStarts(t *testing.T) {
 	h := statusHarness(t)
 	h.details("Other", "Calendar")
 	h.contains("Other / Calendar", "[~] needs a sign-in", "> Sign in to Calendar", "opens your browser",
-		"Choose tools", "all, after sign-in", "[*] Sign in with your browser", "[.] Tools load after sign-in", "Runs  remote - calendar.example")
+		"Choose tools", "all, after sign-in", "[+] On", "[.] Tools load after sign-in", "Runs  remote - calendar.example")
+	h.lacks("[*] Sign in with your browser")
 	h.press("enter")
 	_, signIns, signed := h.fin.counts()
 	if signIns != 1 || len(signed) != 1 {
@@ -334,6 +338,13 @@ func TestServerPageSignsInAndStarts(t *testing.T) {
 	h.contains("Calendar is ready.", "[x] ready - 2 tools", "> Choose tools", "2 of 2 on", "Test again", "last ok just now",
 		"Tools", "draw", "Draw a diagram.", "erase")
 	h.lacks("To do", "Second line.")
+	// Off, its one step is the action above: the tools still show, under no
+	// To do of done items only.
+	h.press("space")
+	h.contains("[ ] off", "> Turn on", "Tools", "draw")
+	h.lacks("To do", "2 tools loaded")
+	h.press("u")
+	h.contains("[x] ready - 2 tools")
 	h.press("esc")
 	h.details("Other", "Search")
 	h.contains("> Choose tools", "Start", "loads its tools")
@@ -357,8 +368,8 @@ func TestServerPageCommandNotInstalled(t *testing.T) {
 		o.CommandAvailable = func(command, _ string) bool { return command != "maps-fixture" || found }
 	})
 	h.details("Other", "Maps")
-	h.contains("[-] maps-fixture not installed", "> maps-fixture not installed", "Enter looks again", "[*] Install maps-fixture")
-	h.lacks("Start  ")
+	h.contains("[-] maps-fixture not installed", "> maps-fixture not installed", "Enter looks again", "[+] On")
+	h.lacks("Start  ", "[*] Install maps-fixture")
 	h.press("enter")
 	h.contains("maps-fixture is still not installed: it is not found on PATH.", "> maps-fixture not installed")
 	found = true

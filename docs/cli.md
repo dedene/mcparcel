@@ -1,8 +1,8 @@
 # MCParcel CLI contract
 
-Review draft, 4 October 2026. Commands below are proposed, not implemented.
-This revision specifies the earlier CLI sketch; [catalog.md](catalog.md) and
-[runtime.md](runtime.md) define configuration and execution behaviour.
+The command-line contract: commands, output, errors and the setup terminal UI.
+[catalog.md](catalog.md) and [runtime.md](runtime.md) define configuration and
+execution behaviour.
 All commands, flags, help, messages, errors and terminal UI are English.
 
 ## Start and daily use
@@ -44,26 +44,26 @@ also work via `npx mcparcel ...`. No global installation or Homebrew is required
 
 | Command | Contract |
 | --- | --- |
-| `add <owner/repo> [--path <file>] [--ref <ref>]` | Validate and register a source, idempotently |
+| `add <owner/repo> [--path <file>] [--ref <ref>]` | Validate and register a source, idempotently. Human output: `Added <owner/repo> (<commit>). Run mcparcel setup to choose its connections.` or `<owner/repo> is already added (<commit>). Run mcparcel sync to update it.` (the short commit, as `join` prints it) |
 | `join <owner/repo> [--path <file>] [--ref <ref>]` | Interactive only (no `--json`). Register the source exactly as `add` does, or reuse it when it is already registered (no fetch; `sync` updates it), print `Added <owner/repo> (<commit>).` or `<owner/repo> is already added (<commit>). Run mcparcel sync to update it.` on stdout, then open setup on that catalog's join screens (see "Joining a catalog"); prints setup's summary on exit |
-| `remove <owner/repo>` | Remove local source registration; retained selections become unavailable; no remote write |
-| `catalog [--domain <id>]` | Available metadata including disabled/missing-input entries |
-| `list` | Enabled selections; clearly mark unavailable entries; no live connection |
-| `inspect <mcp>` | Effective non-secret config, origin, requirements, blockers and revision |
-| `enable <mcp>...` / `disable <mcp>...` | Atomically update selection for supplied IDs; `enable` links a credential profile requirement to the local profile with the same ID (see below) |
-| `tools <mcp> [--cached]` | Live schema discovery; `--cached` has no cache yet and always returns `schema_cache_miss` |
-| `tools enable <mcp> <tool>...` / `tools disable <mcp> <tool>...` | Change personal tool selection; cannot override source policy |
+| `remove <owner/repo> [--dry-run]` | Remove local source registration; retained selections become unavailable; no remote write. Human output: `Removed <owner/repo>.`, plus `<names> was on and is unavailable now.` (`were ... are`) naming its connections that are on. `--dry-run` prints `Would remove <owner/repo>. <names> is on and would become unavailable.` (or `None of its connections are on.`) and saves nothing (see "Dry runs") |
+| `catalog [--domain <id>]` | Available metadata including disabled/missing-input entries (human output: see "List output") |
+| `list` | Enabled selections; clearly mark unavailable entries; no live connection (human output: see "List output") |
+| `inspect <mcp>` | Effective non-secret config, origin, requirements and blockers; JSON adds the revision. Human output is one `Label: value` line per fact (see "List output"), never a JSON dump |
+| `enable <mcp>...` / `disable <mcp>... [--dry-run]` | Atomically update selection for supplied IDs; `enable` links a credential profile requirement to the local profile with the same ID (see below). Human output is one line per connection, in the order typed: `<name> is on.`, `<name> was already on.`, `<name> is off.` or `<name> was already off.` (enable of an enabled connection that awaited review says `is on.`). `disable --dry-run` prints `Would turn off <name>.` or `<name> is already off.` per connection and saves nothing |
+| `tools <mcp>` / `tools list <mcp>` | Live schema discovery. Human output prints one signature per tool, required arguments first (in the schema's `required` order), then optional ones by name with `?`, then the description indented by two spaces: `echo(text: string, times?: integer)` / `  Echo the text back.` Types read `string`, `integer`, `number`, `boolean`, `object` (nested objects are not expanded), `string[]` for arrays, `a\|b\|c` for an enum or `const` of up to 6 short values (else its type), `string\|null` for unions, and `any` when the schema does not say. `--json` returns the full schemas unchanged. `tools list` is the same command; it reaches a connection whose ID is `list`, `enable` or `disable`, which the subcommands of that name shadow in `tools <mcp>` (the canonical ID, such as `local:enable`, works too). `--cached` is hidden from help while there is no schema cache: it is still accepted and always returns `schema_cache_miss` |
+| `tools enable <mcp> <tool>...` / `tools disable <mcp> <tool>...` | Change personal tool selection; cannot override source policy. Human output: `Turned on <tools> for <name>.` / `Turned off <tools> for <name>.`, `<tools> was already on for <name>.` (`were`, `off`) for those that did not change, and for `enable`, `<tools> stays off for <name>: its tool policy does not allow it.` (`stay ... them`) for tools the connection's policy denies. Tools are named only when every one passes the MCP tool name grammar, else counted (`2 tools`) |
 | `call <mcp>.<tool> [key=value ...] [--args <json>] [--meta <json>]` | Invoke an enabled, allowed tool; a server's approval request during the call is shown as a prompt (see Approval prompts). The CLI checks the connection and tool policy offline first: a denied tool (`tool_denied`, exit 4; `deny` wins over `allow`) or a disabled, unreviewed, unknown or ambiguous connection fails before the runtime is contacted, so no daemon starts, no connection opens and no token is requested. The runtime checks again at admission and before dispatch |
 | `setup` | Interactive domain and connection editor (see "Domain matrix and terminal sketch"); renders on stderr and writes each change as it is made. On exit it prints one line on stdout: `9 on, all ready.`, or `9 on: 6 ready, GlitchTip needs a sign-in, Maps could not start, Rails Blocks needs rails-blocks-mcp installed.` (each server that is on with a step left, by label, as its Status reads), or `Nothing is on.`; then, indented, what to run for the steps setup could not take: `  mcparcel setup, then s signs you in` once for the sign-ins `s` can do, `  mcparcel auth <mcp>` per sign-in setup cannot do here (headless mode, or no browser sign-in), named as `auth` next actions are, and `  mcparcel doctor` when a server could not start. `The last change could not be confirmed. Run mcparcel list to check it.` comes first after a change that failed part way. Ctrl+C exits 130 after printing an unconfirmed change, without the summary |
 | `sync [<owner/repo>] [--apply [--accept <mcp>...]]` | Fetch and display update; only `--apply` changes active snapshot; `--accept` unblocks named connections whose execution or auth changed |
 | `import mcporter --file <path> [--bindings <file>] [--only <id>...] [--apply]` | Preview or apply supported imports, with explicit unresolved-field report; unbound `${NAME}` in env/header values becomes `env:NAME` with an `environment_reference` warning |
-| `local add --file <definition.json>` | Add a connection object containing `id` plus catalog connection fields. `domains` declares each ID it names; `other` is reserved (omit `domains` instead). An invalid file fails `invalid_config` with `Invalid definition: <field path>: <reason>.`; any other `invalid_config` with a field error reads `Invalid configuration: <field path>: <reason>.` |
-| `local update <id> --file <definition.json>` | Replace that personal connection atomically; matching ID required |
-| `local remove <id>` | Remove personal definition and turn the connection off (its inputs, profile and tool choices stay for when it comes back); never mutate a team catalog |
+| `local add --file <definition.json>` | Add a connection object containing `id` plus catalog connection fields. `domains` declares each ID it names; `other` is reserved (omit `domains` instead). An invalid file fails `invalid_config` with `Invalid definition: <field path>: <reason>.`; any other `invalid_config` with a field error reads `Invalid configuration: <field path>: <reason>.` The connection is added off: human output `Added personal connection <name>. It is off: run mcparcel enable local:<id> to turn it on.`, or `Personal connection <name> already exists with this definition. Nothing changed.` for an identical definition |
+| `local update <id> --file <definition.json>` | Replace that personal connection atomically; matching ID required. An ID that is not a personal connection fails `connection_unavailable` (`No personal connection is named <id>.`, suggesting only personal IDs). Human output: `Updated personal connection <name>.`, plus `Its command or sign-in changed, so it needs review: run mcparcel enable local:<id> to accept it.` when it was on and now needs review |
+| `local remove <id> [--dry-run]` | Remove personal definition and turn the connection off (its inputs, profile and tool choices stay for when it comes back); never mutate a team catalog. An ID that is not a personal connection fails `connection_unavailable` as for `local update`. Human output: `Removed personal connection <name>.`, with ` It is off now.` when it was on. `--dry-run` prints `Would remove personal connection <name>.` (` and turn it off` when it is on) and saves nothing |
 | `config validate --file <catalog.json>` | Validate schema and references offline |
-| `config input set <mcp> <name> <value>` | Set a declared non-secret local input |
-| `config profile set <name> --file <profile.json>` | Save a validated credential profile containing references only, for example `{"mode":"service-account","tokenFile":"/run/secrets/op-token"}` or `{"mode":"desktop-service-account","account":"Example account","bootstrapRef":"op://Private/mcparcel-bootstrap/token"}`; a `service-account` profile names where its token is (`tokenEnv` or `tokenFile`), never the token ([catalog.md](catalog.md#local-state)) |
-| `config profile bind <mcp> <profile>` | Bind the connection's declared credential requirement |
+| `config input set <mcp> <name> <value>` | Set a declared non-secret local input. Human output: `Set input <name> for <mcp name>.` (never the value) |
+| `config profile set <name> --file <profile.json>` | Save a validated credential profile containing references only, for example `{"mode":"service-account","tokenFile":"/run/secrets/op-token"}` or `{"mode":"desktop-service-account","account":"Example account","bootstrapRef":"op://Private/mcparcel-bootstrap/token"}`; a `service-account` profile names where its token is (`tokenEnv` or `tokenFile`), never the token ([catalog.md](catalog.md#local-state)). Human output: `Saved credential profile <name>.` |
+| `config profile bind <mcp> <profile>` | Bind the connection's declared credential requirement. Human output: `Linked credential profile <profile> to <name>.` |
 | `auth <mcp>` | Make the connection's credentials fresh, through the runtime (it starts it if needed), in this order: (1) a connection with `op://` references (env, headers, OAuth client ID or secret) drops their cached values and reads them again through 1Password now, so a prompt or error shows here and not on the next call; (2) an OAuth authorization-code connection (marked OAuth, or an HTTP connection without a configured credential header) signs in again in the browser; (3) a `client_credentials` connection drops its pooled token and gets a new one now (the token stays in daemon memory only). A connection with both, for example OAuth with an `op://` client secret, reads 1Password first. Sign-in prints the URL on stderr and opens the browser (macOS: `/usr/bin/open`; Linux: `xdg-open`, only when `DISPLAY` or `WAYLAND_DISPLAY` is set; where no browser can open, it prints only the URL to open, and over SSH also the `ssh -N -L <port>:127.0.0.1:<port> <this host>` forward that lets a browser elsewhere reach the loopback callback); before any browser opens, the runtime reads the stored sign-in, waiting up to 2 minutes for a keyring unlock prompt, and a keyring failure other than a missing item refuses it with `keychain_unavailable`. JSON `{connection, secretsRefreshed?, signedIn?, tokenRenewed?}`: a key is present only when its step applies and is `true` when it ran; `signedIn` is `false` when the server never asked for sign-in (nothing stored). Human output: one line per step (`Read the 1Password secrets for <mcp> again.`, `Signed in to <mcp>.` or `<mcp> did not ask for sign-in. Nothing was stored.`, `Got a new access token for <mcp>.`). A re-read holds no connection gate: an in-flight call keeps the values it started with; the next call reconnects only when a value changed, and a failed re-read stops the pooled process once that call ends. A `service-account` profile with an active session reads through that session and does not read its token file or variable again; without one (a new runtime, an expired session, or after `auth lock`), it bootstraps from the token now, as a call would. If the 1Password step succeeds and a later step fails, only the error is returned and the values stay refreshed. Refused offline, without starting the runtime: a connection with only literal values and `env:` references (`invalid_arguments`, "<mcp> has no sign-in, client credentials or 1Password secrets to refresh.", plus "Its env: values are read when the runtime starts." and next action `mcparcel runtime restart` when it uses `env:` references); a sign-in in headless mode (`auth_required`, "This server needs sign-in, which headless mode cannot do."); a sign-in with `--no-input` (`auth_required`, "Signing in to <mcp> opens a browser, which --no-input does not allow."); and, on Linux when no runtime runs and this session has no usable D-Bus session bus, a sign-in (`keychain_unavailable`, "No Secret Service keyring is reachable from this session (no usable D-Bus session bus), so MCParcel cannot store a sign-in."). The keyring checks apply to a sign-in only. `--no-input` re-reads `op://` values for a `desktop-service-account` profile with an active session and for a `service-account` profile (which bootstraps from its token without a prompt, also in headless mode); a `desktop` profile may prompt on any read, so it is refused before anything is dropped (`auth_required`, "Reading <mcp>'s 1Password secrets again may need approval in the 1Password app, which --no-input does not allow."). A `desktop-service-account` profile without a session gives `auth_required` as a call does. On Linux desktop a desktop-app profile gives `config_required`, also under `--no-input`. `client_credentials` works with `--no-input` and in headless mode. A connection named `status`, `logout` or `lock` is shadowed by that subcommand; it is reached by its canonical ID, for example `mcparcel auth local:status`, and MCParcel's next actions use that form (doctor row `credentials.auth-name`) |
 | `auth status [<mcp>]` | Offline, never starts the runtime (it asks a running daemon for its 1Password sessions): per HTTP connection `{connection, state, signedIn, refreshToken, lastRefreshAt?, accessTokenExpiresAt?, refreshTokenExpiresAt?, lastRefreshFailure?: {at, code}, keepAlive, cause?: {code, message}, previousCause?: {code, message}, nextAction?}` in `items`, plus `events` (the health log) for `auth status <mcp>`; `state` is `ok`, `expiring` or `sign-in required`; causes are listed in runtime.md "Health log and `auth status` as built". `previousCause` is set for a signed-in session whose last sign-in followed a terminal failure and says why that sign-in was needed. `keepAlive` is `off` when the connection turned it off, else `unavailable` when its client secret is a 1Password reference, else its keep-alive interval (`24h` by default). Human output: `<connection>  <state>  (<cause>)`, and for one connection the cause message, `Last sign-in needed: <message>`, last refresh, expiries, keep-alive and next action. No token, client identifier or redirect. Without `<mcp>`: enabled HTTP connections marked OAuth, holding a sign-in, or whose server asked for sign-in (an unmarked connection whose call or sign-in got `auth_required`; shown as `sign-in required`). `profiles` lists the local credential profiles an enabled connection uses (for `auth status <mcp>`: that connection's profile when it has `op://` references) as `{profile, mode, session, sessionExpiresAt?, tokenEnv?, tokenFile?, connections}`; `session` is `active`, `expired`, `none` (no session, or the runtime is not running) or `unknown` (the daemon could not be asked or runs another version); `tokenEnv` or `tokenFile` is set for a `service-account` profile and says where its token comes from; human output `profile <id>  <mode>  <session>[  until <RFC3339>][  token from <NAME> | token from file <path>]`. Never the account, a reference or a token. When listing, a connection that is not marked OAuth and whose item the keyring cannot read is left out; a marked connection, or `auth status <mcp>`, fails `keychain_unavailable`. A connection with neither sign-in nor `op://` references gives `invalid_arguments` `client_credentials` connections are left out in every mode (their token lives in daemon memory only); naming one is `invalid_arguments`. Headless mode reads no Keychain: `items` is empty (human: "No sign-ins in headless mode.", followed by the profile lines); `profiles` is listed as on desktop and is `[]`, never `null`, when there are none |
 | `auth lock` | Through the runtime (starts it if needed): end every 1Password session, cancel protected work (dispatched calls report `outcome_unknown`, queued ones `auth_required`), stop protected processes and bar every OAuth connection from reusing its stored session until its next sign-in with `auth <mcp>` (cause `locked` in `auth status`). Service-account profiles are not barred: their next call, also with `--no-input` and in headless mode, bootstraps again from the token without a prompt. To stop one, remove it, bind its connections to another profile or disable them, or revoke the token in 1Password. Secret-free connections keep running. JSON `{locked}` |
@@ -71,10 +71,15 @@ also work via `npx mcparcel ...`. No global installation or Homebrew is required
 | `doctor [<mcp>] [--live]` | Offline checks of the runtime mode and version, local storage, configuration documents, connections, credential mapping and prerequisites, one row each (see Doctor). With `<mcp>`, connection rows cover that connection only. `--live` needs `<mcp>` and lists its tools through the runtime. Exit 8 when a row fails |
 | `runtime status` / `runtime restart [--force]` / `runtime stop [--force]` | Inspect, restart or stop the daemon; status includes `executable` (the file the daemon runs from: on desktop its retained copy `<data>/runtime/<version>/mcparcel`, human `Executable:`), `stayAlive` (human: `Stay-alive: on` or `off`), true when `runtime.keepAlive` is set and an OAuth session may still need refreshing, and `credentialSessions` (`[{profile, mode, state, expiresAt}]`, omitted when there are none; no account or reference); restart and stop refuse active calls unless forced; restart recaptures the login environment and drops pooled sessions, so changed `env:` values apply; stop on a stopped runtime succeeds. Headless mode: status shows `Environment: daemon environment`, and restart starts the new daemon with the forwarded variables of the caller's own environment (no login shell). Against `runtime serve`, restart (also `--force`) is refused with `runtime_supervised` |
 | `runtime serve` | Run the runtime in the foreground under a supervisor: takes the daemon lock itself (`runtime_busy`, exit 6, when another runtime holds it), logs to the daemon log and stderr, never exits when idle; SIGTERM or SIGINT ends dispatched calls as `outcome_unknown`, closes sessions, removes the socket and exits 0 (human `Runtime stopped.`, JSON `{"stopped":true}`). It marks the runtime directory supervised: other CLIs wait up to 15 s for it instead of auto-starting a daemon, then fail `runtime_supervised`. `runtime.supervised: true` in `config.json` (headless only) has the same effect before serve first ran, e.g. on a fresh pod. On Linux in desktop mode it is refused like the other runtime commands when there is neither a desktop session nor a `config.json` |
-| `version` / `--version` / `--help` | Version (`--version` prints the same line as `version`, before any command runs) and English usage |
+| `version` / `--version` / `-V` | Print `mcparcel <version>` (plus ` (<commit>, <date>)` in a release build). `--version` and `-V` print the same line as `version`, before any command runs. JSON `{version, commit?, date?}` |
+| `help [<command>...]` / `--help` / `-h` | English usage. `help tools` and `help auth status` print what `mcparcel tools --help` and `mcparcel auth status --help` print; a word that names no command, or names a hidden internal command, is `invalid_arguments` ("Unknown command.", never the word, with "Did you mean <command>?" for a near miss of a subcommand, as on the command line). `--help` groups the commands: Use MCP tools (`tools`, `call`), Choose connections (`setup`, `enable`, `disable`, `list`, `catalog`, `inspect`), Catalogs and personal definitions (`add`, `join`, `remove`, `sync`, `local`, `import`), Credentials and configuration (`auth`, `config`), Diagnose and help (`doctor`, `runtime`, `version`, `help`, `completion`). `call`, `tools`, `enable`, `add`, `join` and `auth` show examples after the summary line, before their arguments and flags. JSON `{help}`: the same text |
+| `mcparcel` (no command) | A short help on stdout, exit 0: the one-line description, three examples (`mcparcel tools context7`, `mcparcel call context7.resolve-library-id libraryName=react`, `mcparcel setup`), one line per command group naming its commands, and `Run mcparcel --help for all commands.` JSON `{help}` |
+| `completion [bash\|zsh\|fish]` | Print a completion script for that shell (see "Shell completion"); another shell is `invalid_arguments` ("Unknown shell: choose bash, zsh or fish."). JSON `{shell, script}`. Without a shell, on a terminal: the setup line for the shell `$SHELL` names, or every setup line when it is not bash, zsh or fish (that shell is never named); in a pipe: `invalid_arguments` ("Missing argument <shell>.", next action `Run mcparcel completion <shell>.` with the `$SHELL` one when it is one of the three). JSON `{shell, setup: [{shell, command}]}`, `shell` omitted when `$SHELL` is none of the three |
 
-All commands provide `--json` except interactive `setup`; use selection/config
-commands for equivalent machine actions. `--no-input` never opens UI, browser,
+All commands provide `--json` except interactive `setup` and `join`; use
+selection/config commands for equivalent machine actions. With `--json` every
+path prints the envelope, also a command line the parser rejects (an unknown
+command or flag), `version`, `--version`, `help` and `--help`. `--no-input` never opens UI, browser,
 biometric or approval prompts (terminal or dialog). Missing necessary input yields an error with the next action.
 Headless mode (`runtime.mode: "headless"`) behaves as if every runtime command
 had `--no-input`: no terminal or dialog prompt, no browser, also with a
@@ -110,12 +115,125 @@ requirement and its selection has no profile, or names one that no longer exists
 enable links it to the local profile with the same ID if there is one. It never
 replaces a valid binding and never picks a profile with another ID. Human output
 adds `Linked credential profile <profile> to <mcp>.` per linked connection after
-`Configuration saved at revision N.` (the profile ID, never its account); JSON
+the `<name> is on.` lines (the profile ID, never its account); JSON
 adds `linkedProfiles` (`{"<canonical id>": "<profile>"}`) next to `revision`,
 omitted when nothing was linked. Missing declared inputs/profile mappings still
 block enable with `config_required`, and then nothing is linked or saved. Bulk
 enable is all-or-nothing. Tool names may be configured
 before live discovery; unknown names are marked unverified until schemas are loaded.
+
+### Shell completion
+
+`mcparcel completion <shell>` prints a script for bash, zsh or fish, and
+`mcparcel completion` alone prints the setup line for your shell. Install it
+once (`mcparcel` must be on the PATH; `npx mcparcel` does not complete):
+
+```sh
+echo 'eval "$(mcparcel completion bash)"' >> ~/.bashrc   # bash 3.2 or later
+echo 'source <(mcparcel completion zsh)' >> ~/.zshrc     # after compinit
+mcparcel completion fish > ~/.config/fish/completions/mcparcel.fish
+```
+
+The zsh script also works saved as `_mcparcel` in a directory on `$fpath`.
+Each script asks the hidden `mcparcel __complete <words...>` (the words after
+`mcparcel`, the one being completed last, empty at a fresh word) for
+candidates, one per line: subcommands, flags (hidden ones excluded),
+`completion`'s shells, `help`'s command words, and from the configuration,
+read offline:
+
+| Word | Candidates |
+| --- | --- |
+| `<mcp>` of `enable` | Available connections that are off |
+| `<mcp>` of `disable`, `tools`, `tools list\|enable\|disable` | Connections that are on |
+| any other `<mcp>` (`inspect`, `auth`, `doctor`, `config input set`, ...) | Every connection |
+| `call <mcp>.<tool>` | `<mcp>.` per connection that is on; after the dot, `<mcp>.<tool>` for the tools its tool policy allows by name (a finite `allow` list, without the tools turned off), else only `<mcp>.` |
+| `<tool>` of `tools enable <mcp>` / `tools disable <mcp>` | The tools it turned off / the tools its policy allows and it did not turn off |
+| `remove`, `sync` | Registered catalogs, as `<owner/repo>` |
+| `local update`, `local remove` | Personal connection IDs |
+| `config profile bind <mcp> <profile>` | Credential profile IDs |
+
+A connection is offered as typed: its short ID when no other connection has
+it, else its canonical ID, plus its aliases. Only names that pass the
+connection ID and MCP tool name grammars appear. Completion never starts a
+server or the runtime, never reads 1Password or the network and writes
+nothing; a configuration it cannot read within 300 ms gives no connection
+candidates. A flag's value (a path, JSON) is left to the shell's file
+completion, as is any word with no candidates. A candidate ending in `.`
+gets no space after it.
+
+### Change messages
+
+Every command that changes configuration says in its human output what
+happened, in words, rather than a revision: `Context7 is on.`, `Context7 was
+already off.`, `Added personal connection echo. ...`, `Removed personal
+connection echo. It is off now.` (each command's lines are in the table
+above). A connection is named by its label (the short ID when its definition
+has none); a connection with no definition left is named as typed when that is
+a connection name, else by its canonical ID. `--json` is unchanged: `revision`
+(and `linkedProfiles` for enable), or the source result for `add` and `remove`.
+
+### Dry runs
+
+`disable`, `local remove` and `remove` take `--dry-run`. It runs the command's
+checks (an unknown connection is still `connection_unavailable`, an
+unregistered catalog `catalog_unavailable`), prints what would change followed
+by `Nothing was saved.`, exits 0 and writes nothing. It never prompts. JSON
+returns the plan:
+
+```json
+{"dryRun":true,"revision":7,"source":{},"changes":[{"connection":"github:acme/catalog#paper","change":"unavailable","enabled":true}]}
+```
+
+`revision` is the current one. `source` is set for `remove` only. Each change
+names a canonical connection ID, whether it is on now (`enabled`) and what
+would happen to it (`change`): `turn_off`, `none` (disable of a connection
+that is already off), `remove` (its definition goes; for `local remove` it is
+also turned off when on) or `unavailable` (`remove` of a catalog whose
+connection is on; the selection stays). Headless mode refuses `--dry-run` with
+`config_read_only` like the command itself.
+
+### List output
+
+`list` and `catalog` print one row per connection: ID, label and state
+(`Ready`, `Disabled`, `Review required`, `Configuration required` or
+`Unavailable`). When stdout is a terminal they print a header row
+(`ID  Label  State`) and columns aligned by width (a label too wide for the
+terminal is cut with `...`, so ID and State stay on one line), then a blank line and one
+`Source: <owner/repo> <path> @ <commit> (snapshot age <n>s)` line per
+registered catalog. Otherwise (a pipe or a file) they print tab-separated rows
+only, with no header and no source lines, so `cut -f1` gives the IDs. Neither
+prints the revision; `--json` keeps `revision`, `sourceRevisions` and
+`sources`. With no rows they print one line instead, on stdout on a terminal
+and on stderr in a pipe (stdout then stays empty, so `wc -l` gives 0):
+
+| Case | Line |
+| --- | --- |
+| Nothing available at all | `No connections yet. Run mcparcel setup, or mcparcel add <owner/repo>.` |
+| `list`, nothing on | `Nothing is on. 3 connections are available. Run mcparcel catalog to see them.` (`1 connection is ... see it`) |
+| `catalog --domain <id>` with no match | `No connections in domain <id>. Run mcparcel catalog to see all of them.` |
+
+`catalog --domain <id>` with an ID no catalog declares (nor `other`) fails
+`invalid_arguments`, exit 2: `Unknown domain <id>.`, plus `Did you mean
+<id>?` for a near declared ID, next action `Run mcparcel catalog to see all of
+them.`; an ID outside the identifier grammar is not repeated (`Unknown
+domain.`). JSON `details` gives `argument` (`--domain`) and `suggestion`.
+
+`inspect` prints one `Label: value` line per fact, in this order when it
+applies: `ID`, `Label`, `Description`, `Source` (`Personal` or
+`<owner/repo>`), `Catalog commit`, `State`, `Enabled`, `Blockers`, `Domains`,
+`Transport` (`stdio, <command>, <n> arguments` or `HTTP, <host>`), `Working
+directory`, `Inherited environment`, `Environment`, `HTTP mode`, `Insecure
+HTTP`, `Headers`, `Inputs`, `Credential profile` (`<requirement>, linked to
+<profile>` or `not linked`), `Sign-in` (`OAuth, authorization code` or
+`client credentials`), `Tool policy`, `Tools off`, `Idle timeout`,
+`Keep-alive`, `Call timeout`, `Startup timeout`. A group (`Environment`,
+`Headers`, `Inputs`, `Tool policy`, and `Scopes`, `Client ID` and
+`Client secret` under `Sign-in`) is its label line followed by indented
+`<name>: <value>` lines. A value is described, never shown: `set (value
+hidden)`, `from input <name>`, `from environment variable <NAME>` or
+`from 1Password`; an input is `<kind>, set`, `default` or `not set`. No
+argument, env or header value, URL path or query, secret reference or input
+value appears. An unavailable connection stops after `Blockers`.
 
 ## Arguments and identity
 
@@ -311,7 +429,10 @@ a `next:` line under rows that have one, a summary line) on stdout; the
 
 ## Output and errors
 
-Human output goes to stdout; progress and prompts to stderr. JSON mode emits one
+Human output goes to stdout; progress and prompts to stderr. Human output is
+written for people and can change between 0.x versions; scripts should use
+`--json` (the envelope below, `schemaVersion` 1) or the tab-separated rows
+`list` and `catalog` print to a pipe (see "List output"). JSON mode emits one
 object and no ANSI or diagnostic lines on stdout. Top-level contract:
 
 ```json
@@ -328,8 +449,26 @@ output prints text blocks, `[image saved: <path>]` or `[audio saved: <path>]` fo
 exported blocks and `[<type>]` for any other block (`[content]` when the type is
 not a short lowercase name); when there is no text block it prints
 `structuredContent` as compact JSON. Server text is stripped of terminal escape
-sequences, control characters other than newline and tab, and bidi controls. List output includes `items`, relevant
+sequences, control characters other than newline and tab, and bidi controls;
+`tools` output cleans tool names, descriptions, argument names and enum values
+the same way. List output includes `items`, relevant
 source revisions and cache age. Secret bindings remain references, never values.
+
+A command that waits on something slow says what it waits for in one stderr
+line once it has waited a second: `call` (`Calling <mcp>.<tool>…`, which
+covers starting the runtime and the server), `tools <mcp>` (`Loading <mcp>
+tools…`), and `add`, `sync` and `join` while they fetch a catalog (`Fetching
+<owner/repo>…`; `sync` renames the line for each catalog). When the wait ends
+the line is erased (overwritten with spaces, so no escape sequence is needed)
+and the output, error or prompt that follows prints as if it had never been
+there; a server's approval prompt during a call ends it too. It is a static
+line, never a spinner, so `MCPARCEL_REDUCE_MOTION` changes nothing, and it is
+cut (with an ellipsis) to the terminal's width so it stays on one row. Nothing is
+printed when the wait is shorter, when stderr is not a terminal, or with
+`--json` or `--no-input`. The line names connection IDs, owner/repo and tool
+names that pass the MCP tool name grammar (below; `Calling <mcp>…` otherwise),
+never a catalog path, ref or argument. Its ellipsis is `...` on a terminal
+that is not UTF-8.
 
 | Exit | Meaning |
 | --- | --- |
@@ -355,6 +494,42 @@ pooled process stay, and nothing is retried within the call;
 with `--json` or `--no-input`; the next action lists the equivalent commands);
 `doctor_failed` exit 8 (doctor ran and at least one row failed; `data` keeps
 the rows, as for `isError`).
+
+Messages are sentences. A next action names commands inline and unquoted, as
+`Run mcparcel <command>.`; a placeholder such as `<mcp>` stays when the command
+line did not give the value. Errors name what failed when it is an identifier:
+the message carries it, and `details` repeats it as `connection`, `tool`,
+`argument` (a flag such as `--file`, or a placeholder such as `<mcp>`) and
+`suggestion` (the nearest known name). Only names that pass a grammar appear: a
+connection ID (short or canonical), an MCP tool name (1 to 128 of `A-Z a-z 0-9 _
+- . /`), a flag name (`-x` or a lowercase `--name`) or a subcommand. Anything
+else, such as a mistyped token that could be a pasted secret, gives the generic
+message and no `details` field for it; positional values, flag values, paths and
+references never appear. The error codes do not change.
+
+| Case | Message | Next action |
+| --- | --- | --- |
+| `connection_unavailable` (exit 4), unknown name | `No connection is named <mcp>.`, plus ` Did you mean <id>?` when a known name is within a few edits (aliases and unique short names, or canonical IDs for a canonical name; offline) | `Run mcparcel list to see enabled connections, or mcparcel catalog for all of them.` |
+| `connection_unavailable` (exit 4), exists but unavailable (its catalog or personal definition was removed and the selection kept) | `Connection <mcp> is unavailable: its definition is gone.` (no suggestion) | `Run mcparcel inspect <mcp> to see it, or mcparcel catalog for connections you can use.` |
+| `connection_unavailable` (exit 4), `local update` / `local remove` | `No personal connection is named <id>.`, plus ` Did you mean <id>?` from the personal connection IDs only (as `local:<id>` when the name was) | `Run mcparcel catalog to see your personal connections, listed as local:<id>.` |
+| `connection_disabled` (exit 4) | `Connection <mcp> is disabled.` | `Run mcparcel enable <mcp>.` |
+| `tool_not_found` (exit 2) | `Connection <mcp> has no tool named <tool>.`, plus ` Did you mean <tool>?` from the tool list `call` just read (allowed tools only; no extra request) | `Run mcparcel tools <mcp>.` (`tools list <mcp>` when `<mcp>` is `list`, `enable` or `disable`) |
+| `config_required` (exit 2), no connections at all | `No connections are set up yet.` | `Run mcparcel setup, or mcparcel add <owner/repo>.` |
+| `config_required` (exit 2), without a more specific message, the command line naming the connection | `Connection <mcp> needs configuration.` | `Run mcparcel inspect <mcp> to see what the connection needs, then mcparcel setup.`, naming it |
+| `config_required` (exit 2), without a more specific message | `Required configuration is missing.` | `Run mcparcel inspect <mcp> to see what the connection needs, then mcparcel setup.` |
+| `invalid_arguments` (exit 2), command line | The parser's reason, cleaned: `Unknown flag --x.` (with ` Did you mean --json?`; a hidden flag is never suggested), `Unexpected argument.` (never the argument; with a subcommand suggestion), `Missing argument <mcp>.`, `Missing subcommand: choose validate, input or profile.`, `Missing flag --file.`, `The --timeout flag needs a value.`, `Invalid value for the --json flag.`, `Give the --file flag only once.`, `Invalid command arguments.` otherwise | `Run mcparcel <command> --help.` |
+| `invalid_arguments` (exit 2), `catalog --domain` with an undeclared domain | `Unknown domain <id>.`, plus ` Did you mean <id>?` for a near declared domain | `Run mcparcel catalog to see all of them.` |
+| `invalid_arguments` (exit 2), `auth status <mcp>` with neither sign-in nor 1Password, or `auth logout` / `auth status` naming a client-credentials connection | `<mcp> uses neither sign-in nor 1Password.` / `<mcp> uses client credentials; there is nothing to sign in to.` | none |
+| `invalid_arguments` (exit 2), `call --output-dir` that is not an existing directory | `--output-dir must name an existing directory.` | `Run mcparcel call --help.` |
+| `outcome_unknown` / `timeout` (exit 6), the call's own deadline (`--timeout` or `callTimeout`) ran out | `<mcp>.<tool> did not answer within <duration>; it may have run.` (dispatched) / `<mcp>.<tool> timed out after <duration> before it was sent.` (`The call ...` when a name fails its grammar); `details` adds `connection` and `tool`. A forced restart, a lock or the caller giving up keeps the generic message | `Inspect remote state before deciding whether to call again.` / `Check the server and timeout.` |
+| `invalid_arguments` (exit 2), `call` without `<mcp>.<tool>` | `Name the tool as <mcp>.<tool>, for example context7.resolve-library-id.` | `Run mcparcel list for connection IDs, then mcparcel tools <mcp> for its tools.` |
+| `invalid_arguments` (exit 2), call arguments | The reason as a sentence, naming types, schema paths and only the keys the tool's schema defines: `Argument "limit" must be integer.`, `Arguments do not match the tool schema at /properties/limit (minimum).` A syntax error never repeats a key, which is unchecked text: `Duplicate key.`, `An argument requires valid JSON.` | `Run mcparcel call --help.` for syntax; `Run mcparcel tools <mcp> to see the tool's arguments.` for a schema mismatch (`tools list <mcp>` when `<mcp>` is `list`, `enable` or `disable`) |
+
+Commands outside the product surface (an unknown command such as `mcparcel lst`)
+print the parser's own message, with its suggestion, and `Run mcparcel --help for
+usage.` on stderr. With `--json` they print the envelope instead:
+`invalid_arguments`, `Unknown command.` (never the word; with ` Did you mean
+<command>?` when the parser has one), next action `Run mcparcel --help.`
 Headless mode adds `config_read_only` (exit 2, "This configuration is
 read-only (headless mode).", next action to change the configuration at its
 source and restart the runtime) and `runtime_supervised` (exit 6, a
@@ -401,8 +576,8 @@ unlock or create dialog blocks the keyring) and `auth_callback_unavailable`
 malformed `owner/repo` argument, nothing fetched), `invalid_catalog` (exit 2, fetched
 content rejected), `catalog_unavailable` (exit 4, repository unreachable or not
 registered) and `catalog_requires_upgrade` (exit 4, the fetched catalog's `minVersion`
-is above this MCParcel; `add` saves nothing and `sync` keeps the saved snapshot). Human `sync` with no registered catalogs prints a hint to run
-`mcparcel add <owner/repo>`. `runtime stop --json` returns
+is above this MCParcel; `add` saves nothing and `sync` keeps the saved snapshot). Human `sync` with no registered catalogs prints "No catalogs are registered. Run
+mcparcel add <owner/repo> to register one." `runtime stop --json` returns
 `{"stopped":true,"wasRunning":<bool>}` and never starts a daemon. Errors include request ID when execution began. Upstream
 secret-bearing messages are sanitized. No automatic execution of corrective hints.
 
@@ -420,15 +595,14 @@ MCParcel  Acme · a54e28f · synced 2m ago                                      
   ● Context7                    2 tools                                     │
 > ◐ GlitchTip                   sign in                                     │ ◐ needs a sign-in
   ● Lighthouse                  starts on first use                         │
-  ● Notion                      sign-in unknown                             │ ✓ On
-  ✕ Rails Blocks                rails-blocks-mcp not installed              │ ◆ Sign in with your browser
-                                                                            │ ○ Tools load after sign-in
+  ● Notion                      sign-in unknown                             │ ◆ Sign in with your browser
+  ✕ Rails Blocks                rails-blocks-mcp not installed              │ ⋯ Tools load after sign-in
                                                                             │
                                                                             │ Runs  remote · errors.example
                                                                             │ From  Acme · Monitoring, Development
 
 2 servers need a step.  s set up all   → open GlitchTip
-Space on/off   Tab domain   / search   u undo   ? help   q quit
+Space on/off   Tab domain   u undo   / search   q quit   ? help
 ```
 
 This is setup at 120x30 in a UTF-8 terminal, with the cursor on GlitchTip;
@@ -441,11 +615,14 @@ across all tabs, the servers that are on and how many of those need a step
 (`5 on · 2 need a step`), or `5 on · all ready`. Below it are the domain
 tabs, then the search line (blank until you search). The current tab reads
 `[Label on/total]` (`[Label (n)]` with the match count while a search is
-active); the tab bar keeps it whole, unless it alone is wider than the
+active). A domain without a label of its own (a personal connection's
+domains are declared with just their IDs) reads as its ID humanized, here
+and wherever setup names a domain: `dev-tools` shows as `Dev tools`. The
+tab bar keeps the current tab whole, unless it alone is wider than the
 screen, when its label is cut. It shows `‹` and `›` (`<` and `>` in ASCII)
 when tabs are hidden on either side.
 
-From 100x30 setup uses the wide layout: the list on the left and the details
+From 100x20 setup uses the wide layout: the list on the left and the details
 pane on the right of a rule. Each list row starts with `> ` on the focused
 row, then a glyph, MCP, Status and Source; where a row runs, and the command
 or runner it starts (`npx`, `uvx`, `docker`, ...), is in the pane. MCP is as
@@ -493,11 +670,16 @@ Exceptional states) shows nothing: one Space turns it on.
 
 The details pane takes three eighths of the width, kept between 40 and 60
 columns including the rule, and follows the cursor. It is the server page
-in short: the label, the description (up to 3 lines), the state (`● ready ·
-2 tools`, `◐ needs a sign-in`, `○ off · needs workspace`, ...), the To do,
-then Runs and From (see "The server page"). Below come why a row is
-unavailable, or why it could not start (`Could not start Maps.`, with its
-next step).
+in short: the label, why it matched a search when its description does not
+show the match (see Search under Keys), the description (up to 3 lines),
+the state (`● ready · 2 tools`, `◐ needs a sign-in`, `○ off · needs
+workspace`, ...), the To do less what the state already says (`✓ On`,
+`◆ Turn it on`, `◆ Accept the change`, `◆ Could not start`), then Runs and
+From (see "The server page"). Below come why a row is unavailable, or why
+it could not start (`Could not start Maps.`, with its next step). When the pane is shorter than that, the description shrinks to
+one line, and what still does not fit is cut under a last line that says
+how much (`3 more lines: Enter shows all.`; while a search is typed just
+`3 more lines.`, since Enter there returns to the list).
 Right or Enter opens the server's page.
 
 `mcparcel setup` opens on the first server, in tab order, that needs a
@@ -511,17 +693,23 @@ failed) and `→ open <Label>` (`Right open` in ASCII) when the cursor is on a
 server with a step: `2 servers need a step.  s set up all   → open
 GlitchTip`. With neither it names the next step: `2 servers need a step.
 Next: Rails Blocks, rails-blocks-mcp not installed.` The second line keeps
-the main keys. Otherwise they are the two key
-lines. While setting up runs they show its progress or the sign-in that
-waits (see "Setting up").
+the main keys that line does not offer: `Space on/off   Tab domain   u undo
+/ search   q quit   ? help`. Otherwise there is one key line, the main keys
+(the arrow keys are only in `?` help):
+`Space on/off   Tab domain   Enter open   s set up   u undo   / search   n new   q quit   ? help`.
+While setting up runs they show its progress or the sign-in that waits (see
+"Setting up").
 
-Below 100 columns or 30 rows setup uses the compact list: glyph, MCP and
+Below 100 columns or 20 rows setup uses the compact list: glyph, MCP and
 Status. Under the list come one summary line (what the focused row needs,
-in a sentence),
-the status line and one bottom line when a server needs a step (`2 need a
-step. s set up all   → open GlitchTip   ? help`, `1 needs a step. Next: ...`,
-as on the wide list). MCP is as wide as the longest label needs, and Status
-gets the rest. In both layouts every column ends in two spaces,
+in a sentence, or why it matched a search, see Search under Keys),
+the status line and one bottom line: when a server needs a step `2 need a
+step. s set up all   → open GlitchTip   ? help` (`1 needs a step. Next: ...`,
+as on the wide list), else the main keys, in the same order, as many as
+fit. MCP is as wide as the longest label needs, and Status gets the rest; on
+the wide list MCP stops at 28 columns only when Status needs the room. A
+status too long for its column cuts the command or input it names, never
+`not installed` or `needs`. In both layouts every column ends in two spaces,
 so truncated text never runs into the next column. Below 40x10 setup shows
 `Terminal too small (need 40x10). Resize, or press q.`
 
@@ -537,12 +725,13 @@ Status phrases; letters match either case):
 | Where | Keys |
 | --- | --- |
 | List | Tab/Shift+Tab: next or previous domain (wrapping). Up/Down: server; PgUp/PgDn, Home/End. Right or Enter: open the server's page. Space: on/off, written at once (on a row that misses something it asks for it first, see Exceptional states). `u`: undo the last change, again and again, back to how setup opened. `s`: set up every server that is on and needs no step from you (see "Setting up"). `n`: new personal connection. `/`: search. Left or Esc: clear an active search, keeping the cursor on the server it was on; otherwise Esc only says how to quit. `q`: quit (while setting up runs, it stops it). `?`: help. Ctrl+C: quit, exit 130. |
-| Search | Typing filters label, ID and description in every tab (the help lines show these keys while searching); after each edit, when the current tab has no match it moves to the first tab, in tab order, that has one; with no match anywhere it stays. Backspace, Ctrl+U. Enter or Down: back to the list, filter kept. Esc: clear; the cursor stays on the server it was on. |
+| Search | Typing filters label, ID and description in every tab (the help lines show these keys while searching); after each edit, when the current tab has no match it moves to the first tab, in tab order, that has one; with no match anywhere it stays. When the focused server matched on its ID or description but not its label, the compact summary line says why, in one line cut to the width, with a snippet around the match (`Matches description: ...library documentation.`, `Matches ID: local:notes`); the pane says it too when the description it shows leaves the match out. With color the matched text is bold and underlined. Backspace, Ctrl+U. Enter or Down: back to the list, filter kept. Esc: clear; the cursor stays on the server it was on. |
 | Server page | Up/Down: choose an action; the page opens on the first, the next step. Enter: do it. Right: open Choose tools or Edit only, so a stray arrow never signs in, starts or removes anything. Space: on/off. `s`: set up this server (also one that loaded its tools already). `u`: undo. `i`: show or hide the technical facts. `?`: help. Left or Esc: back. `q`: quit (while setting up runs, it stops it). While an input is edited on the page: typing, Backspace, Ctrl+U, paste; Enter writes it; Esc leaves it as it was. |
 | Tools | Opening the page loads the tools of a server that is on (Esc cancels a running load). Up/Down. Space: on/off, written at once. `s`: set up this server right here; its tools show once it starts. `u`: undo. `?`: help. Left or Esc: back (while a sign-in waits, Esc skips it). `q`: quit (while setting up runs, it stops it). |
 | Setting up | The list stays usable. Esc skips the sign-in waiting for your browser; `q` stops setting up and stays in setup (`q` again quits). |
 | Join | Intro: Enter uses the suggested 1Password account, `e` types another one (Enter uses it, Esc goes back), Esc skips 1Password for now; with nothing to ask, Enter continues. Presets: Up/Down, Space picks or unpicks (on Start empty it clears the picks), Enter turns the picks on and continues to the list (on Start empty, without the picks). `q` (and Esc where it does not skip) quits. |
 | Form or field | Typing, Backspace, Ctrl+U, paste (control characters stripped). Tab/Shift+Tab: next or previous field. Enter: apply, written at once (on the field Space opens, the next missing item). Esc: discard the edit. Keys pressed and text pasted while a change is written wait for it, then run in order. |
+| Any screen | Ctrl+Z: suspend setup to the shell, never typed into a field; `fg` brings it back drawn in full, showing what changed in the configuration meanwhile (a server page or its edit form whose server is gone returns to the list) and reading the stored sign-ins and local commands again. Pressed while a change is written, it waits for it, as every key does, so setup never stops part way through a write; keys pressed after it wait until setup is back. |
 
 Every setup action has a non-interactive command, and both run the same code:
 
@@ -585,8 +774,7 @@ Errors and performance.
 
 To do
   ✓ On
-  ◆ Sign in with your browser
-  ○ Tools load after sign-in
+  ⋯ Tools load after sign-in
 
 Runs  remote · errors.example
 From  Acme · Monitoring, Development
@@ -629,9 +817,13 @@ session knows: `✓` (`[+]` in ASCII) what is done (`On`, `workspace is set`,
 loaded`), `◆` (`[*]`) what is left for you (`Turn it on`, `Accept the
 change`, `Set workspace`, `Link a 1Password profile`, `Install
 rails-blocks-mcp`, `Sign in with your browser`, `Could not start: timed
-out`) and `○` (`[.]`) what happens later by itself (`Sign in when it first
-starts`, `Tools load after sign-in`, `Tools load on first use`). Once its tools
-loaded and nothing is left, the page lists the tools instead (a mark, the
+out`) and `⋯` (`[.]`) what happens later by itself (`Sign in when it first
+starts`, `Tools load after sign-in`, `Tools load on first use`). The actions
+are the steps, so the page leaves out a `◆` step an action above takes:
+under `Sign in to GlitchTip` the To do does not say `Sign in with your
+browser` again, under `Turn on` not `Turn it on`. A To do with nothing left
+to list has no heading either. Once its tools loaded and the To do has no
+step left that an action above does not take, the page lists the tools instead (a mark, the
 name and the first line of the description, as many as fit, then `N more
 tools: Choose tools lists them all.`):
 

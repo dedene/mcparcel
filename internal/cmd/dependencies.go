@@ -79,6 +79,41 @@ func newSetupTerminal(in, errOut *os.File) bool {
 	return newTerminal(config.Paths{}, in, errOut) != nil
 }
 
+// stdoutTerminal reports whether out is a terminal: list and catalog then
+// print a header row and aligned columns instead of tab-separated rows.
+func stdoutTerminal(out io.Writer) bool { return writerTerminal(out) }
+
+// stderrTerminal reports whether errOut is a terminal: a slow command then
+// says on it what it waits for (progress.go).
+func stderrTerminal(errOut io.Writer) bool { return writerTerminal(errOut) }
+
+func writerTerminal(w io.Writer) bool {
+	f, ok := w.(*os.File)
+	if !ok {
+		return false
+	}
+	fd, ok := fileFD(f)
+	return ok && isTerminal(fd)
+}
+
+// writerColumns is the width of the terminal w writes to, or 0 when w is
+// not a terminal or the width is unknown.
+func writerColumns(w io.Writer) int {
+	f, ok := w.(*os.File)
+	if !ok {
+		return 0
+	}
+	fd, ok := fileFD(f)
+	if !ok {
+		return 0
+	}
+	ws, err := unix.IoctlGetWinsize(fd, unix.TIOCGWINSZ)
+	if err != nil {
+		return 0
+	}
+	return int(ws.Col)
+}
+
 // promptReader first discards input typed before the prompt, so a line typed
 // ahead cannot answer a prompt not yet shown; if that fails it reads as EOF.
 func promptReader(ctx context.Context, fd int) io.Reader {

@@ -35,7 +35,9 @@ on your machine:
   registers one, and `mcparcel sync` shows what changed before you apply it.
 - Your **selection** of servers and tools stays local. `mcparcel setup` is a
   keyboard-driven terminal UI with tabs per domain (Design, Research, …).
-  `enable` and `disable` do the same from scripts.
+  `enable` and `disable` do the same from scripts, and `mcparcel list` shows
+  what is on. `disable`, `remove` and `local remove` take `--dry-run` to show
+  what would change first.
 - **Personal connections** (a local app such as Paper, a server only you use)
   live next to the catalogs and never touch them.
 - **Credentials** come from 1Password (`op://` references, through the
@@ -48,7 +50,9 @@ on your machine:
 
 ## Status
 
-Version `0.1.0`. It is used daily, but it is early software:
+It is used daily, but it is early software (0.x). `mcparcel --version` prints
+the version you have; [GitHub Releases](https://github.com/dedene/mcparcel/releases)
+lists the latest and what changed:
 
 - On **macOS** it runs on Apple Silicon only. The binary is ad-hoc signed,
   not notarized.
@@ -73,6 +77,19 @@ Or download the archive for your platform from
 `mcparcel` on your PATH. Upgrades and rollbacks are in
 [docs/migration.md](docs/migration.md).
 
+Shell completion covers commands, flags, connection IDs and `call` targets.
+It reads your configuration offline and never starts a server. Run
+`mcparcel completion` for your shell's setup line, or pick it here:
+
+```sh
+echo 'eval "$(mcparcel completion bash)"' >> ~/.bashrc
+echo 'source <(mcparcel completion zsh)' >> ~/.zshrc     # after compinit
+mcparcel completion fish > ~/.config/fish/completions/mcparcel.fish
+```
+
+Run `mcparcel` on its own for a short overview, and `mcparcel help <command>`
+(or `--help`) for the details of one command.
+
 ## Getting started
 
 1. Run `mcparcel doctor`. It works offline and writes nothing. Every `fail` row
@@ -93,7 +110,9 @@ Or download the archive for your platform from
    mcparcel call context7.resolve-library-id libraryName=react
    ```
 
-   Arguments are typed by the tool's schema. Add `--json` for one
+   `tools` prints each tool's arguments, such as
+   `echo(text: string, times?: integer)` (`?` marks an optional one), and call
+   arguments are typed by that schema. Add `--json` for one
    machine-readable envelope with stable error codes.
 5. For a server that uses OAuth, sign in once with `mcparcel auth <mcp>`.
    The same command reads a connection's 1Password secrets again or gets a

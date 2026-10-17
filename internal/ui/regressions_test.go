@@ -131,6 +131,18 @@ func TestHelpListsEveryScreen(t *testing.T) {
 	}
 }
 
+// Each mark in the help legend means one thing: off is not also "happens
+// later".
+func TestHelpMarksAreDistinct(t *testing.T) {
+	help := strings.Join(helpText(unicodeGlyphs), "\n")
+	if !strings.Contains(help, "○ off") || !strings.Contains(help, "⋯ happens later") || strings.Count(help, "○") != 1 {
+		t.Fatalf("%s", help)
+	}
+	if !strings.Contains(strings.Join(helpText(asciiGlyphs), "\n"), "[.] happens later") {
+		t.Fatal("the ASCII legend lacks [.]")
+	}
+}
+
 func TestStringInputInURLShowsHostOnly(t *testing.T) {
 	seed := func(t *testing.T, store *config.Store) {
 		mustUpdate(t, store, func(s *config.State) {

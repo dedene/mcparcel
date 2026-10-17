@@ -76,6 +76,9 @@ func TestHeadlessConfigReadOnlyBlackBox(t *testing.T) {
 	for _, argv := range [][]string{
 		{"enable", "alpha"},
 		{"disable", "beta"},
+		{"disable", "beta", "--dry-run"},
+		{"local", "remove", "beta", "--dry-run"},
+		{"remove", "fixture-owner/fixture.repo", "--dry-run"},
 		{"tools", "disable", "beta", "read"},
 		{"local", "add", "--file", definition},
 		{"config", "input", "set", "beta", "endpoint", "https://fixture.invalid"},

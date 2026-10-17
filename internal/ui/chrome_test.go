@@ -100,13 +100,13 @@ func TestSearchJumpsToFirstTabWithMatches(t *testing.T) {
 	h.contains(`No MCPs match "zzz" in Development.`)
 }
 
-// The details pane shows beside the list from 100x30; below that the list
+// The details pane shows beside the list from 100x20; below that the list
 // keeps its summary line.
 func TestDetailsPaneThreshold(t *testing.T) {
 	for _, tc := range []struct {
 		w, h int
 		pane bool
-	}{{100, 30, true}, {120, 35, true}, {160, 50, true}, {99, 30, false}, {100, 29, false}, {80, 24, false}, {40, 10, false}} {
+	}{{100, 20, true}, {120, 22, true}, {160, 26, true}, {120, 35, true}, {160, 50, true}, {99, 30, false}, {100, 19, false}, {80, 24, false}, {40, 10, false}} {
 		h := newHarness(t, seedFixture, tc.w, tc.h, fixedAges(7200))
 		checkFits(t, h, tc.w, tc.h, "pane")
 		lines := strings.Split(h.plain(), "\n")
@@ -119,8 +119,9 @@ func TestDetailsPaneThreshold(t *testing.T) {
 			continue
 		}
 		// The header shows the only catalog's commit and age; the pane does not
-		// repeat them, nor the summary line its To do already says.
-		h.paneContains("[ ] off", "[*] Turn it on", "Runs remote - mcp.figma.example", "From acmeco/mcp-catalog - Design")
+		// repeat them, nor the summary line, nor its state line as a To do step.
+		h.paneContains("[ ] off [.] Tools load on first use", "Runs remote - mcp.figma.example", "From acmeco/mcp-catalog - Design")
+		h.paneLacks("Turn it on")
 		if pane := h.paneText(); strings.Contains(pane, "aaaaaaa") || strings.Contains(pane, "Space turns it on") {
 			t.Fatalf("%dx%d: %q", tc.w, tc.h, pane)
 		}
@@ -128,7 +129,7 @@ func TestDetailsPaneThreshold(t *testing.T) {
 		h.press("down")
 		h.paneContains("Paper", "Runs this device - paper-fixture", "From acmeco/mcp-catalog - Design")
 		h.selectTab("Research")
-		h.paneContains("[ ] off - needs workspace", "[*] Set workspace [*] Link a 1Password profile")
+		h.paneContains("[ ] off - needs workspace [*] Set workspace [*] Link a 1Password profile")
 	}
 	// The pane never shows a profile's account or a secret, whatever row it follows.
 	h := newHarness(t, seedSecrets, 120, 35, fixedAges(60))
@@ -142,6 +143,39 @@ func TestDetailsPaneThreshold(t *testing.T) {
 			}
 			h.press("down")
 		}
+	}
+}
+
+// A pane taller than its space first gives up description lines, then cuts
+// the rest with a line that says how much and that Enter shows all.
+func TestPaneDegradesWhenShort(t *testing.T) {
+	h := newHarness(t, seedLong, 100, 20, fixedNow())
+	h.selectTab("Other")
+	h.selectRow(strings.Repeat("Very long label ", 12))
+	n := 100 - listWidth(100) - 3 // the pane's text width, right of the rule
+	full := h.m.pane(n, 40)
+	if got := strings.Count(strings.Join(full[1:4], " "), "wide"); got < 3*4 || strings.Contains(full[4], "wide") {
+		t.Fatalf("a tall pane does not wrap the description over 3 lines: %q", full)
+	}
+	short := h.m.pane(n, 9)
+	if len(short) != 9 || !strings.HasSuffix(short[1], "...") || strings.Contains(short[2], "wide") {
+		t.Fatalf("the description is not trimmed to one line: %q", short)
+	}
+	if strings.Contains(strings.Join(short, "\n"), "more line") || !strings.Contains(strings.Join(short, "\n"), "From  Personal - Other") {
+		t.Fatalf("the trimmed pane does not fit whole: %q", short)
+	}
+	cut := h.m.pane(n, 6)
+	if len(cut) != 6 || cut[5] != "4 more lines: Enter shows all." || !strings.Contains(cut[3], "off") {
+		t.Fatalf("%q", cut)
+	}
+	if one := h.m.pane(n, 1); len(one) != 1 || strings.Contains(one[0], "more") {
+		t.Fatalf("%q", one)
+	}
+	// While a search is typed Enter returns to the list, so the note does
+	// not offer it.
+	h.press("/")
+	if cut := h.m.pane(n, 6); cut[5] != "4 more lines." {
+		t.Fatalf("%q", cut)
 	}
 }
 
@@ -187,5 +221,10 @@ func TestKeyHintsAreChips(t *testing.T) {
 	narrow.contains("2 need a step. Next: Reviewer...  ? help")
 	narrow.lacks("Tab dom...", "/ sea...")
 	calm := newHarness(t, nil, 40, 12)
-	calm.contains("Space on/off   Enter open   ? help")
+	// The compact list's keys keep the wide list's order.
+	calm.contains("Space on/off   Tab domain   ? help")
+	compact := newHarness(t, nil, 99, 20)
+	compact.contains("Space on/off   Tab domain   Enter open   s set up   u undo   / search   n new   q quit   ? help")
+	short := newHarness(t, nil, 72, 15)
+	short.contains("Space on/off   Tab domain   Enter open   s set up   u undo   ? help")
 }

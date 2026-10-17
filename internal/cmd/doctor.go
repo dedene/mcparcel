@@ -29,7 +29,7 @@ const doctorConfigWait = 5 * time.Second
 // already running runtime for its status, as runtime status does.
 func (c *DoctorCmd) Run(ctx context.Context, s *Streams, opts *CommandOptions) error {
 	if c.Live && c.MCP == "" {
-		return output.CommandUsageError()
+		return output.UsageError("doctor", "The --live flag needs a connection: mcparcel doctor <mcp> --live.", "--live", "")
 	}
 	in, err := doctorInput(ctx, c.MCP)
 	if err != nil {
