@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
+	"io"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -199,6 +201,56 @@ func TestCompletionScripts(t *testing.T) {
 	code, stdout, stderr := run(t, "completion", "pwsh-CANARY")
 	if code != 2 || stdout != "" || !strings.Contains(stderr, "Unknown shell: choose bash, zsh or fish.") || strings.Contains(stderr, "CANARY") {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+}
+
+// completion without a shell shows the setup line for $SHELL on a terminal
+// (every line for a shell it does not complete, which it never names); in a
+// pipe it stays the missing-argument error, so $(mcparcel completion) never
+// yields text a shell would run.
+func TestCompletionWithoutShell(t *testing.T) {
+	saved := completionTerminal
+	t.Cleanup(func() { completionTerminal = saved })
+	terminal := true
+	completionTerminal = func(io.Writer) bool { return terminal }
+
+	t.Setenv("SHELL", "/opt/homebrew/bin/zsh")
+	code, stdout, stderr := run(t, "completion")
+	want := "Set up zsh completion once with:\n\n    echo 'source <(mcparcel completion zsh)' >> ~/.zshrc   # after compinit\n\nOther shells: mcparcel completion --help.\n"
+	if code != 0 || stdout != want || stderr != "" {
+		t.Fatalf("zsh: code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	setup := func() (int, completionSetupData) {
+		t.Helper()
+		code, out, _ := run(t, "completion", "--json")
+		var envelope struct{ Data completionSetupData }
+		if err := json.Unmarshal([]byte(out), &envelope); err != nil {
+			t.Fatalf("%v: %q", err, out)
+		}
+		return code, envelope.Data
+	}
+	if code, data := setup(); code != 0 || data.Shell != "zsh" || len(data.Setup) != 1 || data.Setup[0] != completionSetups[1] {
+		t.Fatalf("json: code=%d %+v", code, data)
+	}
+
+	t.Setenv("SHELL", "/usr/bin/nu-CANARY")
+	code, stdout, _ = run(t, "completion")
+	if code != 0 || !strings.HasPrefix(stdout, "mcparcel completes bash, zsh and fish.") || strings.Count(stdout, "mcparcel completion ") != 3 || strings.Contains(stdout, "CANARY") {
+		t.Fatalf("unknown shell: code=%d stdout=%q", code, stdout)
+	}
+	if code, data := setup(); code != 0 || data.Shell != "" || len(data.Setup) != 3 {
+		t.Fatalf("unknown shell json: code=%d %+v", code, data)
+	}
+
+	terminal = false
+	t.Setenv("SHELL", "/bin/bash")
+	code, stdout, stderr = run(t, "completion")
+	if code != 2 || stdout != "" || !strings.Contains(stderr, "Missing argument <shell>.") || !strings.Contains(stderr, "Run mcparcel completion bash.") {
+		t.Fatalf("pipe: code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	t.Setenv("SHELL", "")
+	if code, _, stderr := run(t, "completion"); code != 2 || !strings.Contains(stderr, "Run mcparcel completion bash, zsh or fish.") {
+		t.Fatalf("pipe, no SHELL: code=%d stderr=%q", code, stderr)
 	}
 }
 

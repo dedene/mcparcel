@@ -78,7 +78,8 @@ Or download the archive for your platform from
 [docs/migration.md](docs/migration.md).
 
 Shell completion covers commands, flags, connection IDs and `call` targets.
-It reads your configuration offline and never starts a server:
+It reads your configuration offline and never starts a server. Run
+`mcparcel completion` for your shell's setup line, or pick it here:
 
 ```sh
 echo 'eval "$(mcparcel completion bash)"' >> ~/.bashrc

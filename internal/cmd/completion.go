@@ -1,16 +1,21 @@
 package cmd
 
 import (
+	"fmt"
 	"io"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/dedene/mcparcel/internal/output"
 )
 
 // CompletionCmd prints a shell completion script. Each script asks
 // mcparcel __complete for its candidates, so completion follows the
-// installed version and the current configuration.
+// installed version and the current configuration. Without a shell it says
+// how to set up the one $SHELL names.
 type CompletionCmd struct {
-	Shell string `arg:"" name:"shell" json:"-" help:"bash, zsh or fish."`
+	Shell string `arg:"" optional:"" name:"shell" json:"-" help:"bash, zsh or fish. Leave it out to see how to set up your shell."`
 }
 
 // completionData is the JSON form of completion.
@@ -19,18 +24,42 @@ type completionData struct {
 	Script string `json:"script"`
 }
 
+// completionSetupData is the JSON form of completion without a shell: the
+// shell $SHELL names when mcparcel completes it, and the setup lines.
+type completionSetupData struct {
+	Shell string            `json:"shell,omitempty"`
+	Setup []completionSetup `json:"setup"`
+}
+
+type completionSetup struct {
+	Shell   string `json:"shell"`
+	Command string `json:"command"`
+}
+
+// completionSetups is the one line that loads each shell's script.
+var completionSetups = []completionSetup{
+	{"bash", `echo 'eval "$(mcparcel completion bash)"' >> ~/.bashrc`},
+	{"zsh", `echo 'source <(mcparcel completion zsh)' >> ~/.zshrc   # after compinit`},
+	{"fish", `mcparcel completion fish > ~/.config/fish/completions/mcparcel.fish`},
+}
+
+// completionTerminal is stdoutTerminal; tests replace it.
+var completionTerminal = stdoutTerminal
+
 func (c *CompletionCmd) Help() string {
 	return `Completes commands, flags, connection IDs and call targets. It reads your configuration offline: it never starts servers or the runtime, and it lists a connection's tools only as far as its configuration names them. mcparcel must be on your PATH.
 
 Install:
 
-    bash  echo 'eval "$(mcparcel completion bash)"' >> ~/.bashrc
-    zsh   echo 'source <(mcparcel completion zsh)' >> ~/.zshrc   # after compinit
-    fish  mcparcel completion fish > ~/.config/fish/completions/mcparcel.fish`
+` + setupLines(completionSetups)
 }
 
-// Run prints the script for the named shell.
+// Run prints the script for the named shell, or without one how to set up
+// completion.
 func (c *CompletionCmd) Run(s *Streams, opts *CommandOptions) error {
+	if c.Shell == "" {
+		return completionSetupHint(s, opts, filepath.Base(os.Getenv("SHELL")))
+	}
 	script, ok := completionScripts[c.Shell]
 	if !ok {
 		return output.UsageError("completion", "Unknown shell: choose bash, zsh or fish.", "<shell>", "")
@@ -42,6 +71,54 @@ func (c *CompletionCmd) Run(s *Streams, opts *CommandOptions) error {
 		return &commandWriteFailure{err}
 	}
 	return nil
+}
+
+// completionSetupHint answers completion without a shell: on a terminal,
+// the setup line for the login shell (every line when mcparcel does not
+// complete it). In a pipe or $(...) the hint would be read as the script,
+// so it stays the missing-argument error, naming the shell to pass. The
+// shell is shown only when it is one of the three.
+func completionSetupHint(s *Streams, opts *CommandOptions, login string) error {
+	setups := completionSetups
+	shell := ""
+	for _, setup := range completionSetups {
+		if setup.Shell == login {
+			setups, shell = []completionSetup{setup}, login
+		}
+	}
+	if opts.JSON {
+		return writeSuccess(s, opts, completionSetupData{Shell: shell, Setup: setups})
+	}
+	if !completionTerminal(s.Out) {
+		err := output.UsageError("completion", "Missing argument <shell>.", "<shell>", "")
+		err.NextAction = "Run mcparcel completion bash, zsh or fish."
+		if shell != "" {
+			err.NextAction = "Run mcparcel completion " + shell + "."
+		}
+		return err
+	}
+	var text string
+	if shell != "" {
+		text = fmt.Sprintf("Set up %s completion once with:\n\n    %s\n\nOther shells: mcparcel completion --help.\n", shell, setups[0].Command)
+	} else {
+		text = "mcparcel completes bash, zsh and fish. Set up yours once with:\n\n" + setupLines(setups) + "\n"
+	}
+	if _, err := io.WriteString(s.Out, text); err != nil {
+		return &commandWriteFailure{err}
+	}
+	return nil
+}
+
+// setupLines lists setups as indented "shell  command" lines.
+func setupLines(setups []completionSetup) string {
+	var b strings.Builder
+	for i, setup := range setups {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		fmt.Fprintf(&b, "    %-4s  %s", setup.Shell, setup.Command)
+	}
+	return b.String()
 }
 
 // A candidate ending in "." (a call target's connection) or "=" takes no

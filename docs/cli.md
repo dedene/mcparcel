@@ -74,7 +74,7 @@ also work via `npx mcparcel ...`. No global installation or Homebrew is required
 | `version` / `--version` / `-V` | Print `mcparcel <version>` (plus ` (<commit>, <date>)` in a release build). `--version` and `-V` print the same line as `version`, before any command runs. JSON `{version, commit?, date?}` |
 | `help [<command>...]` / `--help` / `-h` | English usage. `help tools` and `help auth status` print what `mcparcel tools --help` and `mcparcel auth status --help` print; a word that names no command, or names a hidden internal command, is `invalid_arguments` ("Unknown command.", never the word, with "Did you mean <command>?" for a near miss of a subcommand, as on the command line). `--help` groups the commands: Use MCP tools (`tools`, `call`), Choose connections (`setup`, `enable`, `disable`, `list`, `catalog`, `inspect`), Catalogs and personal definitions (`add`, `join`, `remove`, `sync`, `local`, `import`), Credentials and configuration (`auth`, `config`), Diagnose and help (`doctor`, `runtime`, `version`, `help`, `completion`). `call`, `tools`, `enable`, `add`, `join` and `auth` show examples after the summary line, before their arguments and flags. JSON `{help}`: the same text |
 | `mcparcel` (no command) | A short help on stdout, exit 0: the one-line description, three examples (`mcparcel tools context7`, `mcparcel call context7.resolve-library-id libraryName=react`, `mcparcel setup`), one line per command group naming its commands, and `Run mcparcel --help for all commands.` JSON `{help}` |
-| `completion bash\|zsh\|fish` | Print a completion script for that shell (see "Shell completion"); another shell is `invalid_arguments` ("Unknown shell: choose bash, zsh or fish."). JSON `{shell, script}` |
+| `completion [bash\|zsh\|fish]` | Print a completion script for that shell (see "Shell completion"); another shell is `invalid_arguments` ("Unknown shell: choose bash, zsh or fish."). JSON `{shell, script}`. Without a shell, on a terminal: the setup line for the shell `$SHELL` names, or every setup line when it is not bash, zsh or fish (that shell is never named); in a pipe: `invalid_arguments` ("Missing argument <shell>.", next action `Run mcparcel completion <shell>.` with the `$SHELL` one when it is one of the three). JSON `{shell, setup: [{shell, command}]}`, `shell` omitted when `$SHELL` is none of the three |
 
 All commands provide `--json` except interactive `setup` and `join`; use
 selection/config commands for equivalent machine actions. With `--json` every
@@ -124,7 +124,8 @@ before live discovery; unknown names are marked unverified until schemas are loa
 
 ### Shell completion
 
-`mcparcel completion <shell>` prints a script for bash, zsh or fish. Install it
+`mcparcel completion <shell>` prints a script for bash, zsh or fish, and
+`mcparcel completion` alone prints the setup line for your shell. Install it
 once (`mcparcel` must be on the PATH; `npx mcparcel` does not complete):
 
 ```sh
