@@ -64,6 +64,7 @@ changelog:
       - "^test:"
       - "^ci:"
       - "^chore:"
+      - "^Merge "
 
 brews:
   - repository:
