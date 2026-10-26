@@ -27,6 +27,9 @@ import (
 // RefreshIdleTTL rejects a refresh token unused for longer with invalid_grant.
 // ClientCredentials enables the client_credentials grant for the
 // preconfigured client (see authserver_cc.go).
+// OmitAuthMethod leaves token_endpoint_auth_method out of registration
+// responses; with PublicRegistration every registered client is public and the
+// token endpoint refuses its Basic header, as Raindrop.io does.
 type AuthServerOptions struct {
 	ClientCredentials bool
 	CCExpiresIn       int    // expires_in of client_credentials answers; 0 omits it
@@ -45,6 +48,9 @@ type AuthServerOptions struct {
 	RefreshExpiresIn time.Duration
 	Now              func() time.Time
 	RefreshIdleTTL   time.Duration
+
+	OmitAuthMethod     bool
+	PublicRegistration bool
 }
 
 // AuthServer is a loopback-only fake authorization server with PKCE S256,
@@ -73,7 +79,10 @@ type AuthServer struct {
 	noRegister    bool           // StopRegistration was called
 }
 
-type asClient struct{ secret, redirect string }
+type asClient struct {
+	secret, redirect string
+	noBasic          bool // refuse client_secret_basic at the token endpoint
+}
 
 type asCode struct{ client, redirect, challenge, resource string }
 
@@ -272,8 +281,14 @@ func (a *AuthServer) register(w http.ResponseWriter, r *http.Request) {
 	if method == "" {
 		method = "client_secret_basic"
 	}
-	c := asClient{redirect: req.RedirectURIs[0]}
+	if a.o.PublicRegistration {
+		method = "none"
+	}
+	c := asClient{redirect: req.RedirectURIs[0], noBasic: a.o.PublicRegistration}
 	resp := map[string]any{"client_id": "client-" + rand.Text(), "redirect_uris": req.RedirectURIs, "token_endpoint_auth_method": method}
+	if a.o.OmitAuthMethod {
+		delete(resp, "token_endpoint_auth_method")
+	}
 	if method != "none" {
 		c.secret = a.o.TokenPrefix + rand.Text()
 		resp["client_secret"] = c.secret
@@ -332,7 +347,7 @@ func (a *AuthServer) token(w http.ResponseWriter, r *http.Request) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	c, ok := a.clients[id]
-	if !ok || c.secret != secret {
+	if !ok || c.secret != secret || basic && c.noBasic {
 		writeJSON(w, 401, map[string]string{"error": "invalid_client"})
 		return
 	}
