@@ -150,6 +150,12 @@ func (h *OAuthHandler) loginLocked(ctx context.Context, req *http.Request, resp 
 			RedirectURIs: []string{cb.redirect}, ClientName: name, GrantTypes: []string{"authorization_code", "refresh_token"},
 			ResponseTypes: []string{"code"}, TokenEndpointAuthMethod: h.auth.TokenEndpointAuthMethod,
 		}}
+		// Without metadata the SDK registers at the issuer's /register.
+		endpoint := issuer + "/register"
+		if asm != nil {
+			endpoint = asm.RegistrationEndpoint
+		}
+		cfg.Client = withPublicClientDefault(client, endpoint)
 	}
 	sdk, err := sdkauth.NewAuthorizationCodeHandler(cfg)
 	if err == nil {

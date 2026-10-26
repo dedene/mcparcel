@@ -135,6 +135,10 @@ OAuth fields: `clientName`, `scopes` (array), `clientId` (Value), `clientSecret`
 `redirectUrl` (optional explicit callback), `issuerUrl` (optional explicit override).
 `tokenEndpointAuthMethod` is sent in dynamic registration only; the SDK picks the
 method from server metadata, and enforcing the configured one is deferred.
+A dynamically registered client uses the method the registration response
+names; a response that names none and issues no `client_secret` registers a
+public client (`none`: client ID in the form body), not RFC 7591's
+`client_secret_basic` default, which some servers refuse with an empty secret.
 `redirectUrl` must be `http` on `127.0.0.1`, `[::1]` or `localhost`; without it the
 callback is `http://127.0.0.1:<random port>/callback`.
 Use discovery otherwise; bind state/tokens to the discovered issuer and resource.
