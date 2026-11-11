@@ -281,6 +281,37 @@ func TestAuthRereadNoGate(t *testing.T) {
 	awaitClosed(t, r, 1)
 }
 
+// Regression: once a "desktop" profile's 5-minute value cache lapsed, a
+// --no-input call said only "run interactively with 1Password desktop
+// integration enabled", so agents blamed an expired session and sent the user
+// to mcparcel auth. It now names the cache and says to drop --no-input.
+func TestNoInputDesktopCacheLapsed(t *testing.T) {
+	r, vault, clock := vaultRig(t)
+	r.stdio("a", true)
+	r.local.CredentialProfiles["shared"] = config.Profile{Mode: config.ProfileModeDesktop, Account: "fixture", SessionDuration: "8h"}
+	vault.Set(secretRef("a"), "value")
+	r.start()
+	count(t, r.call(testCtx(t), "a", "counter"))
+	for _, tc := range []struct {
+		advance time.Duration
+		code    string
+	}{{5 * time.Minute, "auth_required"}, {8 * time.Hour, "auth_expired"}} {
+		clock.Advance(tc.advance)
+		res := noInputCall(r, "a")
+		responseCode(t, res, tc.code, false)
+		if want := output.DesktopNoInputError(tc.code, "local:a"); res.Error.Message != want.Message || res.Error.NextAction != want.NextAction {
+			t.Fatal(tc.code, res.Error)
+		}
+	}
+	if vault.Boots() != 1 {
+		t.Fatal("bootstrapped without input", vault.Boots())
+	}
+	// Without --no-input the same call reads again.
+	if n := count(t, r.call(testCtx(t), "a", "counter")); n != 1 || vault.Boots() != 2 {
+		t.Fatal("no fresh read", n, vault.Boots())
+	}
+}
+
 func TestAuthRereadNoInputDesktop(t *testing.T) {
 	r, vault, _ := vaultRig(t)
 	r.stdio("a", true)

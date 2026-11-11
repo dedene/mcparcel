@@ -355,7 +355,9 @@ Profile tagged union:
 `desktop` requires `account` and has no service-account prompt-free guarantee:
 it reads through the 1Password app itself, which may ask again after the app
 locks, so there is no 24-hour promise and `--no-input` is served only from
-the 5-minute cache (`auth_required` after it).
+the 5-minute cache (`auth_required` after it, or `auth_expired` once the
+session ended; both say to run the command again without `--no-input`, which
+reads through the 1Password app without `mcparcel auth`).
 `service-account` reads a 1Password service-account token without the desktop
 app, for headless mode, CI and Linux. It takes exactly one of `tokenEnv` and
 `tokenFile`:

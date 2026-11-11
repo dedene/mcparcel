@@ -47,6 +47,14 @@ func (p *pool) resolveLease(ctx context.Context, canonical string, c config.Conn
 			p.retire(canonical, entry)
 		}
 	}
+	if noInput && profile.Mode == config.ProfileModeDesktop {
+		switch {
+		case errors.Is(e, auth.ErrRequired):
+			return lease, output.DesktopNoInputError("auth_required", canonical)
+		case errors.Is(e, auth.ErrExpired):
+			return lease, output.DesktopNoInputError("auth_expired", canonical)
+		}
+	}
 	return lease, p.leaseError(c.CredentialProfile, profile, e)
 }
 
