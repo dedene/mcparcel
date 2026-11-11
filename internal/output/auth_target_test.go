@@ -21,6 +21,17 @@ func TestAuthTarget(t *testing.T) {
 	}
 }
 
+func TestDesktopNoInputError(t *testing.T) {
+	for _, code := range []string{"auth_required", "auth_expired"} {
+		e := DesktopNoInputError(code, "local:a")
+		if e.Code != code || ExitCode(e) != 3 ||
+			e.Message != "With --no-input, local:a's 1Password values come only from MCParcel's 5-minute cache, which has lapsed." ||
+			e.NextAction != "Run the command again without --no-input; the 1Password app asks for approval only if it needs to." {
+			t.Fatalf("%+v", e)
+		}
+	}
+}
+
 func TestRereadNeedsInputError(t *testing.T) {
 	e := RereadNeedsInputError("a", "local:a")
 	if e.Code != "auth_required" || ExitCode(e) != 3 ||

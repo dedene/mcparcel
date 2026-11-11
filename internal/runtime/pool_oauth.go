@@ -14,6 +14,10 @@ import (
 // loginTimeout bounds one sign-in, browser time included.
 const loginTimeout = 10 * time.Minute
 
+// OAuthCapable reports whether sign-in applies, as the runtime decides it;
+// auth status uses it so it never shows a sign-in the runtime would not do.
+func OAuthCapable(c config.Connection) bool { return oauthCapable(c) }
+
 // oauthCapable reports whether sign-in applies: an HTTP connection marked
 // OAuth, or one without a configured credential header.
 func oauthCapable(c config.Connection) bool {

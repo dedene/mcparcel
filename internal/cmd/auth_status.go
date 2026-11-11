@@ -11,6 +11,7 @@ import (
 	"github.com/dedene/mcparcel/internal/auth"
 	"github.com/dedene/mcparcel/internal/config"
 	"github.com/dedene/mcparcel/internal/output"
+	runtimeclient "github.com/dedene/mcparcel/internal/runtime"
 )
 
 type authStatusData struct {
@@ -94,7 +95,9 @@ func (c *AuthStatusCmd) Run(ctx context.Context, s *Streams, opts *CommandOption
 	data := authStatusData{Items: []authStatusItem{}, Profiles: []authProfileItem{}}
 	for _, id := range ids {
 		row := effective.Connections[id]
-		if row.Connection == nil || row.Connection.Transport.HTTP == nil {
+		// A connection with a credential header never signs in, so it has no
+		// sign-in row; its 1Password values show in the profile row.
+		if row.Connection == nil || !runtimeclient.OAuthCapable(*row.Connection) {
 			if c.MCP != "" && profile == "" {
 				e := output.NewError("invalid_arguments", nil)
 				e.Message = c.MCP + " uses neither sign-in nor 1Password."

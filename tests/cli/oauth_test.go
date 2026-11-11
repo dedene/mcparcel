@@ -326,6 +326,37 @@ func TestHeaderKey401BlackBox(t *testing.T) {
 	}
 }
 
+// Regression: auth status <mcp> showed "sign-in required (never_signed_in)"
+// and "Keep-alive: unavailable" for an HTTP connection whose credential is a
+// 1Password header, which never signs in, so agents misread the cause. Only
+// the 1Password profile row applies; with an env: header nothing does.
+func TestAuthStatusHeaderSecretBlackBox(t *testing.T) {
+	r := newOAuthRig(t, testutil.AuthServerOptions{Registration: true}, nil)
+	c := r.personal.Connections["n"]
+	c.CredentialProfile = "shared"
+	c.Transport.HTTP.Headers = map[string]config.Value{"Authorization": {Secret: &config.SecretRef{Secret: "op://Fixture/api/key", Prefix: "Bearer "}}}
+	r.personal.Connections["n"] = c
+	r.personal.CredentialProfiles["shared"] = config.ProfileRequirement{}
+	r.save()
+	if items := r.authStatus("n"); len(items) != 0 {
+		t.Fatalf("%+v", items)
+	}
+	human := r.run("auth", "status", "n")
+	if human.code != 0 || !strings.HasPrefix(human.stdout, "profile shared  ") || strings.Contains(human.stdout, "sign-in") || strings.Contains(human.stdout, "Keep-alive") {
+		t.Fatalf("%q", human.stdout)
+	}
+	if all := r.run("auth", "status"); all.code != 0 || strings.Contains(all.stdout, "local:n") {
+		t.Fatalf("%q", all.stdout)
+	}
+	c.Transport.HTTP.Headers["Authorization"] = config.Value{Secret: &config.SecretRef{Secret: "env:FIXTURE_KEY", Prefix: "Bearer "}}
+	r.personal.Connections["n"] = c
+	r.save()
+	neither := r.check(r.run("auth", "status", "n", "--json"), 2, "invalid_arguments")
+	if !strings.Contains(neither.stdout, "n uses neither sign-in nor 1Password.") {
+		t.Fatal(neither.stdout)
+	}
+}
+
 func TestKeychainUnavailableBlackBox(t *testing.T) {
 	r := newOAuthRig(t, testutil.AuthServerOptions{Registration: true}, &config.OAuth{Type: "oauth"})
 	files := func() []string {

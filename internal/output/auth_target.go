@@ -22,6 +22,17 @@ func AuthAction(name, canonical string) string {
 	return "mcparcel auth " + AuthTarget(name, canonical)
 }
 
+// DesktopNoInputError is code (auth_required, or auth_expired once the
+// session ended) for a --no-input call on a connection whose "desktop" profile
+// the resolver serves from its 5-minute cache only. Running without --no-input
+// reads again through the 1Password app; mcparcel auth is not needed.
+func DesktopNoInputError(code, canonical string) *Error {
+	err := NewError(code, nil)
+	err.Message = "With --no-input, " + DisplayMetadata(canonical) + "'s 1Password values come only from MCParcel's 5-minute cache, which has lapsed."
+	err.NextAction = "Run the command again without --no-input; the 1Password app asks for approval only if it needs to."
+	return err
+}
+
 // RereadNeedsInputError is auth_required for auth <mcp> --no-input on a
 // connection whose "desktop" profile may prompt on any 1Password read. Its
 // cached values are kept.
